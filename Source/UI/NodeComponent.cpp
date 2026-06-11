@@ -36,8 +36,10 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
         // keine patchbaren Aktionen (gleiches Verhalten wie der OSC-Pfad 6.1).
         parameterSlider.onValueChange = [this]
         {
-            if (auto parameter = firstParameter(); parameter.isValid())
-                parameter.setProperty (id::paramValue, parameterSlider.getValue(), nullptr);
+            // eigener Name — verschattet sonst das 'parameter' des umgebenden
+            // if-Init (Clang -Wshadow-uncaptured-local unter -Werror)
+            if (auto liveParameter = firstParameter(); liveParameter.isValid())
+                liveParameter.setProperty (id::paramValue, parameterSlider.getValue(), nullptr);
         };
         addAndMakeVisible (parameterSlider);
     }
