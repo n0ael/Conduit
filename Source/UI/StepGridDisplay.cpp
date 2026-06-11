@@ -78,7 +78,9 @@ juce::Rectangle<float> StepGridDisplay::cellBounds (int row, int column) const
     const auto cellWidth  = static_cast<float> (getWidth())  / numColumns;
     const auto cellHeight = static_cast<float> (getHeight()) / numRows;
 
-    return { column * cellWidth, row * cellHeight, cellWidth, cellHeight };
+    return { static_cast<float> (column) * cellWidth,
+             static_cast<float> (row) * cellHeight,
+             cellWidth, cellHeight };
 }
 
 //==============================================================================
