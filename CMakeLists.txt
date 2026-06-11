@@ -88,6 +88,7 @@ target_sources(Conduit PRIVATE
     Source/Modules/ModuleFactory.h
     Source/Modules/UtilityModule.h
     Source/Modules/AttenuatorModule.h
+    Source/Util/SpscQueue.h
 )
 
 target_include_directories(Conduit PRIVATE Source)
@@ -156,6 +157,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/GraphFaderTests.cpp
         Tests/Core/GraphManagerTests.cpp
         Tests/Core/ThreadingStressTests.cpp
+        Tests/Util/SpscQueueTests.cpp
     )
 
     target_sources(ConduitTests PRIVATE
