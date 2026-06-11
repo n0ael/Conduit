@@ -201,6 +201,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/GraphManagerTests.cpp
         Tests/Core/OscControllerTests.cpp
         Tests/Core/PatchingTests.cpp
+        Tests/Core/PresetTests.cpp
         Tests/Core/ScopeModuleTests.cpp
         Tests/Core/ThreadingStressTests.cpp
         Tests/UI/NodeCanvasTests.cpp

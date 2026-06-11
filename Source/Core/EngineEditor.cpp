@@ -10,6 +10,7 @@ namespace conduit
 
 EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
     : juce::AudioProcessorEditor (engineProcessor),
+      engine (engineProcessor),
       rootState (engineProcessor.getRootState()),
       undoManager (engineProcessor.getUndoManager()),
       graphManager (engineProcessor.getGraphManager()),
@@ -30,6 +31,8 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
 
     undoButton.onClick = [this] { undoManager.undo(); };
     redoButton.onClick = [this] { undoManager.redo(); };
+    saveButton.onClick = [this] { launchPresetChooser (true); };
+    loadButton.onClick = [this] { launchPresetChooser (false); };
 
     // Link-Transport: Slider schreibt in die Session, der Timer pollt zurück
     tempoSlider.setRange (20.0, 300.0, 0.1);
@@ -53,6 +56,8 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
     addAndMakeVisible (addScopeButton);
     addAndMakeVisible (undoButton);
     addAndMakeVisible (redoButton);
+    addAndMakeVisible (saveButton);
+    addAndMakeVisible (loadButton);
     addAndMakeVisible (tempoSlider);
     addAndMakeVisible (peersLabel);
     addAndMakeVisible (warningLabel);
@@ -60,10 +65,49 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
 
     setWantsKeyboardFocus (true);
     setResizable (true, true);
-    setSize (960, 640);
+    setSize (1180, 680);
 
     timerCallback();    // Peer-Label sofort befüllen, nicht erst nach 250ms
     startTimerHz (4);   // Session-Polling — Tempo/Peers können sich im Netz ändern
+}
+
+//==============================================================================
+void EngineEditor::launchPresetChooser (bool saving)
+{
+    const auto defaultDirectory = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                      .getChildFile ("Conduit");
+    defaultDirectory.createDirectory();
+
+    // Async — Modal-Loops sind projektweit abgeschaltet (13.2)
+    presetChooser = std::make_unique<juce::FileChooser> (
+        saving ? "Preset speichern" : "Preset laden",
+        defaultDirectory,
+        "*" + juce::String (EngineProcessor::presetFileExtension));
+
+    // 'chooserFlags' — 'flags' würde juce::Component::flags verschatten (C4458)
+    const auto chooserFlags = saving
+        ? juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+              | juce::FileBrowserComponent::warnAboutOverwriting
+        : juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
+
+    presetChooser->launchAsync (chooserFlags, [this, saving] (const juce::FileChooser& chooser)
+    {
+        auto file = chooser.getResult();
+
+        if (file == juce::File())
+            return;  // abgebrochen
+
+        if (saving)
+            file = file.withFileExtension (EngineProcessor::presetFileExtension);
+
+        const auto result = saving ? engine.savePreset (file)
+                                   : engine.loadPreset (file);
+
+        if (result.failed())
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                                    saving ? "Preset speichern" : "Preset laden",
+                                                    result.getErrorMessage());
+    });
 }
 
 //==============================================================================
@@ -94,19 +138,21 @@ void EngineEditor::resized()
     auto bounds = getLocalBounds();
     auto toolbar = bounds.removeFromTop (toolbarHeight).reduced (8, 6);  // Buttons ≥ 44px hoch
 
-    addButton.setBounds (toolbar.removeFromLeft (150));
-    toolbar.removeFromLeft (8);
-    addLfoButton.setBounds (toolbar.removeFromLeft (100));
-    toolbar.removeFromLeft (8);
-    addScopeButton.setBounds (toolbar.removeFromLeft (110));
-    toolbar.removeFromLeft (8);
-    undoButton.setBounds (toolbar.removeFromLeft (80));
-    toolbar.removeFromLeft (8);
-    redoButton.setBounds (toolbar.removeFromLeft (80));
-    toolbar.removeFromLeft (16);
-    tempoSlider.setBounds (toolbar.removeFromLeft (150));
-    toolbar.removeFromLeft (8);
-    peersLabel.setBounds (toolbar.removeFromLeft (130));
+    const auto place = [&toolbar] (juce::Component& component, int width, int gapAfter = 8)
+    {
+        component.setBounds (toolbar.removeFromLeft (width));
+        toolbar.removeFromLeft (gapAfter);
+    };
+
+    place (addButton,      110);
+    place (addLfoButton,    90);
+    place (addScopeButton, 100);
+    place (undoButton,      70);
+    place (redoButton,      70, 16);
+    place (saveButton,      70);
+    place (loadButton,      70, 16);
+    place (tempoSlider,    140);
+    place (peersLabel,     130);
     warningLabel.setBounds (toolbar);
 
     canvas.setBounds (bounds);

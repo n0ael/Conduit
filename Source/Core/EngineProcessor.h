@@ -56,6 +56,18 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     //==========================================================================
+    /** Preset-System (CLAUDE.md 5.4). Message Thread.
+
+        Save flusht vorher ausstehende OSC-Werte (isDirty-Guard 6.1).
+        Load ersetzt den Root-Tree undo-fähig in EINER Transaktion —
+        GraphManager und Canvas rebuilden über den Container-Swap-Pfad,
+        CalibrationProfiles kommen mit und gelten sofort. */
+    juce::Result savePreset (const juce::File& file);
+    juce::Result loadPreset (const juce::File& file);
+
+    static constexpr const char* presetFileExtension = ".conduit";
+
+    //==========================================================================
     // Datenmodell — Mutationen NUR auf dem Message Thread (CLAUDE.md 6)
     [[nodiscard]] juce::ValueTree getRootState() noexcept;
     [[nodiscard]] juce::UndoManager& getUndoManager() noexcept;

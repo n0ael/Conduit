@@ -153,6 +153,51 @@ void EngineProcessor::setStateInformation (const void* data, int sizeInBytes)
 }
 
 //==============================================================================
+juce::Result EngineProcessor::savePreset (const juce::File& file)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // Serialisierungs-Guard (6.1): kein OSC-Wert geht beim Speichern verloren
+    oscController.flushPendingUpdates();
+
+    const auto snapshot = rootState.createCopy();  // CLAUDE.md 5.4
+
+    if (const auto xml = snapshot.createXml())
+    {
+        if (xml->writeTo (file))
+            return juce::Result::ok();
+
+        return juce::Result::fail ("Preset-Datei nicht schreibbar: " + file.getFullPathName());
+    }
+
+    return juce::Result::fail ("Preset-Serialisierung fehlgeschlagen");
+}
+
+juce::Result EngineProcessor::loadPreset (const juce::File& file)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    const auto xml = juce::XmlDocument::parse (file);
+
+    if (xml == nullptr)
+        return juce::Result::fail ("Kein gültiges Preset-XML: " + file.getFullPathName());
+
+    const auto loaded = juce::ValueTree::fromXml (*xml);
+
+    if (! loaded.hasType (id::root))
+        return juce::Result::fail ("Kein Conduit-Preset: " + file.getFullPathName());
+
+    // Undo-fähig in EINER Transaktion — ein Undo stellt den kompletten
+    // vorherigen Patch wieder her (Batch-Coalescing 5.5 macht daraus
+    // einen einzigen Graph-Swap)
+    undoManager.beginNewTransaction ("Preset laden");
+    rootState.copyPropertiesAndChildrenFrom (loaded, &undoManager);
+    ensureIONodeStates();  // Presets ohne I/O-Nodes reparieren
+
+    return juce::Result::ok();
+}
+
+//==============================================================================
 juce::ValueTree EngineProcessor::getRootState() noexcept       { return rootState; }
 juce::UndoManager& EngineProcessor::getUndoManager() noexcept  { return undoManager; }
 GraphManager& EngineProcessor::getGraphManager() noexcept      { return graphManager; }

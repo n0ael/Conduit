@@ -36,22 +36,29 @@ public:
 
 private:
     void timerCallback() override;
+    void launchPresetChooser (bool saving);
 
     static constexpr int toolbarHeight = 56;
 
+    EngineProcessor& engine;
     juce::ValueTree rootState;  // ref-counted Handle, read/listen-only
     juce::UndoManager& undoManager;
     GraphManager& graphManager;
     LinkClock& linkClock;
 
-    juce::TextButton addButton      { juce::String::fromUTF8 ("\xef\xbc\x8b Attenuator") };
+    juce::TextButton addButton      { juce::String::fromUTF8 ("\xef\xbc\x8b Atten") };
     juce::TextButton addLfoButton   { juce::String::fromUTF8 ("\xef\xbc\x8b LFO") };
     juce::TextButton addScopeButton { juce::String::fromUTF8 ("\xef\xbc\x8b Scope") };
     juce::TextButton undoButton   { "Undo" };
     juce::TextButton redoButton   { "Redo" };
+    juce::TextButton saveButton   { "Save" };
+    juce::TextButton loadButton   { "Load" };
     juce::Slider tempoSlider      { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     juce::Label peersLabel;
     juce::Label warningLabel;
+
+    // Muss den async Callback überleben (JUCE_MODAL_LOOPS_PERMITTED=0)
+    std::unique_ptr<juce::FileChooser> presetChooser;
 
     NodeCanvas canvas;
 
