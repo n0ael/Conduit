@@ -139,7 +139,7 @@ TEST_CASE ("SpscQueue: Producer und Consumer auf getrennten Threads", "[spsc][th
         }
 
         if (received.sequence != expectedSequence
-            || received.value != static_cast<float> (received.sequence) * 0.25f)
+            || ! juce::exactlyEqual (received.value, static_cast<float> (received.sequence) * 0.25f))
         {
             payloadIntact = false;
             break;
