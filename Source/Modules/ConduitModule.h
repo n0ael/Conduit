@@ -28,6 +28,8 @@ namespace id
     inline const juce::Identifier nodeError     { "nodeError" };
     inline const juce::Identifier positionX     { "x" };
     inline const juce::Identifier positionY     { "y" };
+    inline const juce::Identifier numInputChannels  { "numInputChannels" };   // für die Port-UI
+    inline const juce::Identifier numOutputChannels { "numOutputChannels" };
 
     // Parameters
     inline const juce::Identifier parameters    { "Parameters" };
@@ -65,6 +67,12 @@ enum class NodeState
     fadingIn,
     deleting
 };
+
+// Reservierte moduleIds: Tree-Nodes, die NICHT über die ModuleFactory
+// materialisiert werden, sondern auf externe Graph-Nodes gemappt sind
+// (die Audio-I/O-Prozessoren des EngineProcessor).
+inline constexpr const char* audioInputModuleId  = "audio_input";
+inline constexpr const char* audioOutputModuleId = "audio_output";
 
 [[nodiscard]] juce::String toString (ModuleType type);
 [[nodiscard]] juce::String toString (NodeState state);

@@ -24,6 +24,25 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
     };
     addAndMakeVisible (deleteButton);
 
+    // Externe I/O-Endpunkte sind Grundausstattung — nicht löschbar
+    deleteButton.setVisible (! graphManager.isExternalEndpoint (
+        nodeTree.getProperty (id::moduleId).toString()));
+
+    // Ports aus den persistierten Kanalzahlen (Schema 6.2)
+    const auto makePorts = [this] (bool isInput, int count,
+                                   std::vector<std::unique_ptr<PortComponent>>& ports)
+    {
+        for (int channel = 0; channel < count; ++channel)
+        {
+            auto port = std::make_unique<PortComponent> (PortInfo { nodeUuid, isInput, channel });
+            addAndMakeVisible (*port);
+            ports.push_back (std::move (port));
+        }
+    };
+
+    makePorts (true,  (int) nodeTree.getProperty (id::numInputChannels,  0), inputPorts);
+    makePorts (false, (int) nodeTree.getProperty (id::numOutputChannels, 0), outputPorts);
+
     if (const auto parameter = firstParameter(); parameter.isValid())
     {
         parameterSlider.setRange ((double) parameter.getProperty (id::paramMin, 0.0),
@@ -135,6 +154,45 @@ juce::ValueTree NodeComponent::firstParameter() const
 }
 
 //==============================================================================
+int NodeComponent::getNumInputPorts() const noexcept  { return static_cast<int> (inputPorts.size()); }
+int NodeComponent::getNumOutputPorts() const noexcept { return static_cast<int> (outputPorts.size()); }
+
+juce::Point<int> NodeComponent::getPortCentre (bool isInput, int channel) const
+{
+    const auto count = isInput ? getNumInputPorts() : getNumOutputPorts();
+    const auto availableHeight = getHeight() - touchTarget;  // unterhalb des Headers
+
+    return { isInput ? 12 : getWidth() - 12,
+             touchTarget + availableHeight * (channel + 1) / (count + 1) };
+}
+
+const PortComponent* NodeComponent::findPortNear (juce::Point<int> localPoint,
+                                                  int maxDistance) const
+{
+    const PortComponent* nearest = nullptr;
+    auto nearestDistance = maxDistance;
+
+    const auto consider = [&] (const std::vector<std::unique_ptr<PortComponent>>& ports)
+    {
+        for (const auto& port : ports)
+        {
+            const auto centre = getPortCentre (port->getInfo().isInput, port->getInfo().channel);
+            const auto distance = juce::roundToInt (centre.getDistanceFrom (localPoint));
+
+            if (distance <= nearestDistance)
+            {
+                nearest = port.get();
+                nearestDistance = distance;
+            }
+        }
+    };
+
+    consider (inputPorts);
+    consider (outputPorts);
+    return nearest;
+}
+
+//==============================================================================
 void NodeComponent::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat().reduced (1.0f);
@@ -173,7 +231,21 @@ void NodeComponent::resized()
     auto bounds = getLocalBounds();
 
     deleteButton.setBounds (bounds.removeFromTop (touchTarget).removeFromRight (touchTarget));
-    parameterSlider.setBounds (bounds.removeFromBottom (touchTarget).reduced (8, 0));
+
+    // Eingerückt, damit der Slider nicht unter den Port-Hit-Zonen liegt
+    parameterSlider.setBounds (bounds.removeFromBottom (touchTarget).reduced (28, 0));
+
+    const auto placePorts = [this] (std::vector<std::unique_ptr<PortComponent>>& ports)
+    {
+        for (auto& port : ports)
+        {
+            const auto centre = getPortCentre (port->getInfo().isInput, port->getInfo().channel);
+            port->setCentrePosition (centre.x, centre.y);
+        }
+    };
+
+    placePorts (inputPorts);
+    placePorts (outputPorts);
 }
 
 void NodeComponent::mouseDown (const juce::MouseEvent& event)

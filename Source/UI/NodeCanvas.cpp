@@ -86,6 +86,13 @@ void NodeCanvas::removeComponentFor (const juce::String& nodeUuid)
 //==============================================================================
 void NodeCanvas::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
+    // Kabel folgen bewegten Nodes
+    if (property == id::positionX || property == id::positionY)
+    {
+        repaint();
+        return;
+    }
+
     // Undo-Restore-Fall: Subtree kam mit nodeState == Deleting zurück,
     // der Graph-Swap setzt ihn auf Active — jetzt UI nachziehen.
     if (property == id::nodeState && tree.hasType (id::node)
@@ -99,6 +106,8 @@ void NodeCanvas::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& 
         addComponentFor (child);
     else if (child.hasType (id::nodes))
         rebuildAll();  // Container-Austausch (Preset-Load)
+    else if (parent.hasType (id::connections) || child.hasType (id::connections))
+        repaint();  // neues Kabel
 }
 
 void NodeCanvas::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
@@ -110,11 +119,104 @@ void NodeCanvas::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree
         removeComponentFor (child.getProperty (id::nodeId).toString());
     else if (child.hasType (id::nodes))
         rebuildAll();
+    else if (parent.hasType (id::connections) || child.hasType (id::connections))
+        repaint();  // Kabel entfernt
 }
 
 void NodeCanvas::valueTreeRedirected (juce::ValueTree&)
 {
     rebuildAll();
+}
+
+//==============================================================================
+void NodeCanvas::beginCableDrag (const PortInfo& fromPort, juce::Point<int> position)
+{
+    activeCableDrag = CableDrag { fromPort, position };
+    repaint();
+}
+
+void NodeCanvas::updateCableDrag (juce::Point<int> position)
+{
+    if (activeCableDrag)
+    {
+        activeCableDrag->currentPosition = position;
+        repaint();
+    }
+}
+
+void NodeCanvas::endCableDrag (juce::Point<int> position)
+{
+    if (! activeCableDrag)
+        return;
+
+    const auto from = activeCableDrag->from;
+    activeCableDrag.reset();
+    repaint();
+
+    for (const auto& component : nodeComponents)
+    {
+        const auto* port = component->findPortNear (position - component->getPosition(),
+                                                    NodeComponent::touchTarget);
+
+        if (port == nullptr || port->getInfo().isInput == from.isInput)
+            continue;  // nur Output ↔ Input ergibt ein Kabel
+
+        // Richtung normalisieren: Output-Seite ist immer die Quelle.
+        // Duplikat/Selbstverbindung lehnt der GraphManager ab — kein Assert.
+        const auto& source = from.isInput ? port->getInfo() : from;
+        const auto& dest   = from.isInput ? from            : port->getInfo();
+
+        graphManager.addConnection (source.nodeUuid, source.channel,
+                                    dest.nodeUuid, dest.channel);
+        return;
+    }
+}
+
+juce::ValueTree NodeCanvas::findConnectionAt (juce::Point<int> position) const
+{
+    const auto connectionsTree = rootState.getChildWithName (id::connections);
+    const auto target = position.toFloat();
+
+    for (int i = 0; i < connectionsTree.getNumChildren(); ++i)
+    {
+        const auto connection = connectionsTree.getChild (i);
+
+        const auto start = getPortCentreInCanvas (connection.getProperty (id::sourceNodeId).toString(),
+                                                  false, (int) connection.getProperty (id::sourceChannel));
+        const auto end   = getPortCentreInCanvas (connection.getProperty (id::destNodeId).toString(),
+                                                  true,  (int) connection.getProperty (id::destChannel));
+
+        if (! start || ! end)
+            continue;
+
+        juce::Point<float> nearestOnPath;
+        makeCablePath (start->toFloat(), end->toFloat()).getNearestPoint (target, nearestOnPath);
+
+        if (nearestOnPath.getDistanceFrom (target) <= 8.0f)
+            return connection;
+    }
+
+    return {};
+}
+
+std::optional<juce::Point<int>> NodeCanvas::getPortCentreInCanvas (const juce::String& nodeUuid,
+                                                                   bool isInput, int channel) const
+{
+    if (const auto* component = findNodeComponent (nodeUuid))
+        return component->getPosition() + component->getPortCentre (isInput, channel);
+
+    return std::nullopt;
+}
+
+juce::Path NodeCanvas::makeCablePath (juce::Point<float> start, juce::Point<float> end)
+{
+    // Bezier mit horizontalen Tangenten — klassische Patch-Kabel-Optik
+    const auto bend = juce::jmax (40.0f, std::abs (end.x - start.x) * 0.5f);
+
+    juce::Path path;
+    path.startNewSubPath (start);
+    path.cubicTo (start.translated (bend, 0.0f), end.translated (-bend, 0.0f), end);
+    return path;
 }
 
 //==============================================================================
@@ -131,6 +233,51 @@ void NodeCanvas::paint (juce::Graphics& g)
 
     for (int y = gridSize; y < getHeight(); y += gridSize)
         g.drawHorizontalLine (y, 0.0f, static_cast<float> (getWidth()));
+
+    // Kabel aus Connections[] (Schema 6.2) — unter den Node-Kacheln
+    const juce::PathStrokeType cableStroke (3.0f, juce::PathStrokeType::curved,
+                                            juce::PathStrokeType::rounded);
+    const auto connectionsTree = rootState.getChildWithName (id::connections);
+
+    g.setColour (juce::Colour (0xff8fd0a0));
+
+    for (int i = 0; i < connectionsTree.getNumChildren(); ++i)
+    {
+        const auto connection = connectionsTree.getChild (i);
+
+        const auto start = getPortCentreInCanvas (connection.getProperty (id::sourceNodeId).toString(),
+                                                  false, (int) connection.getProperty (id::sourceChannel));
+        const auto end   = getPortCentreInCanvas (connection.getProperty (id::destNodeId).toString(),
+                                                  true,  (int) connection.getProperty (id::destChannel));
+
+        if (start && end)
+            g.strokePath (makeCablePath (start->toFloat(), end->toFloat()), cableStroke);
+    }
+
+    // Kabel-Vorschau während des Drags
+    if (activeCableDrag)
+    {
+        if (const auto origin = getPortCentreInCanvas (activeCableDrag->from.nodeUuid,
+                                                       activeCableDrag->from.isInput,
+                                                       activeCableDrag->from.channel))
+        {
+            g.setColour (juce::Colour (0xff8fd0a0).withAlpha (0.5f));
+            g.strokePath (makeCablePath (origin->toFloat(),
+                                         activeCableDrag->currentPosition.toFloat()),
+                          cableStroke);
+        }
+    }
+}
+
+void NodeCanvas::mouseDown (const juce::MouseEvent& event)
+{
+    // Klick auf ein Kabel trennt es (undo-fähig) — Klicks auf Kacheln/Ports
+    // kommen hier nie an (Child-Components fangen sie ab)
+    if (const auto connection = findConnectionAt (event.getPosition()); connection.isValid())
+        graphManager.removeConnection (connection.getProperty (id::sourceNodeId).toString(),
+                                       (int) connection.getProperty (id::sourceChannel),
+                                       connection.getProperty (id::destNodeId).toString(),
+                                       (int) connection.getProperty (id::destChannel));
 }
 
 void NodeCanvas::mouseDoubleClick (const juce::MouseEvent& event)

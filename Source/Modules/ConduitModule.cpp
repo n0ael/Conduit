@@ -52,6 +52,10 @@ juce::ValueTree ConduitModule::createState()
     nodeTree.setProperty (id::positionX,    0.0,                             nullptr);
     nodeTree.setProperty (id::positionY,    0.0,                             nullptr);
 
+    // Kanalzahlen für die Port-UI — die Busse stehen seit dem Konstruktor
+    nodeTree.setProperty (id::numInputChannels,  getTotalNumInputChannels(),  nullptr);
+    nodeTree.setProperty (id::numOutputChannels, getTotalNumOutputChannels(), nullptr);
+
     juce::ValueTree parameters (id::parameters);
     appendParametersTo (parameters);
     nodeTree.appendChild (parameters, nullptr);

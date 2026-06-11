@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -8,6 +9,7 @@
 #include "Core/GraphManager.h"
 #include "Core/NodeUiRegistry.h"
 #include "UI/NodeComponent.h"
+#include "UI/PortComponent.h"
 
 namespace conduit
 {
@@ -45,7 +47,18 @@ public:
     [[nodiscard]] NodeComponent* findNodeComponent (const juce::String& nodeUuid) const;
 
     //==========================================================================
+    // Kabel-Gesten — aufgerufen von den PortComponents (Canvas-Koordinaten)
+    void beginCableDrag (const PortInfo& fromPort, juce::Point<int> position);
+    void updateCableDrag (juce::Point<int> position);
+    void endCableDrag (juce::Point<int> position);
+
+    /** Kabel unter dem Punkt (Toleranz ~8px), invalides ValueTree wenn keins.
+        Public für Tests. */
+    [[nodiscard]] juce::ValueTree findConnectionAt (juce::Point<int> position) const;
+
+    //==========================================================================
     void paint (juce::Graphics& g) override;
+    void mouseDown (const juce::MouseEvent& event) override;
     void mouseDoubleClick (const juce::MouseEvent& event) override;
 
 private:
@@ -60,12 +73,24 @@ private:
     void addComponentFor (juce::ValueTree nodeTree);
     void removeComponentFor (const juce::String& nodeUuid);
 
+    [[nodiscard]] std::optional<juce::Point<int>> getPortCentreInCanvas (const juce::String& nodeUuid,
+                                                                         bool isInput, int channel) const;
+    [[nodiscard]] static juce::Path makeCablePath (juce::Point<float> start, juce::Point<float> end);
+
     //==========================================================================
     juce::ValueTree rootState;  // ref-counted Handle
     GraphManager& graphManager;
     NodeUiRegistry& uiRegistry;
 
     std::vector<std::unique_ptr<NodeComponent>> nodeComponents;
+
+    struct CableDrag
+    {
+        PortInfo from;
+        juce::Point<int> currentPosition;
+    };
+
+    std::optional<CableDrag> activeCableDrag;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NodeCanvas)
 };

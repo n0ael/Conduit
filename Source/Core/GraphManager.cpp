@@ -87,7 +87,8 @@ bool GraphManager::requestNodeDelete (const juce::String& nodeUuid)
     auto nodeTree = rootState.getChildWithName (id::nodes)
                         .getChildWithProperty (id::nodeId, nodeUuid);
 
-    if (! nodeTree.isValid())
+    if (! nodeTree.isValid()
+        || isExternalEndpoint (nodeTree.getProperty (id::moduleId).toString()))
         return false;
 
     // Phase 1: UI entkoppelt sich über ihren nodeState-Listener.
@@ -95,6 +96,84 @@ bool GraphManager::requestNodeDelete (const juce::String& nodeUuid)
     // in Phase 2, nicht der Übergangszustand.
     nodeTree.setProperty (id::nodeState, toString (NodeState::deleting), nullptr);
     return true;
+}
+
+//==============================================================================
+bool GraphManager::addConnection (const juce::String& sourceUuid, int sourceChannel,
+                                  const juce::String& destUuid, int destChannel)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    const auto nodesTree = rootState.getChildWithName (id::nodes);
+
+    if (sourceUuid == destUuid  // direkte Selbstverbindung wäre ein Graph-Zyklus
+        || ! nodesTree.getChildWithProperty (id::nodeId, sourceUuid).isValid()
+        || ! nodesTree.getChildWithProperty (id::nodeId, destUuid).isValid()
+        || findConnectionTree (sourceUuid, sourceChannel, destUuid, destChannel).isValid())
+        return false;
+
+    juce::ValueTree connection (id::connection);
+    connection.setProperty (id::sourceNodeId,  sourceUuid,    nullptr);
+    connection.setProperty (id::sourceChannel, sourceChannel, nullptr);
+    connection.setProperty (id::destNodeId,    destUuid,      nullptr);
+    connection.setProperty (id::destChannel,   destChannel,   nullptr);
+
+    undoManager.beginNewTransaction ("Kabel verbinden");
+    rootState.getChildWithName (id::connections).appendChild (connection, &undoManager);
+    return true;
+}
+
+bool GraphManager::removeConnection (const juce::String& sourceUuid, int sourceChannel,
+                                     const juce::String& destUuid, int destChannel)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    const auto connection = findConnectionTree (sourceUuid, sourceChannel, destUuid, destChannel);
+
+    if (! connection.isValid())
+        return false;
+
+    undoManager.beginNewTransaction ("Kabel trennen");
+    rootState.getChildWithName (id::connections).removeChild (connection, &undoManager);
+    return true;
+}
+
+juce::ValueTree GraphManager::findConnectionTree (const juce::String& sourceUuid, int sourceChannel,
+                                                  const juce::String& destUuid, int destChannel) const
+{
+    const auto connectionsTree = rootState.getChildWithName (id::connections);
+
+    for (int i = 0; i < connectionsTree.getNumChildren(); ++i)
+    {
+        const auto connection = connectionsTree.getChild (i);
+
+        if (connection.getProperty (id::sourceNodeId).toString() == sourceUuid
+            && (int) connection.getProperty (id::sourceChannel) == sourceChannel
+            && connection.getProperty (id::destNodeId).toString() == destUuid
+            && (int) connection.getProperty (id::destChannel) == destChannel)
+            return connection;
+    }
+
+    return {};
+}
+
+//==============================================================================
+void GraphManager::registerExternalEndpoint (const juce::String& moduleId,
+                                             juce::AudioProcessorGraph::NodeID graphNodeId)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    externalEndpoints[moduleId] = graphNodeId;
+}
+
+bool GraphManager::isExternalEndpoint (const juce::String& moduleId) const noexcept
+{
+    return externalEndpoints.contains (moduleId);
+}
+
+bool GraphManager::isExternalGraphNode (juce::AudioProcessorGraph::NodeID nodeId) const
+{
+    return std::any_of (externalEndpoints.begin(), externalEndpoints.end(),
+                        [nodeId] (const auto& entry) { return entry.second == nodeId; });
 }
 
 //==============================================================================
@@ -289,6 +368,7 @@ void GraphManager::prepareNewModules()
         if (nodeUuid.isEmpty()
             || treeToGraphNode.contains (nodeUuid)
             || preparedModules.contains (nodeUuid)
+            || isExternalEndpoint (nodeTree.getProperty (id::moduleId).toString())
             || nodeTree.getProperty (id::nodeError).toString().isNotEmpty())
             continue;
 
@@ -356,7 +436,11 @@ void GraphManager::removeVanishedNodes()
             continue;
         }
 
-        graph.removeNode (it->second);  // entfernt auch alle Kabel dieses Nodes
+        // Externe Endpunkte (I/O des EngineProcessor) gehören nicht uns —
+        // nur das Mapping lösen, den Graph-Node niemals zerstören
+        if (! isExternalGraphNode (it->second))
+            graph.removeNode (it->second);  // entfernt auch alle Kabel dieses Nodes
+
         it = treeToGraphNode.erase (it);
     }
 }
@@ -374,6 +458,15 @@ void GraphManager::addNewNodes()
             || treeToGraphNode.contains (nodeUuid)
             || nodeTree.getProperty (id::nodeError).toString().isNotEmpty())
             continue;
+
+        // Externer Endpunkt: nur das Mapping setzen — kein Factory-Modul
+        if (const auto moduleId = nodeTree.getProperty (id::moduleId).toString();
+            isExternalEndpoint (moduleId))
+        {
+            treeToGraphNode[nodeUuid] = externalEndpoints[moduleId];
+            nodeTree.setProperty (id::nodeState, toString (NodeState::active), nullptr);
+            continue;
+        }
 
         std::unique_ptr<ConduitModule> module;
 

@@ -85,8 +85,31 @@ public:
     juce::ValueTree addModuleNode (const juce::String& moduleId, juce::Point<int> position);
 
     /** Phase 1 des zweiphasigen Deletes (5.3): setzt nodeState → Deleting.
-        false, wenn kein Node mit dieser nodeId existiert. Message Thread. */
+        false, wenn kein Node mit dieser nodeId existiert oder der Node ein
+        externer Endpunkt ist (I/O-Nodes sind nicht löschbar). Message Thread. */
     [[nodiscard]] bool requestNodeDelete (const juce::String& nodeUuid);
+
+    //==========================================================================
+    /** Patch-Aktion: legt ein Kabel als Connection-Child an (Schema 6.2),
+        undo-fähig. false bei unbekanntem Endpunkt, Selbstverbindung oder
+        Duplikat. Die Kanal-Validierung übernimmt der Graph beim Swap. */
+    bool addConnection (const juce::String& sourceUuid, int sourceChannel,
+                        const juce::String& destUuid, int destChannel);
+
+    /** Patch-Aktion: entfernt das passende Kabel undo-fähig.
+        false, wenn keines existiert. */
+    bool removeConnection (const juce::String& sourceUuid, int sourceChannel,
+                           const juce::String& destUuid, int destChannel);
+
+    //==========================================================================
+    /** Mappt eine reservierte moduleId (audio_input/audio_output) auf einen
+        extern verwalteten Graph-Node des EngineProcessor. Tree-Nodes mit
+        dieser moduleId werden nicht factory-materialisiert, nicht gelöscht
+        und ihr Graph-Node beim Verschwinden nicht entfernt. */
+    void registerExternalEndpoint (const juce::String& moduleId,
+                                   juce::AudioProcessorGraph::NodeID graphNodeId);
+
+    [[nodiscard]] bool isExternalEndpoint (const juce::String& moduleId) const noexcept;
 
     //==========================================================================
     /** Live-Modul-Instanz zu einer Tree-nodeId — nullptr solange das Modul
@@ -146,6 +169,10 @@ private:
     void syncParameterValue (juce::ValueTree parameterTree);
 
     [[nodiscard]] bool isManagedGraphNode (juce::AudioProcessorGraph::NodeID nodeId) const;
+    [[nodiscard]] bool isExternalGraphNode (juce::AudioProcessorGraph::NodeID nodeId) const;
+
+    [[nodiscard]] juce::ValueTree findConnectionTree (const juce::String& sourceUuid, int sourceChannel,
+                                                      const juce::String& destUuid, int destChannel) const;
 
     /** true für die Container Nodes[] und Connections[] (Schema 6.2). */
     [[nodiscard]] static bool isTopologyContainer (const juce::ValueTree& tree) noexcept;
@@ -180,6 +207,9 @@ private:
 
     // Deleting-Nodes (Phase 1 abgeschlossen): nodeId → gecachte moduleId
     std::map<juce::String, juce::String> pendingDeletes;
+
+    // Reservierte moduleIds → extern verwaltete Graph-Nodes (I/O)
+    std::map<juce::String, juce::AudioProcessorGraph::NodeID> externalEndpoints;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GraphManager)
 };

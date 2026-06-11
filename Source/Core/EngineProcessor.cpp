@@ -23,6 +23,45 @@ EngineProcessor::EngineProcessor()
     using IOProcessor = juce::AudioProcessorGraph::AudioGraphIOProcessor;
     audioInputNode  = graph.addNode (std::make_unique<IOProcessor> (IOProcessor::audioInputNode));
     audioOutputNode = graph.addNode (std::make_unique<IOProcessor> (IOProcessor::audioOutputNode));
+
+    // Als externe Endpunkte verfügbar machen: Tree-Nodes mit diesen
+    // moduleIds mappen auf die I/O-Prozessoren statt auf Factory-Module
+    graphManager.registerExternalEndpoint (audioInputModuleId,  audioInputNode->nodeID);
+    graphManager.registerExternalEndpoint (audioOutputModuleId, audioOutputNode->nodeID);
+    ensureIONodeStates();
+}
+
+//==============================================================================
+void EngineProcessor::ensureIONodeStates()
+{
+    auto nodesTree = rootState.getChildWithName (id::nodes);
+
+    const auto ensure = [&nodesTree] (const char* moduleId, int numInputs, int numOutputs,
+                                      int x, int y)
+    {
+        if (nodesTree.getChildWithProperty (id::moduleId, juce::String (moduleId)).isValid())
+            return;
+
+        juce::ValueTree node (id::node);
+        node.setProperty (id::nodeId,            juce::Uuid().toString(),          nullptr);
+        node.setProperty (id::type,              toString (ModuleType::io),        nullptr);
+        node.setProperty (id::moduleId,          moduleId,                         nullptr);
+        node.setProperty (id::stateVersion,      1,                                nullptr);
+        node.setProperty (id::nodeState,         toString (NodeState::active),     nullptr);
+        node.setProperty (id::nodeError,         juce::String(),                   nullptr);
+        node.setProperty (id::positionX,         x,                                nullptr);
+        node.setProperty (id::positionY,         y,                                nullptr);
+        node.setProperty (id::numInputChannels,  numInputs,                        nullptr);
+        node.setProperty (id::numOutputChannels, numOutputs,                       nullptr);
+        node.appendChild (juce::ValueTree (id::parameters), nullptr);
+
+        nodesTree.appendChild (node, nullptr);  // Grundausstattung — kein Undo
+    };
+
+    // Aus Graph-Sicht: der Input-Prozessor LIEFERT Kanäle (Outputs),
+    // der Output-Prozessor NIMMT Kanäle entgegen (Inputs)
+    ensure (audioInputModuleId,  0, 2, 40,  260);
+    ensure (audioOutputModuleId, 2, 0, 700, 260);
 }
 
 //==============================================================================
@@ -98,7 +137,10 @@ void EngineProcessor::setStateInformation (const void* data, int sizeInBytes)
         const auto loaded = juce::ValueTree::fromXml (*xml);
 
         if (loaded.hasType (id::root))
+        {
             rootState.copyPropertiesAndChildrenFrom (loaded, nullptr);
+            ensureIONodeStates();  // Presets ohne I/O-Nodes reparieren
+        }
     }
 }
 

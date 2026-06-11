@@ -78,6 +78,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Modules/AttenuatorModule.cpp
     Source/UI/NodeCanvas.cpp
     Source/UI/NodeComponent.cpp
+    Source/UI/PortComponent.cpp
 )
 
 target_sources(Conduit PRIVATE
@@ -94,6 +95,7 @@ target_sources(Conduit PRIVATE
     Source/Modules/AttenuatorModule.h
     Source/UI/NodeCanvas.h
     Source/UI/NodeComponent.h
+    Source/UI/PortComponent.h
     Source/Util/SpscQueue.h
 )
 
@@ -163,6 +165,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/GraphFaderTests.cpp
         Tests/Core/GraphManagerTests.cpp
         Tests/Core/OscControllerTests.cpp
+        Tests/Core/PatchingTests.cpp
         Tests/Core/ThreadingStressTests.cpp
         Tests/UI/NodeCanvasTests.cpp
         Tests/Util/SpscQueueTests.cpp
@@ -170,6 +173,8 @@ if(CONDUIT_BUILD_TESTS)
 
     target_sources(ConduitTests PRIVATE
         ${CONDUIT_TEST_CPP_SOURCES}
+        Source/Core/EngineEditor.cpp
+        Source/Core/EngineProcessor.cpp
         Source/Core/GraphFader.cpp
         Source/Core/GraphManager.cpp
         Source/Core/NodeUiRegistry.cpp
@@ -179,6 +184,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Modules/AttenuatorModule.cpp
         Source/UI/NodeCanvas.cpp
         Source/UI/NodeComponent.cpp
+        Source/UI/PortComponent.cpp
     )
 
     target_include_directories(ConduitTests PRIVATE Source)

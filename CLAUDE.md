@@ -266,11 +266,16 @@ RootTree
        ├── nodeState      (Active | FadingOut | FadingIn | Deleting)
        ├── nodeError      (String, leer wenn kein Fehler)
        ├── position       (x, y für UI)
+       ├── numInputChannels / numOutputChannels   (int, für die Port-UI)
        └── Parameters[]
             ├── id, value, min, max, default
   └── Connections[]
        ├── sourceNodeId, sourceChannel
        └── destNodeId,   destChannel
+
+# Reservierte moduleIds: "audio_input" / "audio_output" — Tree-Nodes, die der
+# GraphManager auf die Audio-I/O-Prozessoren des EngineProcessor mappt
+# (keine Factory-Materialisierung, nicht löschbar, Graph-Node bleibt erhalten)
   └── CalibrationProfiles[]
        ├── interfaceId        (Hardware-Device-Name, primärer Key)
        ├── interfaceIdPrefix  (Prefix ohne Suffix wie " (2)", Fallback-Key)

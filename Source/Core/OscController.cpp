@@ -177,6 +177,11 @@ void OscController::rebuildEndpoints()
         if (nodeTree.getProperty (id::nodeState).toString() == toString (NodeState::deleting))
             continue;
 
+        const auto parameters = nodeTree.getChildWithName (id::parameters);
+
+        if (parameters.getNumChildren() == 0)
+            continue;  // nichts zu registrieren (z.B. externe I/O-Endpunkte)
+
         auto* module = graphManager.getModuleFor (nodeUuid);
 
         if (module == nullptr
@@ -186,8 +191,6 @@ void OscController::rebuildEndpoints()
         const auto addressPrefix = "/conduit/"
                                    + nodeTree.getProperty (id::type).toString().toLowerCase()
                                    + "/" + moduleId + "/";
-
-        const auto parameters = nodeTree.getChildWithName (id::parameters);
 
         for (int p = 0; p < parameters.getNumChildren(); ++p)
         {

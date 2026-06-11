@@ -64,6 +64,10 @@ public:
     [[nodiscard]] OscController& getOscController() noexcept;
 
 private:
+    /** Legt die reservierten I/O-Tree-Nodes (audio_input/audio_output) an,
+        falls sie fehlen — frischer Patch oder Preset ohne I/O. Idempotent. */
+    void ensureIONodeStates();
+
     juce::ValueTree rootState;
     juce::UndoManager undoManager;
 

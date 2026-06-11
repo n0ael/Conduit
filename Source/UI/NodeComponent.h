@@ -2,11 +2,13 @@
 
 #include <functional>
 #include <memory>
+#include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Core/GraphManager.h"
 #include "Core/NodeUiRegistry.h"
+#include "UI/PortComponent.h"
 
 namespace conduit
 {
@@ -52,6 +54,19 @@ public:
     void completeTeardownNow();
 
     //==========================================================================
+    /** Port-Mittelpunkt relativ zu dieser Component — für die Kabel-Pfade
+        des Canvas. Inputs links, Outputs rechts. */
+    [[nodiscard]] juce::Point<int> getPortCentre (bool isInput, int channel) const;
+
+    /** Nächster Port im Umkreis von maxDistance (Touch-Toleranz beim Drop),
+        nullptr wenn keiner. localPoint relativ zu dieser Component. */
+    [[nodiscard]] const PortComponent* findPortNear (juce::Point<int> localPoint,
+                                                     int maxDistance) const;
+
+    [[nodiscard]] int getNumInputPorts() const noexcept;
+    [[nodiscard]] int getNumOutputPorts() const noexcept;
+
+    //==========================================================================
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent& event) override;
@@ -75,6 +90,9 @@ private:
     juce::TextButton deleteButton;
     juce::Slider parameterSlider { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::ComponentDragger dragger;
+
+    std::vector<std::unique_ptr<PortComponent>> inputPorts;
+    std::vector<std::unique_ptr<PortComponent>> outputPorts;
 
     std::unique_ptr<juce::VBlankAttachment> teardownVBlank;
     bool tearingDown = false;
