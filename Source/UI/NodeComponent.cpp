@@ -17,6 +17,9 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
     uiRegistry.acquire (nodeUuid);
     nodeTree.addListener (this);
 
+    const auto factoryKey = GraphManager::factoryKeyOf (nodeTree);
+    const auto isExternal = graphManager.isExternalEndpoint (factoryKey);
+
     deleteButton.setButtonText (juce::String::fromUTF8 ("\xc3\x97"));  // ×
     deleteButton.onClick = [this]
     {
@@ -26,8 +29,22 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
     addAndMakeVisible (deleteButton);
 
     // Externe I/O-Endpunkte sind Grundausstattung — nicht löschbar
-    deleteButton.setVisible (! graphManager.isExternalEndpoint (
-        nodeTree.getProperty (id::moduleId).toString()));
+    deleteButton.setVisible (! isExternal);
+
+    // named_id im Header — Doppelklick benennt um (OSC-Pfad folgt, 7)
+    titleLabel.setText (nodeTree.getProperty (id::moduleId).toString(),
+                        juce::dontSendNotification);
+    titleLabel.setFont (juce::Font (juce::FontOptions (15.0f)));
+    titleLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.9f));
+    titleLabel.setEditable (false, ! isExternal, false);
+    titleLabel.onTextChange = [this]
+    {
+        if (! graphManager.renameNode (nodeUuid, titleLabel.getText()))
+            titleLabel.setText (nodeTree.getProperty (id::moduleId).toString(),
+                                juce::dontSendNotification);  // abgelehnt → zurück
+        // Bei Erfolg zieht der Property-Listener den sanitierten Namen nach
+    };
+    addAndMakeVisible (titleLabel);
 
     // Ports aus den persistierten Kanalzahlen (Schema 6.2)
     const auto makePorts = [this] (bool isInput, int count,
@@ -65,7 +82,7 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
     }
 
     // Scope-Nodes zeigen die Waveform direkt in der Kachel
-    if (nodeTree.getProperty (id::moduleId).toString() == ScopeModule::staticModuleId)
+    if (factoryKey == ScopeModule::staticModuleId)
     {
         scopeDisplay = std::make_unique<ScopeDisplay> (graphManager, nodeUuid);
         addAndMakeVisible (*scopeDisplay);
@@ -99,6 +116,7 @@ void NodeComponent::beginTeardown()
     setInterceptsMouseClicks (false, false);
     deleteButton.setEnabled (false);
     parameterSlider.setEnabled (false);
+    titleLabel.setEnabled (false);
 
     if (scopeDisplay != nullptr)
         scopeDisplay->stopUpdates();  // keine Rendering-Updates mehr (5.3 Phase 1)
@@ -146,6 +164,9 @@ void NodeComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
             beginTeardown();
         else if (property == id::nodeError)
             repaint();
+        else if (property == id::moduleId)  // Rename (auch Undo/OSC-extern)
+            titleLabel.setText (tree.getProperty (id::moduleId).toString(),
+                                juce::dontSendNotification);
 
         return;
     }
@@ -226,13 +247,6 @@ void NodeComponent::paint (juce::Graphics& g)
                                     : juce::Colour (0xff4a5160));
     g.drawRoundedRectangle (bounds, 8.0f, error.isNotEmpty() ? 2.0f : 1.0f);
 
-    g.setColour (juce::Colours::white.withAlpha (tearingDown ? 0.4f : 0.9f));
-    g.setFont (juce::Font (juce::FontOptions (15.0f)));
-    g.drawText (nodeTree.getProperty (id::moduleId).toString(),
-                getLocalBounds().removeFromTop (touchTarget).withTrimmedLeft (12)
-                    .withTrimmedRight (touchTarget),
-                juce::Justification::centredLeft);
-
     if (error.isNotEmpty())
     {
         g.setColour (juce::Colours::orangered);
@@ -246,7 +260,9 @@ void NodeComponent::resized()
 {
     auto bounds = getLocalBounds();
 
-    deleteButton.setBounds (bounds.removeFromTop (touchTarget).removeFromRight (touchTarget));
+    auto header = bounds.removeFromTop (touchTarget);
+    deleteButton.setBounds (header.removeFromRight (touchTarget));
+    titleLabel.setBounds (header.withTrimmedLeft (8));
 
     // Eingerückt, damit der Slider nicht unter den Port-Hit-Zonen liegt
     parameterSlider.setBounds (bounds.removeFromBottom (touchTarget).reduced (28, 0));

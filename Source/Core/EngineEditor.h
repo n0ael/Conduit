@@ -55,6 +55,7 @@ private:
     juce::TextButton loadButton   { "Load" };
     juce::Slider tempoSlider      { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     juce::Label peersLabel;
+    juce::Label oscLabel;
     juce::Label warningLabel;
 
     // Muss den async Callback überleben (JUCE_MODAL_LOOPS_PERMITTED=0)

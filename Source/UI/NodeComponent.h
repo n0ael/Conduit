@@ -88,6 +88,7 @@ private:
     NodeUiRegistry& uiRegistry;
     const juce::String nodeUuid;
 
+    juce::Label titleLabel;  // named_id — Doppelklick benennt um (renameNode)
     juce::TextButton deleteButton;
     juce::Slider parameterSlider { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::ComponentDragger dragger;

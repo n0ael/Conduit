@@ -22,7 +22,8 @@ namespace id
     inline const juce::Identifier node          { "Node" };
     inline const juce::Identifier nodeId        { "nodeId" };
     inline const juce::Identifier type          { "type" };
-    inline const juce::Identifier moduleId      { "moduleId" };
+    inline const juce::Identifier factoryId     { "factoryId" };  // unveränderlicher Factory-Schlüssel
+    inline const juce::Identifier moduleId      { "moduleId" };   // user-editierbare named_id (OSC, 7)
     inline const juce::Identifier stateVersion  { "stateVersion" };
     inline const juce::Identifier nodeState     { "nodeState" };
     inline const juce::Identifier nodeError     { "nodeError" };

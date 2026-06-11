@@ -81,6 +81,9 @@ public:
     [[nodiscard]] bool connect (int udpPort);
     void disconnect();
 
+    /** Aktiver UDP-Port, -1 wenn nicht verbunden — für die Status-UI. */
+    [[nodiscard]] int getConnectedPort() const noexcept { return connectedPort; }
+
     /** true, solange empfangene OSC-Werte noch nicht im ValueTree stehen.
         Preset-Save/Undo-Snapshot müssen vorher flushPendingUpdates() rufen (6.1). */
     [[nodiscard]] bool isStateDirty() const noexcept;
@@ -158,6 +161,7 @@ private:
     std::atomic<bool> stateDirty { false };
 
     bool registryDirty = true;  // nur Message Thread
+    int connectedPort = -1;     // nur Message Thread
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OscController)
 };

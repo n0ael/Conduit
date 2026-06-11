@@ -198,6 +198,7 @@ if(CONDUIT_BUILD_TESTS)
     set(CONDUIT_TEST_CPP_SOURCES
         Tests/Core/ClockTests.cpp
         Tests/Core/GraphFaderTests.cpp
+        Tests/Core/NamedIdTests.cpp
         Tests/Core/GraphManagerTests.cpp
         Tests/Core/OscControllerTests.cpp
         Tests/Core/PatchingTests.cpp

@@ -30,12 +30,15 @@ OscController::~OscController()
 bool OscController::connect (int udpPort)
 {
     JUCE_ASSERT_MESSAGE_THREAD
-    return receiver.connect (udpPort);
+    const auto ok = receiver.connect (udpPort);
+    connectedPort = ok ? udpPort : -1;
+    return ok;
 }
 
 void OscController::disconnect()
 {
     receiver.disconnect();
+    connectedPort = -1;
 }
 
 bool OscController::isStateDirty() const noexcept

@@ -43,6 +43,16 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
     peersLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.7f));
     peersLabel.setJustificationType (juce::Justification::centredLeft);
 
+    // OSC-Status (verbunden in Main::initialise)
+    const auto oscPort = engine.getOscController().getConnectedPort();
+    oscLabel.setText (oscPort > 0 ? "OSC :" + juce::String (oscPort)
+                                  : juce::String ("OSC: aus"),
+                      juce::dontSendNotification);
+    oscLabel.setColour (juce::Label::textColourId,
+                        oscPort > 0 ? juce::Colours::white.withAlpha (0.7f)
+                                    : juce::Colours::orange);
+    oscLabel.setJustificationType (juce::Justification::centredLeft);
+
     warningLabel.setColour (juce::Label::textColourId, juce::Colours::orange);
     warningLabel.setJustificationType (juce::Justification::centredRight);
 
@@ -60,6 +70,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
     addAndMakeVisible (loadButton);
     addAndMakeVisible (tempoSlider);
     addAndMakeVisible (peersLabel);
+    addAndMakeVisible (oscLabel);
     addAndMakeVisible (warningLabel);
     addAndMakeVisible (canvas);
 
@@ -152,7 +163,8 @@ void EngineEditor::resized()
     place (saveButton,      70);
     place (loadButton,      70, 16);
     place (tempoSlider,    140);
-    place (peersLabel,     130);
+    place (peersLabel,     120);
+    place (oscLabel,        90);
     warningLabel.setBounds (toolbar);
 
     canvas.setBounds (bounds);

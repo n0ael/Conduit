@@ -45,6 +45,9 @@ juce::ValueTree ConduitModule::createState()
 
     nodeTree.setProperty (id::nodeId,       juce::Uuid().toString(),         nullptr);
     nodeTree.setProperty (id::type,         toString (getType()),            nullptr);
+    nodeTree.setProperty (id::factoryId,    getModuleId(),                   nullptr);
+    // named_id default = Factory-Schlüssel; eindeutig macht ihn der
+    // GraphManager beim Einfügen (addModuleNode), user-editierbar via Rename
     nodeTree.setProperty (id::moduleId,     getModuleId(),                   nullptr);
     nodeTree.setProperty (id::stateVersion, getStateVersion(),               nullptr);
     nodeTree.setProperty (id::nodeState,    toString (NodeState::active),    nullptr);

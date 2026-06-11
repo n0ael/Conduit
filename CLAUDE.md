@@ -261,7 +261,8 @@ RootTree
   └── Nodes[]
        ├── nodeId         (juce::Uuid)
        ├── type           (ModuleType enum als String)
-       ├── moduleId       (named_id, z.B. "neutron_filter")
+       ├── factoryId      (unveränderlicher Factory-Schlüssel, z.B. "attenuator")
+       ├── moduleId       (named_id, user-editierbar, eindeutig — z.B. "neutron_filter")
        ├── stateVersion   (int, für Migration)
        ├── nodeState      (Active | FadingOut | FadingIn | Deleting)
        ├── nodeError      (String, leer wenn kein Fehler)

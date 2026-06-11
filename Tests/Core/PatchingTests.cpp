@@ -155,9 +155,9 @@ TEST_CASE ("EngineProcessor: erster hörbarer Patch — Audio In → Attenuator 
 
     // I/O-Grundausstattung steht im frischen Patch
     auto nodes = engine.getRootState().getChildWithName (conduit::id::nodes);
-    const auto ioIn  = nodes.getChildWithProperty (conduit::id::moduleId,
+    const auto ioIn  = nodes.getChildWithProperty (conduit::id::factoryId,
                                                    juce::String (conduit::audioInputModuleId));
-    const auto ioOut = nodes.getChildWithProperty (conduit::id::moduleId,
+    const auto ioOut = nodes.getChildWithProperty (conduit::id::factoryId,
                                                    juce::String (conduit::audioOutputModuleId));
     REQUIRE (ioIn.isValid());
     REQUIRE (ioOut.isValid());

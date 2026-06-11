@@ -60,13 +60,13 @@ ConduitModule* GraphManager::getModuleFor (const juce::String& nodeUuid) const
 }
 
 //==============================================================================
-juce::ValueTree GraphManager::addModuleNode (const juce::String& moduleId, juce::Point<int> position)
+juce::ValueTree GraphManager::addModuleNode (const juce::String& factoryKey, juce::Point<int> position)
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
     // Instanz nur für createState() (4.4) — die Graph-Instanz erzeugt der
     // Swap später frisch über prepareNewModules().
-    const auto module = factory.create (moduleId);
+    const auto module = factory.create (factoryKey);
 
     if (module == nullptr)
         return {};
@@ -75,9 +75,93 @@ juce::ValueTree GraphManager::addModuleNode (const juce::String& moduleId, juce:
     nodeTree.setProperty (id::positionX, position.x, nullptr);
     nodeTree.setProperty (id::positionY, position.y, nullptr);
 
+    // Eindeutige named_id (OSC-Pfad, 7) — vor dem Einhängen, ohne Listener
+    nodeTree.setProperty (id::moduleId, makeUniqueModuleName (factoryKey), nullptr);
+
     undoManager.beginNewTransaction ("Modul hinzufügen");
     rootState.getChildWithName (id::nodes).appendChild (nodeTree, &undoManager);
     return nodeTree;
+}
+
+bool GraphManager::renameNode (const juce::String& nodeUuid, const juce::String& requestedName)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    auto nodeTree = rootState.getChildWithName (id::nodes)
+                        .getChildWithProperty (id::nodeId, nodeUuid);
+
+    if (! nodeTree.isValid())
+        return false;
+
+    const auto sanitized = sanitizeModuleName (requestedName);
+
+    if (sanitized.isEmpty())
+        return false;
+
+    if (sanitized == nodeTree.getProperty (id::moduleId).toString())
+        return true;  // No-op
+
+    if (isModuleNameTaken (sanitized))
+        return false;
+
+    // Rename ändert OSC-Pfade — patchbare Aktion, also undo-fähig
+    undoManager.beginNewTransaction ("Modul umbenennen");
+    nodeTree.setProperty (id::moduleId, sanitized, &undoManager);
+    return true;
+}
+
+//==============================================================================
+juce::String GraphManager::sanitizeModuleName (const juce::String& raw)
+{
+    // OSC-pfadtauglich (7): lowercase, [a-z0-9_]; Trenner werden '_'
+    juce::String result;
+    result.preallocateBytes (static_cast<size_t> (raw.length()));
+
+    for (const auto character : raw.trim().toLowerCase())
+    {
+        if ((character >= 'a' && character <= 'z')
+            || (character >= '0' && character <= '9') || character == '_')
+            result << character;
+        else if (character == ' ' || character == '-')
+            result << '_';
+    }
+
+    return result;
+}
+
+bool GraphManager::isModuleNameTaken (const juce::String& name) const
+{
+    const auto nodesTree = rootState.getChildWithName (id::nodes);
+
+    for (int i = 0; i < nodesTree.getNumChildren(); ++i)
+        if (nodesTree.getChild (i).getProperty (id::moduleId).toString() == name)
+            return true;
+
+    return false;
+}
+
+juce::String GraphManager::makeUniqueModuleName (const juce::String& factoryKey) const
+{
+    for (int counter = 1;; ++counter)
+        if (const auto candidate = factoryKey + "_" + juce::String (counter);
+            ! isModuleNameTaken (candidate))
+            return candidate;
+}
+
+juce::String GraphManager::factoryKeyOf (const juce::ValueTree& nodeTree)
+{
+    if (nodeTree.hasProperty (id::factoryId))
+        return nodeTree.getProperty (id::factoryId).toString();
+
+    return nodeTree.getProperty (id::moduleId).toString();  // Alt-Bestand
+}
+
+void GraphManager::normalizeNode (juce::ValueTree nodeTree)
+{
+    // Migration alter States: moduleId trug früher den Factory-Schlüssel
+    if (! nodeTree.hasProperty (id::factoryId))
+        nodeTree.setProperty (id::factoryId,
+                              nodeTree.getProperty (id::moduleId).toString(), nullptr);
 }
 
 //==============================================================================
@@ -89,7 +173,7 @@ bool GraphManager::requestNodeDelete (const juce::String& nodeUuid)
                         .getChildWithProperty (id::nodeId, nodeUuid);
 
     if (! nodeTree.isValid()
-        || isExternalEndpoint (nodeTree.getProperty (id::moduleId).toString()))
+        || isExternalEndpoint (factoryKeyOf (nodeTree)))
         return false;
 
     // Phase 1: UI entkoppelt sich über ihren nodeState-Listener.
@@ -371,10 +455,12 @@ void GraphManager::prepareNewModules()
         auto nodeTree = nodesTree.getChild (i);
         const auto nodeUuid = nodeTree.getProperty (id::nodeId).toString();
 
+        normalizeNode (nodeTree);  // Migration vor jeder Auswertung
+
         if (nodeUuid.isEmpty()
             || treeToGraphNode.contains (nodeUuid)
             || preparedModules.contains (nodeUuid)
-            || isExternalEndpoint (nodeTree.getProperty (id::moduleId).toString())
+            || isExternalEndpoint (factoryKeyOf (nodeTree))
             || nodeTree.getProperty (id::nodeError).toString().isNotEmpty())
             continue;
 
@@ -385,12 +471,12 @@ void GraphManager::prepareNewModules()
 
 std::unique_ptr<ConduitModule> GraphManager::materializeModule (juce::ValueTree nodeTree)
 {
-    const auto moduleId = nodeTree.getProperty (id::moduleId).toString();
-    auto module = factory.create (moduleId);
+    const auto factoryKey = factoryKeyOf (nodeTree);
+    auto module = factory.create (factoryKey);
 
     if (module == nullptr)
     {
-        nodeTree.setProperty (id::nodeError, "Unbekanntes Modul: " + moduleId, nullptr);
+        nodeTree.setProperty (id::nodeError, "Unbekanntes Modul: " + factoryKey, nullptr);
         return nullptr;
     }
 
@@ -465,16 +551,18 @@ void GraphManager::addNewNodes()
         auto nodeTree = nodesTree.getChild (i);
         const auto nodeUuid = nodeTree.getProperty (id::nodeId).toString();
 
+        normalizeNode (nodeTree);
+
         if (nodeUuid.isEmpty()
             || treeToGraphNode.contains (nodeUuid)
             || nodeTree.getProperty (id::nodeError).toString().isNotEmpty())
             continue;
 
         // Externer Endpunkt: nur das Mapping setzen — kein Factory-Modul
-        if (const auto moduleId = nodeTree.getProperty (id::moduleId).toString();
-            isExternalEndpoint (moduleId))
+        if (const auto factoryKey = factoryKeyOf (nodeTree);
+            isExternalEndpoint (factoryKey))
         {
-            treeToGraphNode[nodeUuid] = externalEndpoints[moduleId];
+            treeToGraphNode[nodeUuid] = externalEndpoints[factoryKey];
             nodeTree.setProperty (id::nodeState, toString (NodeState::active), nullptr);
             continue;
         }

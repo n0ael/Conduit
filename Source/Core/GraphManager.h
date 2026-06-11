@@ -83,7 +83,13 @@ public:
         UndoManager-Transaktion an Nodes[] — die Materialisierung folgt über
         den normalen Swap. Invalides ValueTree bei unbekannter moduleId.
         Message Thread. */
-    juce::ValueTree addModuleNode (const juce::String& moduleId, juce::Point<int> position);
+    juce::ValueTree addModuleNode (const juce::String& factoryKey, juce::Point<int> position);
+
+    /** Patch-Aktion: benennt die named_id (OSC-Pfad, UI-Titel) eines Nodes
+        undo-fähig um. Der Name wird OSC-pfadtauglich saniert (lowercase,
+        [a-z0-9_]); false bei leerem Ergebnis, vergebenem Namen oder
+        unbekanntem Node. Message Thread. */
+    bool renameNode (const juce::String& nodeUuid, const juce::String& requestedName);
 
     /** Phase 1 des zweiphasigen Deletes (5.3): setzt nodeState → Deleting.
         false, wenn kein Node mit dieser nodeId existiert oder der Node ein
@@ -111,6 +117,11 @@ public:
                                    juce::AudioProcessorGraph::NodeID graphNodeId);
 
     [[nodiscard]] bool isExternalEndpoint (const juce::String& moduleId) const noexcept;
+
+    /** Factory-Schlüssel mit Migrations-Fallback: alte Bestände (vor der
+        factoryId/moduleId-Trennung) tragen den Schlüssel in moduleId.
+        Public — auch die UI unterscheidet Modultypen darüber. */
+    [[nodiscard]] static juce::String factoryKeyOf (const juce::ValueTree& nodeTree);
 
     //==========================================================================
     /** Takt-Verteiler für IClockSlave-Module — wird bei der Materialisierung
@@ -184,6 +195,13 @@ private:
 
     /** true für die Container Nodes[] und Connections[] (Schema 6.2). */
     [[nodiscard]] static bool isTopologyContainer (const juce::ValueTree& tree) noexcept;
+
+    /** Migration: fehlendes factoryId aus moduleId ergänzen (alter Zustand). */
+    static void normalizeNode (juce::ValueTree nodeTree);
+
+    [[nodiscard]] static juce::String sanitizeModuleName (const juce::String& raw);
+    [[nodiscard]] bool isModuleNameTaken (const juce::String& name) const;
+    [[nodiscard]] juce::String makeUniqueModuleName (const juce::String& factoryKey) const;
 
     void markTopologyDirty();
 

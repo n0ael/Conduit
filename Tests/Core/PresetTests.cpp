@@ -47,7 +47,7 @@ TEST_CASE ("Preset-Round-Trip: Patch überlebt Save → frische Engine → Load 
         gainParameterOf (node).setProperty (conduit::id::paramValue, 0.3, nullptr);
 
         const auto ioIn = source.getRootState().getChildWithName (conduit::id::nodes)
-                              .getChildWithProperty (conduit::id::moduleId,
+                              .getChildWithProperty (conduit::id::factoryId,
                                                      juce::String (conduit::audioInputModuleId));
         REQUIRE (manager.addConnection (uuidOf (ioIn), 0, savedAttenuatorUuid, 0));
 
@@ -66,7 +66,7 @@ TEST_CASE ("Preset-Round-Trip: Patch überlebt Save → frische Engine → Load 
     // I/O-Grundausstattung: aus dem Preset übernommen, NICHT dupliziert
     int ioInputCount = 0;
     for (int i = 0; i < nodes.getNumChildren(); ++i)
-        if (nodes.getChild (i).getProperty (conduit::id::moduleId).toString()
+        if (nodes.getChild (i).getProperty (conduit::id::factoryId).toString()
             == conduit::audioInputModuleId)
             ++ioInputCount;
     REQUIRE (ioInputCount == 1);
@@ -129,7 +129,8 @@ TEST_CASE ("Preset-Save flusht ausstehende OSC-Werte (isDirty-Guard 6.1)", "[pre
     osc.flushPendingUpdates();  // Registry aufbauen
 
     // OSC-Wert empfangen, aber noch NICHT in den Tree geflusht
-    osc.oscMessageReceived (juce::OSCMessage { "/conduit/utility/attenuator/gain", 0.7f });
+    // (addModuleNode vergibt die eindeutige named_id "attenuator_1")
+    osc.oscMessageReceived (juce::OSCMessage { "/conduit/utility/attenuator_1/gain", 0.7f });
     REQUIRE (osc.isStateDirty());
 
     REQUIRE (engine.savePreset (file).wasOk());

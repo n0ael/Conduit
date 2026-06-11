@@ -47,6 +47,12 @@ public:
     {
         engine = std::make_unique<EngineProcessor>();
         initAudio();
+
+        // OSC-Empfang aktivieren (CLAUDE.md 7) — Status zeigt die Toolbar
+        if (! engine->getOscController().connect (OscController::defaultPort))
+            juce::Logger::writeToLog ("OSC: Port " + juce::String (OscController::defaultPort)
+                                      + " belegt — Empfang deaktiviert");
+
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
     }
 

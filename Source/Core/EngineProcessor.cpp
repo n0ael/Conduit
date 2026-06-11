@@ -39,16 +39,19 @@ void EngineProcessor::ensureIONodeStates()
 {
     auto nodesTree = rootState.getChildWithName (id::nodes);
 
-    const auto ensure = [&nodesTree] (const char* moduleId, int numInputs, int numOutputs,
-                                      int x, int y)
+    const auto ensure = [&nodesTree] (const char* factoryKey, const char* defaultName,
+                                      int numInputs, int numOutputs, int x, int y)
     {
-        if (nodesTree.getChildWithProperty (id::moduleId, juce::String (moduleId)).isValid())
+        // Vorhanden? factoryId-Match; Alt-Bestände tragen den Schlüssel in moduleId
+        if (nodesTree.getChildWithProperty (id::factoryId, juce::String (factoryKey)).isValid()
+            || nodesTree.getChildWithProperty (id::moduleId, juce::String (factoryKey)).isValid())
             return;
 
         juce::ValueTree node (id::node);
         node.setProperty (id::nodeId,            juce::Uuid().toString(),          nullptr);
         node.setProperty (id::type,              toString (ModuleType::io),        nullptr);
-        node.setProperty (id::moduleId,          moduleId,                         nullptr);
+        node.setProperty (id::factoryId,         factoryKey,                       nullptr);
+        node.setProperty (id::moduleId,          defaultName,                      nullptr);
         node.setProperty (id::stateVersion,      1,                                nullptr);
         node.setProperty (id::nodeState,         toString (NodeState::active),     nullptr);
         node.setProperty (id::nodeError,         juce::String(),                   nullptr);
@@ -63,8 +66,8 @@ void EngineProcessor::ensureIONodeStates()
 
     // Aus Graph-Sicht: der Input-Prozessor LIEFERT Kanäle (Outputs),
     // der Output-Prozessor NIMMT Kanäle entgegen (Inputs)
-    ensure (audioInputModuleId,  0, 2, 40,  260);
-    ensure (audioOutputModuleId, 2, 0, 700, 260);
+    ensure (audioInputModuleId,  "audio_in",  0, 2, 40,  260);
+    ensure (audioOutputModuleId, "audio_out", 2, 0, 700, 260);
 }
 
 //==============================================================================
