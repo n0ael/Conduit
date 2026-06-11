@@ -4,6 +4,8 @@
 #include "Modules/AttenuatorModule.h"
 #include "Modules/LfoModule.h"
 #include "Modules/ScopeModule.h"
+#include "Modules/StepSequencerModule.h"
+#include "Util/ScaleQuantizer.h"
 
 namespace conduit
 {
@@ -28,6 +30,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
     addButton.onClick      = [addModule] { addModule (AttenuatorModule::staticModuleId); };
     addLfoButton.onClick   = [addModule] { addModule (LfoModule::staticModuleId); };
     addScopeButton.onClick = [addModule] { addModule (ScopeModule::staticModuleId); };
+    addSeqButton.onClick   = [addModule] { addModule (StepSequencerModule::staticModuleId); };
 
     undoButton.onClick = [this] { undoManager.undo(); };
     redoButton.onClick = [this] { undoManager.redo(); };
@@ -42,6 +45,34 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
 
     peersLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.7f));
     peersLabel.setJustificationType (juce::Justification::centredLeft);
+
+    // Globale Session-Skala (Schema 6.2): schreibt die Root-Properties —
+    // bewusst ohne UndoManager (Session-Setting wie Parameter-Sweeps);
+    // preset-persistent ist sie über den Tree trotzdem
+    {
+        const char* noteNames[] = { "C", "C#", "D", "D#", "E", "F",
+                                    "F#", "G", "G#", "A", "A#", "B" };
+
+        for (int note = 0; note < 12; ++note)
+            rootCombo.addItem (noteNames[note], note + 1);
+
+        for (const auto type : { ScaleType::chromatic, ScaleType::major,
+                                 ScaleType::minor, ScaleType::pentatonic })
+            scaleCombo.addItem (toString (type), static_cast<int> (type) + 1);
+
+        rootCombo.setSelectedId (juce::jlimit (0, 11,
+            (int) rootState.getProperty (id::scaleRoot, 0)) + 1, juce::dontSendNotification);
+        scaleCombo.setSelectedId (static_cast<int> (scaleTypeFromString (
+            rootState.getProperty (id::scaleType).toString())) + 1, juce::dontSendNotification);
+
+        rootCombo.onChange = [this]
+        { rootState.setProperty (id::scaleRoot, rootCombo.getSelectedId() - 1, nullptr); };
+        scaleCombo.onChange = [this]
+        {
+            rootState.setProperty (id::scaleType,
+                toString (static_cast<ScaleType> (scaleCombo.getSelectedId() - 1)), nullptr);
+        };
+    }
 
     // OSC-Status (verbunden in Main::initialise)
     const auto oscPort = engine.getOscController().getConnectedPort();
@@ -64,11 +95,14 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
     addAndMakeVisible (addButton);
     addAndMakeVisible (addLfoButton);
     addAndMakeVisible (addScopeButton);
+    addAndMakeVisible (addSeqButton);
     addAndMakeVisible (undoButton);
     addAndMakeVisible (redoButton);
     addAndMakeVisible (saveButton);
     addAndMakeVisible (loadButton);
     addAndMakeVisible (tempoSlider);
+    addAndMakeVisible (rootCombo);
+    addAndMakeVisible (scaleCombo);
     addAndMakeVisible (peersLabel);
     addAndMakeVisible (oscLabel);
     addAndMakeVisible (warningLabel);
@@ -76,7 +110,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
 
     setWantsKeyboardFocus (true);
     setResizable (true, true);
-    setSize (1180, 680);
+    setSize (1320, 720);
 
     timerCallback();    // Peer-Label sofort befüllen, nicht erst nach 250ms
     startTimerHz (4);   // Session-Polling — Tempo/Peers können sich im Netz ändern
@@ -155,16 +189,19 @@ void EngineEditor::resized()
         toolbar.removeFromLeft (gapAfter);
     };
 
-    place (addButton,      110);
-    place (addLfoButton,    90);
-    place (addScopeButton, 100);
-    place (undoButton,      70);
-    place (redoButton,      70, 16);
-    place (saveButton,      70);
-    place (loadButton,      70, 16);
-    place (tempoSlider,    140);
-    place (peersLabel,     120);
-    place (oscLabel,        90);
+    place (addButton,       95);
+    place (addLfoButton,    80);
+    place (addScopeButton,  90);
+    place (addSeqButton,    80);
+    place (undoButton,      65);
+    place (redoButton,      65, 16);
+    place (saveButton,      65);
+    place (loadButton,      65, 16);
+    place (tempoSlider,    130);
+    place (rootCombo,       60);
+    place (scaleCombo,     110, 16);
+    place (peersLabel,     115);
+    place (oscLabel,        80);
     warningLabel.setBounds (toolbar);
 
     canvas.setBounds (bounds);

@@ -100,6 +100,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/NodeComponent.cpp
     Source/UI/PortComponent.cpp
     Source/UI/ScopeDisplay.cpp
+    Source/UI/StepGridDisplay.cpp
 )
 
 target_sources(Conduit PRIVATE
@@ -127,6 +128,7 @@ target_sources(Conduit PRIVATE
     Source/UI/NodeComponent.h
     Source/UI/PortComponent.h
     Source/UI/ScopeDisplay.h
+    Source/UI/StepGridDisplay.h
     Source/Util/ScaleQuantizer.h
     Source/Util/SpscQueue.h
 )
@@ -234,6 +236,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/NodeComponent.cpp
         Source/UI/PortComponent.cpp
         Source/UI/ScopeDisplay.cpp
+        Source/UI/StepGridDisplay.cpp
     )
 
     target_include_directories(ConduitTests PRIVATE Source)

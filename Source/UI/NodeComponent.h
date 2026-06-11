@@ -10,6 +10,7 @@
 #include "Core/NodeUiRegistry.h"
 #include "UI/PortComponent.h"
 #include "UI/ScopeDisplay.h"
+#include "UI/StepGridDisplay.h"
 
 namespace conduit
 {
@@ -96,8 +97,11 @@ private:
     std::vector<std::unique_ptr<PortComponent>> inputPorts;
     std::vector<std::unique_ptr<PortComponent>> outputPorts;
 
-    // Nur bei Scope-Nodes (moduleId == "scope") — 30-fps-Waveform
+    // Nur bei Scope-Nodes (factoryId == "scope") — 30-fps-Waveform
     std::unique_ptr<ScopeDisplay> scopeDisplay;
+
+    // Nur bei Sequencer-Nodes (factoryId == "sequencer") — 4×16-Grid
+    std::unique_ptr<StepGridDisplay> stepGrid;
 
     std::unique_ptr<juce::VBlankAttachment> teardownVBlank;
     bool tearingDown = false;

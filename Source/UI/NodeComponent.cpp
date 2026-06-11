@@ -2,6 +2,7 @@
 
 #include "Modules/ConduitModule.h"
 #include "Modules/ScopeModule.h"
+#include "Modules/StepSequencerModule.h"
 
 namespace conduit
 {
@@ -81,12 +82,18 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
         addAndMakeVisible (parameterSlider);
     }
 
-    // Scope-Nodes zeigen die Waveform direkt in der Kachel
+    // Modulspezifische Anzeigen direkt in der Kachel
     if (factoryKey == ScopeModule::staticModuleId)
     {
         scopeDisplay = std::make_unique<ScopeDisplay> (graphManager, nodeUuid);
         addAndMakeVisible (*scopeDisplay);
         setSize (252, 168);
+    }
+    else if (factoryKey == StepSequencerModule::staticModuleId)
+    {
+        stepGrid = std::make_unique<StepGridDisplay> (nodeTree, graphManager);
+        addAndMakeVisible (*stepGrid);
+        setSize (492, 300);
     }
     else
     {
@@ -120,6 +127,9 @@ void NodeComponent::beginTeardown()
 
     if (scopeDisplay != nullptr)
         scopeDisplay->stopUpdates();  // keine Rendering-Updates mehr (5.3 Phase 1)
+
+    if (stepGrid != nullptr)
+        stepGrid->stopUpdates();
 
     repaint();
 
@@ -270,6 +280,11 @@ void NodeComponent::resized()
     if (scopeDisplay != nullptr)
         scopeDisplay->setBounds (getLocalBounds().withTrimmedTop (touchTarget)
                                      .reduced (24, 8));  // Platz für die Port-Hit-Zonen
+
+    if (stepGrid != nullptr)
+        stepGrid->setBounds (getLocalBounds().withTrimmedTop (touchTarget)
+                                 .withTrimmedBottom (touchTarget)   // rate-Slider unten
+                                 .reduced (24, 4));
 
     const auto placePorts = [this] (std::vector<std::unique_ptr<PortComponent>>& ports)
     {

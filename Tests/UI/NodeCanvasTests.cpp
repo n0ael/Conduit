@@ -167,6 +167,24 @@ TEST_CASE ("NodeCanvas: Preset-Load (Container-Austausch) rebuildet ohne Zombies
 }
 
 //==============================================================================
+TEST_CASE ("NodeCanvas: Sequencer-Node bekommt die Grid-Kachel", "[ui]")
+{
+    UiTestRig rig;
+    const auto node = rig.manager.addModuleNode ("sequencer", { 10, 10 });
+    REQUIRE (node.isValid());
+
+    auto* component = rig.canvas.findNodeComponent (UiTestRig::uuidOf (node));
+    REQUIRE (component != nullptr);
+    REQUIRE (component->getWidth() == 492);   // große Kachel mit StepGridDisplay
+    REQUIRE (rig.uiRegistry.getRefCount (UiTestRig::uuidOf (node)) == 1);
+
+    // Teardown-Flow unverändert (Timer/Listener sauber gestoppt)
+    REQUIRE (rig.manager.requestNodeDelete (UiTestRig::uuidOf (node)));
+    component->completeTeardownNow();
+    REQUIRE (rig.uiRegistry.getRefCount (UiTestRig::uuidOf (node)) == 0);
+}
+
+//==============================================================================
 TEST_CASE ("GraphManager: Parameter-Sync Tree → Atomic (UI/Preset/Undo-Pfad)", "[ui]")
 {
     UiTestRig rig;

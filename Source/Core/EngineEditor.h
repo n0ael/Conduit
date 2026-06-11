@@ -49,11 +49,14 @@ private:
     juce::TextButton addButton      { juce::String::fromUTF8 ("\xef\xbc\x8b Atten") };
     juce::TextButton addLfoButton   { juce::String::fromUTF8 ("\xef\xbc\x8b LFO") };
     juce::TextButton addScopeButton { juce::String::fromUTF8 ("\xef\xbc\x8b Scope") };
+    juce::TextButton addSeqButton   { juce::String::fromUTF8 ("\xef\xbc\x8b Seq") };
     juce::TextButton undoButton   { "Undo" };
     juce::TextButton redoButton   { "Redo" };
     juce::TextButton saveButton   { "Save" };
     juce::TextButton loadButton   { "Load" };
     juce::Slider tempoSlider      { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
+    juce::ComboBox rootCombo;     // globale Session-Skala (Root-Tree-Properties)
+    juce::ComboBox scaleCombo;
     juce::Label peersLabel;
     juce::Label oscLabel;
     juce::Label warningLabel;
