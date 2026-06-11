@@ -12,6 +12,7 @@ namespace conduit
 {
 
 class ModuleFactory;
+class NodeUiRegistry;
 
 //==============================================================================
 /**
@@ -35,6 +36,16 @@ class ModuleFactory;
     Änderungen, die während des Fade-Outs eintreffen, landen im selben Swap.
     Läuft Audio nicht (Fader unprepared), wird ohne Fade direkt geswappt.
 
+    Zweiphasiges Delete (5.3):
+      Phase 1: requestNodeDelete() setzt nodeState → Deleting. UI-Components
+               reagieren über ihren Listener, entkoppeln sich und geben ihre
+               NodeUiRegistry-Referenz frei; moduleId wird sofort gecacht
+               (der künftige OscController deregistriert darüber, 7.1)
+      Phase 2: im nächsten Loop-Durchlauf, erst wenn der UI-Refcount 0 ist —
+               Subtree + zugehörige Kabel werden in einer UndoManager-
+               Transaktion entfernt; die Graph-Entfernung folgt über den
+               normalen Fade-Swap
+
     Die I/O-Nodes des EngineProcessor sind nicht tree-verwaltet und bleiben
     von der Synchronisation unangetastet.
 
@@ -45,8 +56,6 @@ class ModuleFactory;
     Läuft vollständig auf dem Message Thread — daher ist topologyDirty
     bewusst kein std::atomic. Kein UI-Code, kein DSP-Code (der Fade selbst
     lebt im GraphFader auf dem Audio Thread).
-
-    Nächste Ausbaustufe: zweiphasiges Delete mit Zombie-UI-Schutz (5.3).
 */
 class GraphManager final : private juce::ValueTree::Listener,
                            private juce::AsyncUpdater
@@ -54,16 +63,25 @@ class GraphManager final : private juce::ValueTree::Listener,
 public:
     /** rootTree ist ein ref-counted ValueTree-Handle, processorGraph das
         Swap-Ziel, faderToUse der Master-Fade im Audio-Pfad, factoryToUse
-        erzeugt Module aus persistierten moduleIds.
+        erzeugt Module aus persistierten moduleIds, undoManagerToUse macht
+        Deletes undo-fähig, uiRegistryToUse liefert den Zombie-UI-Schutz.
         Registriert sich als Listener. */
     GraphManager (juce::ValueTree rootTree,
                   juce::AudioProcessorGraph& processorGraph,
                   GraphFader& faderToUse,
-                  ModuleFactory& factoryToUse);
+                  ModuleFactory& factoryToUse,
+                  juce::UndoManager& undoManagerToUse,
+                  NodeUiRegistry& uiRegistryToUse);
 
     /** Deregistriert den Listener und verwirft ausstehende Async-Updates. */
     ~GraphManager() override;
 
+    //==========================================================================
+    /** Phase 1 des zweiphasigen Deletes (5.3): setzt nodeState → Deleting.
+        false, wenn kein Node mit dieser nodeId existiert. Message Thread. */
+    [[nodiscard]] bool requestNodeDelete (const juce::String& nodeUuid);
+
+    //==========================================================================
     /** true, solange ein gesammeltes Frame-Delta auf den Rebuild wartet. */
     [[nodiscard]] bool isTopologyDirty() const noexcept;
 
@@ -79,7 +97,7 @@ public:
 
 private:
     //==========================================================================
-    // juce::ValueTree::Listener — nur Topologie-Änderungen markieren das Delta
+    // juce::ValueTree::Listener — Topologie-Änderungen + Phase 1 des Deletes
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override;
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int formerIndex) override;
@@ -89,6 +107,10 @@ private:
     void handleAsyncUpdate() override;
 
     //==========================================================================
+    /** Phase 2 des Deletes (5.3): entfernt Subtree + Kabel, sobald die UI
+        ihre Referenzen freigegeben hat (Refcount 0). */
+    void processPendingDeletes();
+
     /** Schritt 1: instanziiert + prepariert alle neuen Tree-Nodes VOR dem
         Fade-Out. Fehler → nodeError, das Modul wird übersprungen. */
     void prepareNewModules();
@@ -122,6 +144,8 @@ private:
     juce::AudioProcessorGraph& graph;
     GraphFader& fader;
     ModuleFactory& factory;
+    juce::UndoManager& undoManager;
+    NodeUiRegistry& uiRegistry;
 
     // Nur Message Thread — bewusst kein std::atomic (kein Cross-Thread-Zugriff)
     SwapPhase swapPhase = SwapPhase::idle;
@@ -134,6 +158,9 @@ private:
 
     // In Schritt 1 vorbereitete Instanzen, warten auf den Swap
     std::map<juce::String, std::unique_ptr<ConduitModule>> preparedModules;
+
+    // Deleting-Nodes (Phase 1 abgeschlossen): nodeId → gecachte moduleId
+    std::map<juce::String, juce::String> pendingDeletes;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GraphManager)
 };

@@ -4,6 +4,7 @@
 
 #include "GraphFader.h"
 #include "GraphManager.h"
+#include "NodeUiRegistry.h"
 #include "Modules/ConduitModule.h"
 #include "Modules/ModuleFactory.h"
 
@@ -55,6 +56,10 @@ public:
     [[nodiscard]] juce::ValueTree getRootState() noexcept;
     [[nodiscard]] juce::UndoManager& getUndoManager() noexcept;
 
+    /** Patch-Aktionen (Delete-Requests) und UI-Bindungs-Registry. */
+    [[nodiscard]] GraphManager& getGraphManager() noexcept;
+    [[nodiscard]] NodeUiRegistry& getNodeUiRegistry() noexcept;
+
 private:
     juce::ValueTree rootState;
     juce::UndoManager undoManager;
@@ -69,9 +74,12 @@ private:
     // Default-Module werden im Konstruktor registriert
     ModuleFactory moduleFactory;
 
-    // Nach rootState, graph, graphFader und moduleFactory deklariert —
-    // Initialisierungsreihenfolge!
-    GraphManager graphManager { rootState, graph, graphFader, moduleFactory };
+    // Zombie-UI-Schutz für das zweiphasige Delete (CLAUDE.md 5.3)
+    NodeUiRegistry nodeUiRegistry;
+
+    // Nach allen Abhängigkeiten deklariert — Initialisierungsreihenfolge!
+    GraphManager graphManager { rootState, graph, graphFader,
+                                moduleFactory, undoManager, nodeUiRegistry };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EngineProcessor)
 };

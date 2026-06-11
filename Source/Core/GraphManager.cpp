@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "Modules/ModuleFactory.h"
+#include "NodeUiRegistry.h"
 
 namespace conduit
 {
@@ -11,17 +12,26 @@ namespace conduit
 GraphManager::GraphManager (juce::ValueTree rootTree,
                             juce::AudioProcessorGraph& processorGraph,
                             GraphFader& faderToUse,
-                            ModuleFactory& factoryToUse)
+                            ModuleFactory& factoryToUse,
+                            juce::UndoManager& undoManagerToUse,
+                            NodeUiRegistry& uiRegistryToUse)
     : rootState (std::move (rootTree)),
       graph (processorGraph),
       fader (faderToUse),
-      factory (factoryToUse)
+      factory (factoryToUse),
+      undoManager (undoManagerToUse),
+      uiRegistry (uiRegistryToUse)
 {
     rootState.addListener (this);
+
+    // Gibt die letzte UI-Component einen Deleting-Node frei, kann eine
+    // wartende Phase 2 sofort weiterlaufen (5.3)
+    uiRegistry.setOnNodeFullyReleased ([this] (const juce::String&) { triggerAsyncUpdate(); });
 }
 
 GraphManager::~GraphManager()
 {
+    uiRegistry.setOnNodeFullyReleased (nullptr);
     rootState.removeListener (this);
     cancelPendingUpdate();  // AsyncUpdater darf nie auf ein zerstörtes Objekt feuern
 }
@@ -37,17 +47,46 @@ void GraphManager::flushPendingTopologyUpdate()
 }
 
 //==============================================================================
+bool GraphManager::requestNodeDelete (const juce::String& nodeUuid)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    auto nodeTree = rootState.getChildWithName (id::nodes)
+                        .getChildWithProperty (id::nodeId, nodeUuid);
+
+    if (! nodeTree.isValid())
+        return false;
+
+    // Phase 1: UI entkoppelt sich über ihren nodeState-Listener.
+    // Bewusst ohne UndoManager — undo-fähig ist die Subtree-Entfernung
+    // in Phase 2, nicht der Übergangszustand.
+    nodeTree.setProperty (id::nodeState, toString (NodeState::deleting), nullptr);
+    return true;
+}
+
+//==============================================================================
 bool GraphManager::isTopologyContainer (const juce::ValueTree& tree) noexcept
 {
     return tree.hasType (id::nodes) || tree.hasType (id::connections);
 }
 
-void GraphManager::valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&)
+void GraphManager::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // Bewusst leer: Parameter-Updates kommen via OSC-Dual-State (6.1) im
-    // Millisekundentakt — sie ändern die Topologie nicht und dürfen keinen
-    // Graph-Rebuild auslösen.
-    // Spätere Ausbaustufe: nodeState → Deleting (5.3) wird hier behandelt.
+    // Phase 1 des zweiphasigen Deletes (5.3): moduleId wird JETZT gecacht,
+    // nicht erst bei valueTreeChildRemoved — der künftige OscController
+    // deregistriert seine OSC-Adressen darüber (7.1).
+    if (property == id::nodeState && tree.hasType (id::node)
+        && tree.getProperty (id::nodeState).toString() == toString (NodeState::deleting))
+    {
+        pendingDeletes[tree.getProperty (id::nodeId).toString()]
+            = tree.getProperty (id::moduleId).toString();
+        triggerAsyncUpdate();
+        return;
+    }
+
+    // Sonst bewusst keine Reaktion: Parameter-Updates kommen via
+    // OSC-Dual-State (6.1) im Millisekundentakt — sie ändern die Topologie
+    // nicht und dürfen keinen Graph-Rebuild auslösen.
 }
 
 void GraphManager::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
@@ -85,6 +124,10 @@ void GraphManager::markTopologyDirty()
 //==============================================================================
 void GraphManager::handleAsyncUpdate()
 {
+    // Phase 2 ausstehender Deletes (5.3): entfernt freigegebene Subtrees
+    // und markiert dadurch topologyDirty — der Swap unten nimmt sie mit.
+    processPendingDeletes();
+
     if (swapPhase == SwapPhase::waitingForSilence)
     {
         // Schritt 3: kein Busy-Poll, kein Timer — Self-Re-Dispatch bis der
@@ -123,6 +166,51 @@ void GraphManager::handleAsyncUpdate()
     fader.beginFadeOut();
     swapPhase = SwapPhase::waitingForSilence;
     triggerAsyncUpdate();
+}
+
+//==============================================================================
+void GraphManager::processPendingDeletes()
+{
+    if (pendingDeletes.empty())
+        return;
+
+    auto nodesTree       = rootState.getChildWithName (id::nodes);
+    auto connectionsTree = rootState.getChildWithName (id::connections);
+
+    for (auto it = pendingDeletes.begin(); it != pendingDeletes.end();)
+    {
+        const auto& nodeUuid = it->first;
+
+        // Zombie-UI-Schutz: Phase 2 startet erst, wenn keine UI-Component
+        // mehr eine Referenz auf diesen Subtree hält (5.3). Die Freigabe
+        // stößt via NodeUiRegistry-Callback den nächsten Durchlauf an.
+        if (uiRegistry.getRefCount (nodeUuid) > 0)
+        {
+            ++it;
+            continue;
+        }
+
+        if (auto nodeTree = nodesTree.getChildWithProperty (id::nodeId, nodeUuid); nodeTree.isValid())
+        {
+            // Node und seine Kabel in EINER UndoManager-Transaktion —
+            // ein Undo stellt alles wieder her und löst einen einzigen
+            // gemeinsamen Swap aus (5.5)
+            undoManager.beginNewTransaction ("Modul löschen");
+
+            for (int i = connectionsTree.getNumChildren(); --i >= 0;)
+            {
+                const auto connection = connectionsTree.getChild (i);
+
+                if (connection.getProperty (id::sourceNodeId).toString() == nodeUuid
+                    || connection.getProperty (id::destNodeId).toString() == nodeUuid)
+                    connectionsTree.removeChild (i, &undoManager);
+            }
+
+            nodesTree.removeChild (nodeTree, &undoManager);
+        }
+
+        it = pendingDeletes.erase (it);
+    }
 }
 
 //==============================================================================
@@ -241,7 +329,13 @@ void GraphManager::addNewNodes()
             continue;
 
         if (const auto graphNode = graph.addNode (std::move (module)))
+        {
             treeToGraphNode[nodeUuid] = graphNode->nodeID;
+
+            // Lifecycle-Status zurücksetzen — relevant nach Undo eines
+            // Deletes: der Subtree wurde mit nodeState == Deleting restauriert
+            nodeTree.setProperty (id::nodeState, toString (NodeState::active), nullptr);
+        }
     }
 }
 

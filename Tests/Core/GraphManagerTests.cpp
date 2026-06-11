@@ -4,6 +4,7 @@
 
 #include "Core/GraphFader.h"
 #include "Core/GraphManager.h"
+#include "Core/NodeUiRegistry.h"
 #include "Modules/AttenuatorModule.h"
 #include "Modules/ModuleFactory.h"
 #include "Modules/UtilityModule.h"
@@ -77,12 +78,42 @@ public:
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
 };
 
-void registerTestModules (conduit::ModuleFactory& factory)
+constexpr auto attenuatorId = conduit::AttenuatorModule::staticModuleId;
+
+// Gemeinsames Setup: GraphManager mit allen Abhängigkeiten
+struct TestRig
 {
-    conduit::registerDefaultModules (factory);
-    factory.registerModule ("failing_test_module",
-                            [] { return std::make_unique<FailingModule>(); });
-}
+    TestRig()
+    {
+        conduit::registerDefaultModules (factory);
+        factory.registerModule ("failing_test_module",
+                                [] { return std::make_unique<FailingModule>(); });
+    }
+
+    [[nodiscard]] juce::ValueTree nodes()       { return root.getChildWithName (conduit::id::nodes); }
+    [[nodiscard]] juce::ValueTree connections() { return root.getChildWithName (conduit::id::connections); }
+
+    juce::ValueTree addModuleNode (const juce::String& moduleId)
+    {
+        auto node = makeModuleNode (moduleId);
+        nodes().appendChild (node, nullptr);
+        return node;
+    }
+
+    static juce::String uuidOf (const juce::ValueTree& node)
+    {
+        return node.getProperty (conduit::id::nodeId).toString();
+    }
+
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    juce::ValueTree root = makeRootTree();
+    juce::AudioProcessorGraph graph;
+    conduit::GraphFader fader;  // unprepared → Swap ohne Fade, außer fader.prepare() wird gerufen
+    conduit::ModuleFactory factory;
+    juce::UndoManager undoManager;
+    conduit::NodeUiRegistry uiRegistry;
+    conduit::GraphManager manager { root, graph, fader, factory, undoManager, uiRegistry };
+};
 
 } // namespace
 
@@ -90,56 +121,37 @@ void registerTestModules (conduit::ModuleFactory& factory)
 TEST_CASE ("Batch-Coalescing: viele Topologie-Änderungen in einem Frame ergeben einen Rebuild",
            "[GraphManager]")
 {
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
-
-    auto root = makeRootTree();
-    juce::AudioProcessorGraph graph;
-    conduit::GraphFader fader;  // unprepared → Swap ohne Fade
-    conduit::ModuleFactory factory;
-    conduit::registerDefaultModules (factory);
-    conduit::GraphManager manager (root, graph, fader, factory);
-
-    auto nodes       = root.getChildWithName (conduit::id::nodes);
-    auto connections = root.getChildWithName (conduit::id::connections);
+    TestRig rig;
 
     // Bulk-Szenario aus CLAUDE.md 5.5: 5 Module + 20 Kabel in einem Frame
     for (int i = 0; i < 5; ++i)
-        nodes.appendChild (makeModuleNode (conduit::AttenuatorModule::staticModuleId), nullptr);
+        rig.addModuleNode (attenuatorId);
 
     for (int i = 0; i < 20; ++i)
-        connections.appendChild (juce::ValueTree (conduit::id::connection), nullptr);
+        rig.connections().appendChild (juce::ValueTree (conduit::id::connection), nullptr);
 
-    REQUIRE (manager.isTopologyDirty());
-    REQUIRE (manager.getRebuildCount() == 0);  // noch kein Loop-Durchlauf
+    REQUIRE (rig.manager.isTopologyDirty());
+    REQUIRE (rig.manager.getRebuildCount() == 0);  // noch kein Loop-Durchlauf
 
-    manager.flushPendingTopologyUpdate();      // = nächster Message-Loop-Durchlauf
+    rig.manager.flushPendingTopologyUpdate();      // = nächster Message-Loop-Durchlauf
 
-    CHECK (manager.getRebuildCount() == 1);    // 25 Änderungen → genau 1 Rebuild
-    CHECK_FALSE (manager.isTopologyDirty());
-    CHECK (graph.getNumNodes() == 5);          // alle 5 Module materialisiert
+    CHECK (rig.manager.getRebuildCount() == 1);    // 25 Änderungen → genau 1 Rebuild
+    CHECK_FALSE (rig.manager.isTopologyDirty());
+    CHECK (rig.graph.getNumNodes() == 5);          // alle 5 Module materialisiert
 
     // Folge-Durchlauf ohne neue Änderungen darf nichts tun
-    manager.flushPendingTopologyUpdate();
-    CHECK (manager.getRebuildCount() == 1);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.manager.getRebuildCount() == 1);
 }
 
 //==============================================================================
 TEST_CASE ("Parameter-Änderungen lösen keinen Graph-Rebuild aus", "[GraphManager]")
 {
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TestRig rig;
 
-    auto root = makeRootTree();
-    juce::AudioProcessorGraph graph;
-    conduit::GraphFader fader;
-    conduit::ModuleFactory factory;
-    conduit::registerDefaultModules (factory);
-    conduit::GraphManager manager (root, graph, fader, factory);
-
-    auto nodes = root.getChildWithName (conduit::id::nodes);
-    auto node = makeModuleNode (conduit::AttenuatorModule::staticModuleId);
-    nodes.appendChild (node, nullptr);
-    manager.flushPendingTopologyUpdate();
-    REQUIRE (manager.getRebuildCount() == 1);
+    auto node = rig.addModuleNode (attenuatorId);
+    rig.manager.flushPendingTopologyUpdate();
+    REQUIRE (rig.manager.getRebuildCount() == 1);
 
     // Parameters-Subtree unterhalb eines Nodes ist KEINE Topologie-Änderung
     juce::ValueTree parameters (conduit::id::parameters);
@@ -151,155 +163,109 @@ TEST_CASE ("Parameter-Änderungen lösen keinen Graph-Rebuild aus", "[GraphManag
     for (int i = 0; i < 100; ++i)
         parameter.setProperty (conduit::id::paramValue, i * 0.01, nullptr);
 
-    CHECK_FALSE (manager.isTopologyDirty());
-    manager.flushPendingTopologyUpdate();
-    CHECK (manager.getRebuildCount() == 1);    // unverändert
+    CHECK_FALSE (rig.manager.isTopologyDirty());
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.manager.getRebuildCount() == 1);    // unverändert
 }
 
 //==============================================================================
 TEST_CASE ("Preset-Load: Container-Austausch ergibt einen einzigen Rebuild", "[GraphManager]")
 {
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
-
-    auto root = makeRootTree();
-    juce::AudioProcessorGraph graph;
-    conduit::GraphFader fader;
-    conduit::ModuleFactory factory;
-    conduit::registerDefaultModules (factory);
-    conduit::GraphManager manager (root, graph, fader, factory);
+    TestRig rig;
 
     // Geladenes Preset mit eigener Topologie
     auto loaded = makeRootTree();
     auto loadedNodes = loaded.getChildWithName (conduit::id::nodes);
     for (int i = 0; i < 3; ++i)
-        loadedNodes.appendChild (makeModuleNode (conduit::AttenuatorModule::staticModuleId), nullptr);
+        loadedNodes.appendChild (makeModuleNode (attenuatorId), nullptr);
 
     // Preset-Load-Pfad aus EngineProcessor::setStateInformation():
     // Container werden als ganze Subtrees ersetzt (parent ist der Root)
-    root.copyPropertiesAndChildrenFrom (loaded, nullptr);
+    rig.root.copyPropertiesAndChildrenFrom (loaded, nullptr);
 
-    REQUIRE (manager.isTopologyDirty());
-    manager.flushPendingTopologyUpdate();
-    CHECK (manager.getRebuildCount() == 1);
-    CHECK (graph.getNumNodes() == 3);
+    REQUIRE (rig.manager.isTopologyDirty());
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.manager.getRebuildCount() == 1);
+    CHECK (rig.graph.getNumNodes() == 3);
 }
 
 //==============================================================================
 TEST_CASE ("Graph-Mutationen: Tree-Nodes werden zu Graph-Nodes (add/remove)",
            "[GraphManager]")
 {
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TestRig rig;
 
-    auto root = makeRootTree();
-    juce::AudioProcessorGraph graph;
-    conduit::GraphFader fader;
-    conduit::ModuleFactory factory;
-    conduit::registerDefaultModules (factory);
-    conduit::GraphManager manager (root, graph, fader, factory);
+    auto attenuator = rig.addModuleNode (attenuatorId);
 
-    auto nodes = root.getChildWithName (conduit::id::nodes);
-    auto attenuator = makeModuleNode (conduit::AttenuatorModule::staticModuleId);
-    nodes.appendChild (attenuator, nullptr);
-
-    manager.flushPendingTopologyUpdate();
-    CHECK (graph.getNumNodes() == 1);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.graph.getNumNodes() == 1);
     CHECK (attenuator.getProperty (conduit::id::nodeError).toString().isEmpty());
 
-    nodes.removeChild (attenuator, nullptr);
-    manager.flushPendingTopologyUpdate();
-    CHECK (graph.getNumNodes() == 0);
+    rig.nodes().removeChild (attenuator, nullptr);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.graph.getNumNodes() == 0);
 }
 
 //==============================================================================
 TEST_CASE ("Graph-Mutationen: Connections werden aus dem Tree synchronisiert",
            "[GraphManager]")
 {
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TestRig rig;
 
-    auto root = makeRootTree();
-    juce::AudioProcessorGraph graph;
-    conduit::GraphFader fader;
-    conduit::ModuleFactory factory;
-    conduit::registerDefaultModules (factory);
-    conduit::GraphManager manager (root, graph, fader, factory);
-
-    auto nodes       = root.getChildWithName (conduit::id::nodes);
-    auto connections = root.getChildWithName (conduit::id::connections);
-
-    auto source = makeModuleNode (conduit::AttenuatorModule::staticModuleId);
-    auto dest   = makeModuleNode (conduit::AttenuatorModule::staticModuleId);
-    nodes.appendChild (source, nullptr);
-    nodes.appendChild (dest, nullptr);
+    auto source = rig.addModuleNode (attenuatorId);
+    auto dest   = rig.addModuleNode (attenuatorId);
 
     // Stereo-Kabel: L→L, R→R
     auto left  = makeConnection (source, 0, dest, 0);
     auto right = makeConnection (source, 1, dest, 1);
-    connections.appendChild (left, nullptr);
-    connections.appendChild (right, nullptr);
+    rig.connections().appendChild (left, nullptr);
+    rig.connections().appendChild (right, nullptr);
 
-    manager.flushPendingTopologyUpdate();
-    CHECK (graph.getNumNodes() == 2);
-    CHECK (graph.getConnections().size() == 2u);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.graph.getNumNodes() == 2);
+    CHECK (rig.graph.getConnections().size() == 2u);
 
     // Kabel ziehen: ein Connection-Child entfernen
-    connections.removeChild (right, nullptr);
-    manager.flushPendingTopologyUpdate();
-    CHECK (graph.getConnections().size() == 1u);
+    rig.connections().removeChild (right, nullptr);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.graph.getConnections().size() == 1u);
 
     // Node löschen reißt auch sein verbliebenes Kabel mit
-    nodes.removeChild (dest, nullptr);
-    manager.flushPendingTopologyUpdate();
-    CHECK (graph.getNumNodes() == 1);
-    CHECK (graph.getConnections().size() == 0u);
+    rig.nodes().removeChild (dest, nullptr);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.graph.getNumNodes() == 1);
+    CHECK (rig.graph.getConnections().size() == 0u);
 }
 
 //==============================================================================
 TEST_CASE ("Async Prepare: unbekannte moduleId → nodeError, kein Graph-Node, kein Retry",
            "[GraphManager]")
 {
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TestRig rig;
 
-    auto root = makeRootTree();
-    juce::AudioProcessorGraph graph;
-    conduit::GraphFader fader;
-    conduit::ModuleFactory factory;
-    conduit::registerDefaultModules (factory);
-    conduit::GraphManager manager (root, graph, fader, factory);
+    auto unknown = rig.addModuleNode ("gibts_nicht");
 
-    auto nodes = root.getChildWithName (conduit::id::nodes);
-    auto unknown = makeModuleNode ("gibts_nicht");
-    nodes.appendChild (unknown, nullptr);
-
-    manager.flushPendingTopologyUpdate();
-    CHECK (graph.getNumNodes() == 0);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.graph.getNumNodes() == 0);
     CHECK (unknown.getProperty (conduit::id::nodeError).toString().isNotEmpty());
 
     // Kein Retry-Loop: der nächste Swap überspringt den Fehler-Node,
     // gesunde Module sind nicht betroffen
-    nodes.appendChild (makeModuleNode (conduit::AttenuatorModule::staticModuleId), nullptr);
-    manager.flushPendingTopologyUpdate();
-    CHECK (graph.getNumNodes() == 1);
+    rig.addModuleNode (attenuatorId);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.graph.getNumNodes() == 1);
 }
 
 //==============================================================================
 TEST_CASE ("Async Prepare: fehlschlagendes prepareForGraph → nodeError, Modul nicht im Graph",
            "[GraphManager]")
 {
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TestRig rig;
 
-    auto root = makeRootTree();
-    juce::AudioProcessorGraph graph;
-    conduit::GraphFader fader;
-    conduit::ModuleFactory factory;
-    registerTestModules (factory);
-    conduit::GraphManager manager (root, graph, fader, factory);
+    auto failing = rig.addModuleNode ("failing_test_module");
 
-    auto nodes = root.getChildWithName (conduit::id::nodes);
-    auto failing = makeModuleNode ("failing_test_module");
-    nodes.appendChild (failing, nullptr);
-
-    manager.flushPendingTopologyUpdate();
-    CHECK (graph.getNumNodes() == 0);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.graph.getNumNodes() == 0);
     CHECK (failing.getProperty (conduit::id::nodeError).toString()
                == "Allokation fehlgeschlagen (Test)");
 }
@@ -307,76 +273,140 @@ TEST_CASE ("Async Prepare: fehlschlagendes prepareForGraph → nodeError, Modul 
 //==============================================================================
 TEST_CASE ("Graph-Swap: vollständiger Fade-Zyklus nach CLAUDE.md 5.2", "[GraphManager]")
 {
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TestRig rig;
+    rig.fader.prepare (48000.0);  // Audio "läuft" → Swap nur mit Fade-Zyklus
 
-    auto root = makeRootTree();
-    juce::AudioProcessorGraph graph;
-    conduit::GraphFader fader;
-    fader.prepare (48000.0);  // Audio "läuft" → Swap nur mit Fade-Zyklus
-    conduit::ModuleFactory factory;
-    conduit::registerDefaultModules (factory);
-    conduit::GraphManager manager (root, graph, fader, factory);
-
-    auto nodes = root.getChildWithName (conduit::id::nodes);
-    nodes.appendChild (makeModuleNode (conduit::AttenuatorModule::staticModuleId), nullptr);
-    REQUIRE (manager.isTopologyDirty());
+    rig.addModuleNode (attenuatorId);
+    REQUIRE (rig.manager.isTopologyDirty());
 
     // Schritt 1 + 2: erster Loop-Durchlauf prepariert das Modul und startet
     // den Fade-Out — die Topologie wird noch NICHT geändert
-    manager.flushPendingTopologyUpdate();
-    CHECK (manager.getRebuildCount() == 0);
-    CHECK (graph.getNumNodes() == 0);
-    CHECK (manager.isWaitingForSilence());
-    CHECK (fader.getCurrentPhase() == conduit::GraphFader::Phase::fadingOut);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.manager.getRebuildCount() == 0);
+    CHECK (rig.graph.getNumNodes() == 0);
+    CHECK (rig.manager.isWaitingForSilence());
+    CHECK (rig.fader.getCurrentPhase() == conduit::GraphFader::Phase::fadingOut);
 
     // Schritt 3 (Self-Re-Dispatch): solange keine Stille gemeldet ist,
     // findet kein Swap statt
-    manager.flushPendingTopologyUpdate();
-    CHECK (manager.getRebuildCount() == 0);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.manager.getRebuildCount() == 0);
 
     // Coalescing während des Fade-Outs: neue Änderungen landen im selben Swap
-    nodes.appendChild (makeModuleNode (conduit::AttenuatorModule::staticModuleId), nullptr);
-    nodes.appendChild (makeModuleNode (conduit::AttenuatorModule::staticModuleId), nullptr);
+    rig.addModuleNode (attenuatorId);
+    rig.addModuleNode (attenuatorId);
 
     // Audio Thread rampt auf Stille
-    pumpUntilSilent (fader);
-    REQUIRE (fader.isFadeOutComplete());
+    pumpUntilSilent (rig.fader);
+    REQUIRE (rig.fader.isFadeOutComplete());
 
     // Schritt 3: Topologie-Swap auf Stille, dann Schritt 4: Fade-In
-    manager.flushPendingTopologyUpdate();
-    CHECK (manager.getRebuildCount() == 1);   // 3 Änderungen → 1 Swap
-    CHECK (graph.getNumNodes() == 3);         // alle 3 Module im Graph
-    CHECK_FALSE (manager.isWaitingForSilence());
-    CHECK_FALSE (manager.isTopologyDirty());
-    CHECK (fader.getCurrentPhase() == conduit::GraphFader::Phase::fadingIn);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.manager.getRebuildCount() == 1);   // 3 Änderungen → 1 Swap
+    CHECK (rig.graph.getNumNodes() == 3);         // alle 3 Module im Graph
+    CHECK_FALSE (rig.manager.isWaitingForSilence());
+    CHECK_FALSE (rig.manager.isTopologyDirty());
+    CHECK (rig.fader.getCurrentPhase() == conduit::GraphFader::Phase::fadingIn);
 }
 
 //==============================================================================
 TEST_CASE ("Graph-Swap: gestopptes Audio während des Fade-Outs blockiert den Swap nicht",
            "[GraphManager]")
 {
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TestRig rig;
+    rig.fader.prepare (48000.0);
 
-    auto root = makeRootTree();
-    juce::AudioProcessorGraph graph;
-    conduit::GraphFader fader;
-    fader.prepare (48000.0);
-    conduit::ModuleFactory factory;
-    conduit::registerDefaultModules (factory);
-    conduit::GraphManager manager (root, graph, fader, factory);
+    rig.addModuleNode (attenuatorId);
 
-    root.getChildWithName (conduit::id::nodes)
-        .appendChild (makeModuleNode (conduit::AttenuatorModule::staticModuleId), nullptr);
-
-    manager.flushPendingTopologyUpdate();
-    REQUIRE (manager.isWaitingForSilence());
+    rig.manager.flushPendingTopologyUpdate();
+    REQUIRE (rig.manager.isWaitingForSilence());
 
     // Audio stoppt mitten im Fade-Out (EngineProcessor::releaseResources) —
     // der Audio Thread wird nie Stille melden
-    fader.reset();
+    rig.fader.reset();
 
-    manager.flushPendingTopologyUpdate();
-    CHECK (manager.getRebuildCount() == 1);   // Swap ohne Fade statt Endlos-Dispatch
-    CHECK (graph.getNumNodes() == 1);
-    CHECK_FALSE (manager.isWaitingForSilence());
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.manager.getRebuildCount() == 1);   // Swap ohne Fade statt Endlos-Dispatch
+    CHECK (rig.graph.getNumNodes() == 1);
+    CHECK_FALSE (rig.manager.isWaitingForSilence());
+}
+
+//==============================================================================
+TEST_CASE ("Zweiphasiges Delete (5.3): Phase 1 → Deleting, Phase 2 entfernt Node + Kabel undo-fähig",
+           "[GraphManager]")
+{
+    TestRig rig;
+
+    auto source = rig.addModuleNode (attenuatorId);
+    auto dest   = rig.addModuleNode (attenuatorId);
+    rig.connections().appendChild (makeConnection (source, 0, dest, 0), nullptr);
+
+    rig.manager.flushPendingTopologyUpdate();
+    REQUIRE (rig.graph.getNumNodes() == 2);
+    REQUIRE (rig.graph.getConnections().size() == 1u);
+
+    const auto sourceUuid = TestRig::uuidOf (source);
+    REQUIRE (rig.manager.requestNodeDelete (sourceUuid));
+
+    // Phase 1: nodeState → Deleting, Node und Graph noch unverändert —
+    // UI-Components entkoppeln sich jetzt über ihren Listener
+    CHECK (source.getProperty (conduit::id::nodeState).toString() == "Deleting");
+    CHECK (rig.nodes().getNumChildren() == 2);
+    CHECK (rig.graph.getNumNodes() == 2);
+
+    // Phase 2 im nächsten Loop-Durchlauf: Subtree + Kabel weg, Graph synchron
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.nodes().getNumChildren() == 1);
+    CHECK (rig.connections().getNumChildren() == 0);
+    CHECK (rig.graph.getNumNodes() == 1);
+    CHECK (rig.graph.getConnections().size() == 0u);
+
+    // Undo stellt Node + Kabel in einem Schritt wieder her,
+    // nodeState wird beim Re-Materialisieren auf Active zurückgesetzt
+    REQUIRE (rig.undoManager.undo());
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.nodes().getNumChildren() == 2);
+    CHECK (rig.graph.getNumNodes() == 2);
+    CHECK (rig.graph.getConnections().size() == 1u);
+
+    const auto restored = rig.nodes().getChildWithProperty (conduit::id::nodeId, sourceUuid);
+    REQUIRE (restored.isValid());
+    CHECK (restored.getProperty (conduit::id::nodeState).toString() == "Active");
+}
+
+//==============================================================================
+TEST_CASE ("Zweiphasiges Delete: UI-Referenz blockiert Phase 2 (Zombie-UI-Schutz)",
+           "[GraphManager]")
+{
+    TestRig rig;
+
+    auto node = rig.addModuleNode (attenuatorId);
+    rig.manager.flushPendingTopologyUpdate();
+    REQUIRE (rig.graph.getNumNodes() == 1);
+
+    const auto nodeUuid = TestRig::uuidOf (node);
+
+    // Eine UI-Component ist an den Subtree gebunden
+    rig.uiRegistry.acquire (nodeUuid);
+
+    REQUIRE (rig.manager.requestNodeDelete (nodeUuid));
+    rig.manager.flushPendingTopologyUpdate();
+
+    // Phase 2 wartet: Subtree und Graph-Node bleiben bestehen
+    CHECK (rig.nodes().getNumChildren() == 1);
+    CHECK (rig.graph.getNumNodes() == 1);
+
+    // Die letzte UI-Component koppelt ab → Registry-Callback stößt Phase 2 an
+    rig.uiRegistry.release (nodeUuid);
+    rig.manager.flushPendingTopologyUpdate();
+    CHECK (rig.nodes().getNumChildren() == 0);
+    CHECK (rig.graph.getNumNodes() == 0);
+}
+
+//==============================================================================
+TEST_CASE ("requestNodeDelete: unbekannte nodeId wird abgelehnt", "[GraphManager]")
+{
+    TestRig rig;
+
+    CHECK_FALSE (rig.manager.requestNodeDelete ("nicht-vorhanden"));
 }

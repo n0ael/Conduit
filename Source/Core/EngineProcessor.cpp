@@ -86,7 +86,9 @@ void EngineProcessor::setStateInformation (const void* data, int sizeInBytes)
 }
 
 //==============================================================================
-juce::ValueTree EngineProcessor::getRootState() noexcept     { return rootState; }
-juce::UndoManager& EngineProcessor::getUndoManager() noexcept { return undoManager; }
+juce::ValueTree EngineProcessor::getRootState() noexcept       { return rootState; }
+juce::UndoManager& EngineProcessor::getUndoManager() noexcept  { return undoManager; }
+GraphManager& EngineProcessor::getGraphManager() noexcept      { return graphManager; }
+NodeUiRegistry& EngineProcessor::getNodeUiRegistry() noexcept  { return nodeUiRegistry; }
 
 } // namespace conduit

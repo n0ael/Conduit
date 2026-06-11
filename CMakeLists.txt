@@ -38,6 +38,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/EngineEditor.cpp
     Source/Core/GraphFader.cpp
     Source/Core/GraphManager.cpp
+    Source/Core/NodeUiRegistry.cpp
     Source/Modules/ConduitModule.cpp
     Source/Modules/ModuleFactory.cpp
     Source/Modules/AttenuatorModule.cpp
@@ -49,6 +50,7 @@ target_sources(Conduit PRIVATE
     Source/Core/EngineEditor.h
     Source/Core/GraphFader.h
     Source/Core/GraphManager.h
+    Source/Core/NodeUiRegistry.h
     Source/Modules/ConduitModule.h
     Source/Modules/ModuleFactory.h
     Source/Modules/UtilityModule.h
@@ -126,6 +128,7 @@ if(CONDUIT_BUILD_TESTS)
         ${CONDUIT_TEST_CPP_SOURCES}
         Source/Core/GraphFader.cpp
         Source/Core/GraphManager.cpp
+        Source/Core/NodeUiRegistry.cpp
         Source/Modules/ConduitModule.cpp
         Source/Modules/ModuleFactory.cpp
         Source/Modules/AttenuatorModule.cpp
