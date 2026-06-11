@@ -10,6 +10,7 @@
 #include "Core/NodeUiRegistry.h"
 #include "UI/PortComponent.h"
 #include "UI/ScopeDisplay.h"
+#include "UI/SequencerControlPanel.h"
 #include "UI/StepGridDisplay.h"
 
 namespace conduit
@@ -101,7 +102,9 @@ private:
     std::unique_ptr<ScopeDisplay> scopeDisplay;
 
     // Nur bei Sequencer-Nodes (factoryId == "sequencer") — 4×16-Grid
+    // plus Urzwerg-Kontrollleiste (ersetzt den generischen Parameter-Slider)
     std::unique_ptr<StepGridDisplay> stepGrid;
+    std::unique_ptr<SequencerControlPanel> sequencerControls;
 
     std::unique_ptr<juce::VBlankAttachment> teardownVBlank;
     bool tearingDown = false;

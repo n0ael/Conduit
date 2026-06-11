@@ -62,7 +62,9 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
     makePorts (true,  (int) nodeTree.getProperty (id::numInputChannels,  0), inputPorts);
     makePorts (false, (int) nodeTree.getProperty (id::numOutputChannels, 0), outputPorts);
 
-    if (const auto parameter = firstParameter(); parameter.isValid())
+    // Sequencer-Kacheln haben eine eigene Kontrollleiste — kein generischer Slider
+    if (const auto parameter = firstParameter();
+        parameter.isValid() && factoryKey != StepSequencerModule::staticModuleId)
     {
         parameterSlider.setRange ((double) parameter.getProperty (id::paramMin, 0.0),
                                   (double) parameter.getProperty (id::paramMax, 1.0), 0.0);
@@ -93,7 +95,10 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
     {
         stepGrid = std::make_unique<StepGridDisplay> (nodeTree, graphManager);
         addAndMakeVisible (*stepGrid);
-        setSize (492, 300);
+
+        sequencerControls = std::make_unique<SequencerControlPanel> (nodeTree);
+        addAndMakeVisible (*sequencerControls);
+        setSize (492, 380);
     }
     else
     {
@@ -130,6 +135,9 @@ void NodeComponent::beginTeardown()
 
     if (stepGrid != nullptr)
         stepGrid->stopUpdates();
+
+    if (sequencerControls != nullptr)
+        sequencerControls->setEnabled (false);
 
     repaint();
 
@@ -282,9 +290,11 @@ void NodeComponent::resized()
                                      .reduced (24, 8));  // Platz für die Port-Hit-Zonen
 
     if (stepGrid != nullptr)
-        stepGrid->setBounds (getLocalBounds().withTrimmedTop (touchTarget)
-                                 .withTrimmedBottom (touchTarget)   // rate-Slider unten
-                                 .reduced (24, 4));
+    {
+        auto sequencerArea = getLocalBounds().withTrimmedTop (touchTarget).reduced (24, 4);
+        sequencerControls->setBounds (sequencerArea.removeFromBottom (SequencerControlPanel::preferredHeight));
+        stepGrid->setBounds (sequencerArea.withTrimmedBottom (6));
+    }
 
     const auto placePorts = [this] (std::vector<std::unique_ptr<PortComponent>>& ports)
     {

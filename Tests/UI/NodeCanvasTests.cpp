@@ -176,6 +176,7 @@ TEST_CASE ("NodeCanvas: Sequencer-Node bekommt die Grid-Kachel", "[ui]")
     auto* component = rig.canvas.findNodeComponent (UiTestRig::uuidOf (node));
     REQUIRE (component != nullptr);
     REQUIRE (component->getWidth() == 492);   // große Kachel mit StepGridDisplay
+    REQUIRE (component->getHeight() == 380);  // inkl. Urzwerg-Kontrollleiste
     REQUIRE (rig.uiRegistry.getRefCount (UiTestRig::uuidOf (node)) == 1);
 
     // Teardown-Flow unverändert (Timer/Listener sauber gestoppt)

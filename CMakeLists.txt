@@ -100,6 +100,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/NodeComponent.cpp
     Source/UI/PortComponent.cpp
     Source/UI/ScopeDisplay.cpp
+    Source/UI/SequencerControlPanel.cpp
     Source/UI/StepGridDisplay.cpp
 )
 
@@ -128,6 +129,7 @@ target_sources(Conduit PRIVATE
     Source/UI/NodeComponent.h
     Source/UI/PortComponent.h
     Source/UI/ScopeDisplay.h
+    Source/UI/SequencerControlPanel.h
     Source/UI/StepGridDisplay.h
     Source/Util/ScaleQuantizer.h
     Source/Util/SpscQueue.h
@@ -213,6 +215,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/SequencerTests.cpp
         Tests/Core/ThreadingStressTests.cpp
         Tests/UI/NodeCanvasTests.cpp
+        Tests/UI/SequencerControlPanelTests.cpp
         Tests/Util/ScaleQuantizerTests.cpp
         Tests/Util/SpscQueueTests.cpp
     )
@@ -236,6 +239,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/NodeComponent.cpp
         Source/UI/PortComponent.cpp
         Source/UI/ScopeDisplay.cpp
+        Source/UI/SequencerControlPanel.cpp
         Source/UI/StepGridDisplay.cpp
     )
 
