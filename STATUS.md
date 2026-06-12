@@ -16,7 +16,24 @@
 
 ## Aktueller Meilenstein (Juni 2026 — abgeschlossen)
 
-**Link Audio, Schritt 1 — LinkClock auf ableton::LinkAudio (CLAUDE.md 7.2, verhaltensneutral):**
+**Link Audio, Schritt 2 — LinkAudioSendModule (CLAUDE.md 7.2, factoryId `link_audio_send`):**
+- **Modul-Hierarchie 4.1 materialisiert:** `IOModule` + `NetworkIOModule` als Basisklassen; `LinkAudioSendModule` (2 In / 2 Out Stereo, Output = reines Pass-Through — mitten in eine Kette patchbar) implementiert `ILinkAudioClient` (neues Mixin-Interface 4.2) + `IClockSlave`
+- **RT-Schreibpfad:** `LinkClock::Sink::commitFromClockState()` [Audio Thread, RT-safe] — `captureClockState()` stasht den SessionState des Blocks im Pimpl (Audio-Thread-only, kein Atomic), commit nutzt exakt die SessionState/Beat/Quantum-Basis des lokalen Renderings; **kein zweites captureAudioSessionState im Modul, der `ClockState` brauchte KEINE Erweiterung** (beatAtBlockStart + sampleRate standen schon drin). Float→Int16 mit TPDF-Dither (LCG-Differenz zweier Uniforms, ±1 LSB, deterministisch pro Seed) in vorallokierten Member-Buffer; Sink-Größe in SAMPLES (`samplesPerBlock × Kanäle`)
+- **Sink-Lifecycle:** GraphManager injiziert Clock + moduleId via `setLinkClock()`/`ILinkAudioClient` VOR `prepareForGraph` (Sink entsteht in `prepareToPlay`, Kanal-Name == moduleId); `renameNode` (auch Undo) propagiert live via `sink.setName()`; Delete Phase 1 ruft `releaseSessionResources()` — Sink sofort weg (Pattern OscController), `enableAudio`-Refcount balanciert über Phase 1 UND Destruktor (Preset-Load/Shutdown ohne Phase 1)
+- **Epoch-Handshake gegen das Teardown-Race:** Phase 1 trennt den Audio-Thread per `rtSink`-Atomic (seq_cst), die Sink-Destruktion wartet via AsyncUpdater-Self-Re-Dispatch (Muster 5.2 Schritt 3), bis nach dem Store ein neuer Block begonnen hat (`blocksProcessed`-Zähler); 100-ms-Deadline für gestopptes Audio. Begründung der seq_cst-Korrektheit in der Modul-Doku
+- **Lebensdauer:** `linkClock` im EngineProcessor VOR `graph` deklariert (Module im Graph halten Sinks — Clock muss die Graph-Destruktion überleben), `WeakReference<LinkClock>` als Shutdown-Netz im Modul
+- **UI:** `LinkAudioStatusBadge` am NodeComponent (LED + Text: offline/announced/streaming, 10 Hz, transiente Modul-Auflösung pro Tick — Muster ScopeDisplay, kein Processor-Pointer). Grenze dokumentiert: Erkennung über commit-Aktivität — Overrun ist von „kein Subscriber" über die Link-API nicht unterscheidbar (fällt auf announced zurück); ohne laufendes Audio ändert sich der Status nicht
+- **Tests (`Tests/Core/LinkAudioSendTests.cpp`):** Dither-Statistik (Mittelwert ~0, Fehler ≤ 1.5 LSB, beide Nachbarstufen getroffen, Seed-deterministisch), Stereo-Interleaving mit Sentinel-Schutz (Frames/Samples-Grenzfall), Sink-Kapazität in SAMPLES + wächst-nur-Semantik, GraphManager-Lifecycle end-to-end (Materialisierung, Rename + Undo, Delete Phase 1/2, Refcount über zwei Module), Destruktor-Balance ohne Phase 1, Retire-Handshake unter echtem Audio-Thread (TSan-Ziel)
+
+**Hardware-Smoke-Checkliste Link Audio Send gegen Live 12 Beta (12.06.2026, gleiche Maschine, 48 kHz / 480 Samples):**
+- [x] Peer „Conduit" sichtbar, Kanal erscheint unter der moduleId (`link_audio_send_1`)
+- [x] Live subscribt (Track-Input „Conduit") → Audio kommt an, Badge wechselt auf „streaming" (grün); Live-Preferences zeigen „Connected, 3.93 ms buffered"
+- [x] Rename in Conduit (`drums`) → Kanal-Name in Live folgt live, Stream läuft ohne Unterbrechung weiter
+- [x] Delete des Moduls → Kanal verschwindet aus der Session; Lives UI quittiert den Stream-Abriss erst nach ~5 s (Live-seitige Erkennungslatenz, Beta — Sink-seitig passiert der Reset sofort in Phase 1)
+- [ ] 30 min Streaming bei 48 kHz / 32 Samples ohne xruns (Badge bleibt grün) — Langzeitlauf offen
+- Stolperstein dokumentiert: „keine Peers" trotz aktivem Link-Schalter in Live → Lives Link-Engine hatte den UDP-Port 20808 nicht gebunden; kompletter Live-Neustart bindet neu (objektiv prüfbar via `Get-NetUDPEndpoint -LocalPort 20808` — beide Apps müssen gelistet sein)
+
+**Davor: Link Audio, Schritt 1 — LinkClock auf ableton::LinkAudio (CLAUDE.md 7.2, verhaltensneutral):**
 - `LinkClock`-Pimpl hält jetzt die einzige `ableton::LinkAudio`-Instanz (ERSETZT `ableton::Link`, nie parallel) — Ctor `(bpm, peerName)`, Default-Peer-Name "Conduit"; `enableLinkAudio(false)` initial, Audio aktiviert erst das erste Send-Modul
 - Neue API [Message Thread]: `enableAudio(bool)` mit Refcount (n aktive Sinks → enabled), `isAudioEnabled()` (RT-safe), `peerName()`/`setPeerName()`, `createSink(name, maxNumSamples)` → opaker Pimpl-Wrapper `LinkClock::Sink` (Design im Header dokumentiert: Link-/asio-Header bleiben in der .cpp, RT-Schreib-API folgt mit dem LinkAudioSendModule)
 - `ChannelsChangedCallback` (Link-Thread) wird via `MessageManager::callAsync` + `WeakReference` auf den Message Thread gemarshallt; LinkClock ist nach außen `juce::ChangeBroadcaster`
@@ -75,7 +92,7 @@
 
 ## Nächste Kandidaten (offen, Reihenfolge nicht festgelegt)
 
-- LinkAudioSendModule (CLAUDE.md 7.2, Schritt 2): Sink-Schreib-API (TPDF-Dither Float→Int16, `BufferHandle::commit` aus dem ClockState des Blocks), Sink-Lifecycle ins zweiphasige Delete
+- Link Audio Receive (CLAUDE.md 7.2, Schritt 3): `LinkAudioSource` + `beginBeats()`-Alignment (nie naiv FIFO'en — v1-Drift-Lektion), Monitoring-Latenz dokumentieren; Kanal-Discovery-UI über den bestehenden ChannelsChanged-Broadcast der LinkClock
 - Mixer-Modul (mehrere Inputs) — Capture-Kanal-Buttons wandern dann vom CapturePanel in die Channel-Strips, `stripName` ersetzt `in{N}` im Export-Dateinamen
 - Live-FIFO (kontinuierliches Multitrack-Recording) über die bestehende CaptureWriter-Pipeline (TrackSource-Interface liegt bereit)
 - Capture-Restpunkte (aus der Baustein-5-Planung): LinkBox-Zielordner (feste Partition vs. USB-Stick-Erkennung "Take mitnehmen" — Writer nimmt das Verzeichnis schon pro Job, nur ein Mount-Watcher fehlt, gehört zum LinkBox-Meilenstein); 24-bit-Packing im RAM (−25 %) erst nach Messung via `getCommittedBytes()` — Float bleibt Default

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "Interfaces/IClockSlave.h"
+#include "Interfaces/ILinkAudioClient.h"
 #include "Interfaces/IStochastic.h"
 #include "Modules/ModuleFactory.h"
 #include "NodeUiRegistry.h"
@@ -267,6 +268,11 @@ void GraphManager::setClockBus (const ClockBus* bus) noexcept
     clockBus = bus;
 }
 
+void GraphManager::setLinkClock (LinkClock* clock) noexcept
+{
+    linkClock = clock;
+}
+
 //==============================================================================
 bool GraphManager::isTopologyContainer (const juce::ValueTree& tree) noexcept
 {
@@ -281,9 +287,28 @@ void GraphManager::valueTreePropertyChanged (juce::ValueTree& tree, const juce::
     if (property == id::nodeState && tree.hasType (id::node)
         && tree.getProperty (id::nodeState).toString() == toString (NodeState::deleting))
     {
-        pendingDeletes[tree.getProperty (id::nodeId).toString()]
-            = tree.getProperty (id::moduleId).toString();
+        const auto nodeUuid = tree.getProperty (id::nodeId).toString();
+
+        // Phase-1-Hook (7.2): Link-Audio-Sinks SOFORT zurückziehen — wie die
+        // OSC-Deregistrierung nicht erst beim Subtree-Remove, sonst sehen
+        // die Peers Zombie-Kanäle bis Phase 2.
+        if (auto* linkAudioClient = dynamic_cast<ILinkAudioClient*> (getModuleFor (nodeUuid)))
+            linkAudioClient->releaseSessionResources();
+
+        pendingDeletes[nodeUuid] = tree.getProperty (id::moduleId).toString();
         triggerAsyncUpdate();
+        return;
+    }
+
+    // Rename der named_id (renameNode, auch via Undo): Kanal-Name eines
+    // Link-Audio-Sinks folgt live (7.2). Noch nicht materialisierte Module
+    // bekommen die aktuelle moduleId ohnehin bei der Materialisierung.
+    if (property == id::moduleId && tree.hasType (id::node))
+    {
+        if (auto* linkAudioClient = dynamic_cast<ILinkAudioClient*> (
+                getModuleFor (tree.getProperty (id::nodeId).toString())))
+            linkAudioClient->moduleIdRenamed (tree.getProperty (id::moduleId).toString());
+
         return;
     }
 
@@ -480,6 +505,12 @@ std::unique_ptr<ConduitModule> GraphManager::materializeModule (juce::ValueTree 
         nodeTree.setProperty (id::nodeError, "Unbekanntes Modul: " + factoryKey, nullptr);
         return nullptr;
     }
+
+    // Link-Audio-Kontext VOR prepareForGraph (7.2): der Sink entsteht in
+    // prepareToPlay und braucht Clock + moduleId (Kanal-Name == moduleId)
+    if (auto* linkAudioClient = dynamic_cast<ILinkAudioClient*> (module.get()))
+        linkAudioClient->setLinkAudioContext (linkClock,
+            nodeTree.getProperty (id::moduleId).toString());
 
     // Läuft Audio noch nicht, werden die Latenz-Ziele aus CLAUDE.md 3.2
     // angenommen — graph.prepareToPlay() re-prepariert später mit Ist-Werten.

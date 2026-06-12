@@ -12,6 +12,7 @@
 namespace conduit
 {
 
+class LinkClock;
 class ModuleFactory;
 class NodeUiRegistry;
 
@@ -130,6 +131,13 @@ public:
         frei (Tests). Message Thread, vor den ersten addModuleNode-Aufrufen. */
     void setClockBus (const ClockBus* bus) noexcept;
 
+    /** Link-Audio-Kontext für ILinkAudioClient-Module (7.2) — wird bei der
+        Materialisierung VOR prepareForGraph injiziert (der Sink entsteht in
+        prepareToPlay und braucht Clock + moduleId). Die Clock muss jedes
+        Modul überdauern (Owner: EngineProcessor). nullptr → Module bleiben
+        ohne Session-Kanal (Tests). Message Thread. */
+    void setLinkClock (LinkClock* clock) noexcept;
+
     //==========================================================================
     /** Live-Modul-Instanz zu einer Tree-nodeId — nullptr solange das Modul
         noch nicht materialisiert ist (5.2 Schritt 1–3) oder nodeError gesetzt
@@ -239,6 +247,9 @@ private:
 
     // Takt-Verteiler für IClockSlaves (Owner: EngineProcessor)
     const ClockBus* clockBus = nullptr;
+
+    // Link-Audio-Kontext für ILinkAudioClients (Owner: EngineProcessor)
+    LinkClock* linkClock = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GraphManager)
 };

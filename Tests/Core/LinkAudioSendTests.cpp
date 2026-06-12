@@ -1,0 +1,318 @@
+#include <atomic>
+#include <thread>
+#include <vector>
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+#include "Core/GraphFader.h"
+#include "Core/GraphManager.h"
+#include "Core/LinkClock.h"
+#include "Core/NodeUiRegistry.h"
+#include "Modules/LinkAudioSendModule.h"
+#include "Modules/ModuleFactory.h"
+
+using Catch::Approx;
+
+namespace
+{
+
+juce::ValueTree makeRootTree()
+{
+    juce::ValueTree root (conduit::id::root);
+    root.appendChild (juce::ValueTree (conduit::id::nodes),               nullptr);
+    root.appendChild (juce::ValueTree (conduit::id::connections),         nullptr);
+    root.appendChild (juce::ValueTree (conduit::id::calibrationProfiles), nullptr);
+    return root;
+}
+
+juce::String uuidOf (const juce::ValueTree& nodeTree)
+{
+    return nodeTree.getProperty (conduit::id::nodeId).toString();
+}
+
+} // namespace
+
+//==============================================================================
+TEST_CASE ("TPDF-Dither: Mittelwert ~0, Fehler in ±1.5 LSB, deterministisch pro Seed", "[linkaudio]")
+{
+    constexpr int numSamples = 200000;
+    constexpr float input = 0.25f;                       // 8191.75 — liegt zwischen zwei LSB-Stufen
+    constexpr double ideal = 0.25 * 32767.0;
+
+    std::vector<float> signal (numSamples, input);
+    const float* channels[] = { signal.data() };
+    std::vector<std::int16_t> quantized (numSamples, 0);
+
+    std::uint32_t seed = 0x6c078965u;
+    conduit::LinkAudioSendModule::convertToInt16Tpdf (channels, 1, numSamples,
+                                                      quantized.data(), seed);
+
+    double errorSum = 0.0;
+    double maxAbsError = 0.0;
+    bool sawBothNeighbours = false;
+    int count8191 = 0, count8192 = 0;
+
+    for (const auto value : quantized)
+    {
+        const auto error = static_cast<double> (value) - ideal;
+        errorSum += error;
+        maxAbsError = juce::jmax (maxAbsError, std::abs (error));
+        count8191 += value == 8191 ? 1 : 0;
+        count8192 += value == 8192 ? 1 : 0;
+    }
+
+    sawBothNeighbours = count8191 > 0 && count8192 > 0;
+
+    // TPDF: unbiased (Mittelwert des Fehlers → 0), Spitze ±1 LSB über der
+    // Rundung (Fehlerfenster [-1.5, +1.5] LSB), und der Wert zwischen den
+    // Stufen MUSS auf beide Nachbarstufen verteilt werden (kein nacktes
+    // Truncate/Round — das war der Sinn des Dithers)
+    REQUIRE (std::abs (errorSum / numSamples) < 0.05);
+    REQUIRE (maxAbsError <= 1.5);
+    REQUIRE (sawBothNeighbours);
+
+    // Deterministisch pro Seed (3.1) — identischer Lauf, identisches Ergebnis
+    std::vector<std::int16_t> rerun (numSamples, 0);
+    std::uint32_t seed2 = 0x6c078965u;
+    conduit::LinkAudioSendModule::convertToInt16Tpdf (channels, 1, numSamples,
+                                                      rerun.data(), seed2);
+    REQUIRE (rerun == quantized);
+    REQUIRE (seed2 == seed);
+}
+
+//==============================================================================
+TEST_CASE ("TPDF-Dither: Stereo interleaved, exakt numFrames × numChannels Samples", "[linkaudio]")
+{
+    constexpr int numFrames = 64;
+
+    std::vector<float> left  (numFrames,  0.5f);
+    std::vector<float> right (numFrames, -0.5f);
+    const float* channels[] = { left.data(), right.data() };
+
+    // Sentinels hinter dem Soll-Ende: der Konverter darf exakt
+    // numFrames × 2 Samples schreiben — der v1-Frames/Samples-Grenzfall
+    constexpr std::int16_t sentinel = 0x7abc;
+    std::vector<std::int16_t> dest (numFrames * 2 + 4, sentinel);
+
+    std::uint32_t seed = 1u;
+    conduit::LinkAudioSendModule::convertToInt16Tpdf (channels, 2, numFrames,
+                                                      dest.data(), seed);
+
+    for (int frame = 0; frame < numFrames; ++frame)
+    {
+        REQUIRE (std::abs (dest[(size_t) frame * 2]     - 16383.5) <= 1.5);  // L interleaved auf gerade Indizes
+        REQUIRE (std::abs (dest[(size_t) frame * 2 + 1] + 16383.5) <= 1.5);  // R auf ungerade
+    }
+
+    for (size_t i = (size_t) numFrames * 2; i < dest.size(); ++i)
+        REQUIRE (dest[i] == sentinel);
+}
+
+//==============================================================================
+TEST_CASE ("LinkClock::Sink: Kapazität in SAMPLES (Frames × Kanäle), wächst nur", "[linkaudio]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    conduit::LinkClock clock (120.0, "ConduitTest");
+    clock.prepare (48000.0);
+
+    // 32-Sample-Block, Stereo → 64 SAMPLES (7.2) — wer hier Frames anlegt,
+    // fällt durch
+    auto sink = clock.createSink ("samples_not_frames", 32 * 2);
+    REQUIRE (sink->getMaxNumSamples() == 64);
+
+    sink->requestMaxNumSamples (128);
+    REQUIRE (sink->getMaxNumSamples() == 128);
+
+    sink->requestMaxNumSamples (64);                  // schrumpfen ist ein Link-No-op
+    REQUIRE (sink->getMaxNumSamples() == 128);
+
+    // Commit ohne Subscriber: noBuffer — und niemals ein Crash. rejected
+    // bleibt Programmierfehlern vorbehalten (kein captureClockState).
+    std::vector<std::int16_t> samples (64, 0);
+
+    auto stale = sink->commitFromClockState (samples.data(), 32, 2, {});
+    REQUIRE (stale == conduit::LinkClock::Sink::CommitResult::rejected);  // kein Block-Stash
+
+    const auto state = clock.captureClockState (32);
+    auto result = sink->commitFromClockState (samples.data(), 32, 2, state);
+    REQUIRE (result == conduit::LinkClock::Sink::CommitResult::noBuffer);
+}
+
+//==============================================================================
+TEST_CASE ("LinkAudioSendModule: Sink-Lifecycle über den GraphManager (7.2)", "[linkaudio]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    auto root = makeRootTree();
+    juce::AudioProcessorGraph graph;
+    conduit::GraphFader fader;
+    conduit::ModuleFactory factory;
+    juce::UndoManager undoManager;
+    conduit::NodeUiRegistry uiRegistry;
+    conduit::GraphManager manager { root, graph, fader, factory, undoManager, uiRegistry };
+
+    conduit::registerDefaultModules (factory);
+
+    conduit::LinkClock clock (120.0, "ConduitTest");
+    clock.prepare (48000.0);
+    manager.setLinkClock (&clock);
+
+    conduit::ClockBus bus;
+    manager.setClockBus (&bus);
+
+    REQUIRE_FALSE (clock.isAudioEnabled());
+
+    //==========================================================================
+    // Materialisierung: Sink-Name == moduleId, Refcount aktiviert Audio
+    const auto node1 = manager.addModuleNode (conduit::LinkAudioSendModule::staticModuleId, {});
+    REQUIRE (node1.isValid());
+    manager.flushPendingTopologyUpdate();
+
+    auto* module1 = dynamic_cast<conduit::LinkAudioSendModule*> (manager.getModuleFor (uuidOf (node1)));
+    REQUIRE (module1 != nullptr);
+    REQUIRE (module1->getSinkName() == node1.getProperty (conduit::id::moduleId).toString());
+    REQUIRE (clock.isAudioEnabled());
+
+    // Zweites Modul → Refcount 2
+    const auto node2 = manager.addModuleNode (conduit::LinkAudioSendModule::staticModuleId, {});
+    manager.flushPendingTopologyUpdate();
+    REQUIRE (clock.isAudioEnabled());
+
+    //==========================================================================
+    // Rename propagiert live auf den Sink (sanitiert, undo-fähig)
+    REQUIRE (manager.renameNode (uuidOf (node1), "Drum Bus"));
+    REQUIRE (node1.getProperty (conduit::id::moduleId).toString() == "drum_bus");
+    REQUIRE (module1->getSinkName() == "drum_bus");
+
+    undoManager.undo();
+    REQUIRE (module1->getSinkName() == node1.getProperty (conduit::id::moduleId).toString());
+    REQUIRE (module1->getSinkName() != "drum_bus");
+
+    //==========================================================================
+    // Ohne Subscriber: Status announced (Sinks senden erst bei Source, 7.2)
+    bus.current = clock.captureClockState (32);
+    juce::AudioBuffer<float> buffer (2, 32);
+    buffer.clear();
+    juce::MidiBuffer midi;
+    module1->processBlock (buffer, midi);
+    REQUIRE (module1->getSendStatusForUi() == conduit::LinkAudioSendModule::SendStatus::announced);
+
+    //==========================================================================
+    // Delete Phase 1 (5.3): Sink sofort weg, Refcount −1 — Audio bleibt an
+    // (Modul 2 lebt), die Sink-Destruktion folgt nach dem Epoch-Handshake
+    REQUIRE (manager.requestNodeDelete (uuidOf (node1)));
+    REQUIRE (module1->getSinkName().isEmpty());
+    REQUIRE (module1->isSinkRetirePending());
+    REQUIRE (module1->getSendStatusForUi() == conduit::LinkAudioSendModule::SendStatus::offline);
+    REQUIRE (clock.isAudioEnabled());
+
+    // Audio-Thread-Surrogat: ein Block nach dem Store → Handshake erfüllt
+    module1->processBlock (buffer, midi);
+    module1->flushPendingSinkRetirement();
+    REQUIRE_FALSE (module1->isSinkRetirePending());
+
+    // Phase 2: Subtree weg, Modul destruiert — Refcount bleibt balanciert
+    manager.flushPendingTopologyUpdate();
+    REQUIRE (manager.getModuleFor (uuidOf (node1)) == nullptr);
+    REQUIRE (clock.isAudioEnabled());
+
+    // Letztes Send-Modul weg → Audio deaktiviert (Refcount 0)
+    REQUIRE (manager.requestNodeDelete (uuidOf (node2)));
+    manager.flushPendingTopologyUpdate();
+    REQUIRE_FALSE (clock.isAudioEnabled());
+}
+
+//==============================================================================
+TEST_CASE ("LinkAudioSendModule: Destruktion ohne Phase 1 balanciert den Refcount", "[linkaudio]")
+{
+    // Preset-Load/Shutdown entfernen Nodes ohne requestNodeDelete — der
+    // Destruktor muss enableAudio(false) selbst nachziehen
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    conduit::LinkClock clock (120.0, "ConduitTest");
+    clock.prepare (48000.0);
+
+    {
+        conduit::LinkAudioSendModule module;
+        module.setLinkAudioContext (&clock, "solo_sink");
+        REQUIRE (module.prepareForGraph (48000.0, 32).wasOk());
+        REQUIRE (module.getSinkName() == "solo_sink");
+        REQUIRE (clock.isAudioEnabled());
+
+        // Re-Prepare mit größerem Block ist idempotent (kein zweiter Sink,
+        // kein doppelter Refcount), Kapazität wächst mit
+        REQUIRE (module.prepareForGraph (48000.0, 64).wasOk());
+        REQUIRE (module.getSinkName() == "solo_sink");
+    }
+
+    REQUIRE_FALSE (clock.isAudioEnabled());
+
+    // Ohne Link-Kontext (Tests): reines Pass-Through, Status offline
+    conduit::LinkAudioSendModule offline;
+    REQUIRE (offline.prepareForGraph (48000.0, 32).wasOk());
+
+    juce::AudioBuffer<float> buffer (2, 32);
+    for (int channel = 0; channel < 2; ++channel)
+        for (int i = 0; i < 32; ++i)
+            buffer.setSample (channel, i, 0.25f);
+
+    juce::MidiBuffer midi;
+    offline.processBlock (buffer, midi);
+
+    REQUIRE (offline.getSendStatusForUi() == conduit::LinkAudioSendModule::SendStatus::offline);
+    REQUIRE (buffer.getSample (0, 17) == Approx (0.25f));  // Pass-Through unangetastet
+    REQUIRE (buffer.getSample (1, 31) == Approx (0.25f));
+}
+
+//==============================================================================
+TEST_CASE ("LinkAudioSendModule: Retire-Handshake unter echtem Audio-Thread", "[linkaudio][threading]")
+{
+    // TSan-Ziel (13.4): Phase 1 auf dem Message Thread, processBlock pumpt
+    // parallel — der Sink darf erst destruieren, wenn kein Block mehr den
+    // alten Pointer halten kann (Epoch-Handshake, Modul-Doku)
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    conduit::LinkClock clock (120.0, "ConduitTest");
+    clock.prepare (48000.0);
+
+    conduit::ClockBus bus;
+
+    conduit::LinkAudioSendModule module;
+    module.setLinkAudioContext (&clock, "stress_sink");
+    module.setClockBus (&bus);
+    REQUIRE (module.prepareForGraph (48000.0, 32).wasOk());
+
+    std::atomic<bool> keepRunning { true };
+    std::atomic<int> blocksPumped { 0 };
+
+    std::thread audioThread ([&]
+    {
+        juce::AudioBuffer<float> buffer (2, 32);
+        juce::MidiBuffer midi;
+
+        while (keepRunning.load())
+        {
+            bus.current = clock.captureClockState (32);  // Stash + Commit: gleicher Thread
+            module.processBlock (buffer, midi);
+            blocksPumped.fetch_add (1);
+            std::this_thread::yield();
+        }
+    });
+
+    // Den Audio-Thread sicher ein paar Blöcke arbeiten lassen
+    while (blocksPumped.load() < 8)
+        std::this_thread::yield();
+
+    module.releaseSessionResources();  // Phase 1
+    REQUIRE (module.isSinkRetirePending());
+
+    while (module.isSinkRetirePending())
+    {
+        module.flushPendingSinkRetirement();
+        std::this_thread::yield();
+    }
+
+    keepRunning.store (false);
+    audioThread.join();
+
+    REQUIRE_FALSE (clock.isAudioEnabled());
+    REQUIRE (module.getSendStatusForUi() == conduit::LinkAudioSendModule::SendStatus::offline);
+}

@@ -8,6 +8,7 @@
 
 #include "Core/GraphManager.h"
 #include "Core/NodeUiRegistry.h"
+#include "UI/LinkAudioStatusBadge.h"
 #include "UI/PortComponent.h"
 #include "UI/ScopeDisplay.h"
 #include "UI/SequencerControlPanel.h"
@@ -105,6 +106,10 @@ private:
     // plus Urzwerg-Kontrollleiste (ersetzt den generischen Parameter-Slider)
     std::unique_ptr<StepGridDisplay> stepGrid;
     std::unique_ptr<SequencerControlPanel> sequencerControls;
+
+    // Nur bei Link-Audio-Send-Nodes (factoryId == "link_audio_send") —
+    // Status-LED „announced" vs. „streaming" (7.2)
+    std::unique_ptr<LinkAudioStatusBadge> linkAudioBadge;
 
     std::unique_ptr<juce::VBlankAttachment> teardownVBlank;
     bool tearingDown = false;

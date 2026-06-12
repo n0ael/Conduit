@@ -106,18 +106,20 @@ private:
     std::atomic<int> scaleRootAtomic { 0 };
     std::atomic<int> scaleTypeAtomic { 0 };
 
+    // Clock-Master (Ableton-Link-Session) + Takt-Verteiler (4.2):
+    // clockBus wird einmal pro Block auf dem Audio Thread gefüllt,
+    // IClockSlaves lesen im selben Callback.
+    // VOR dem Graph deklariert — Module im Graph halten Link-Audio-Sinks
+    // (7.2), die LinkClock muss deshalb die Graph-Destruktion überleben.
+    LinkClock linkClock;
+    ClockBus clockBus;
+
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorGraph::Node::Ptr audioInputNode;
     juce::AudioProcessorGraph::Node::Ptr audioOutputNode;
 
     // Master-Fade für glitch-freie Graph-Swaps (CLAUDE.md 5.2)
     GraphFader graphFader;
-
-    // Clock-Master (Ableton-Link-Session) + Takt-Verteiler (4.2):
-    // clockBus wird einmal pro Block auf dem Audio Thread gefüllt,
-    // IClockSlaves lesen im selben Callback
-    LinkClock linkClock;
-    ClockBus clockBus;
 
     // Capture-Settings: App-Zustand via ApplicationProperties, KEIN Patch-
     // Zustand — loadPreset() ersetzt den Root-Tree, Capture bleibt unberührt

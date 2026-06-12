@@ -35,6 +35,10 @@ EngineProcessor::EngineProcessor()
     // Takt-Verteiler — IClockSlaves bekommen den Bus bei der Materialisierung
     graphManager.setClockBus (&clockBus);
 
+    // Link-Audio-Kontext — ILinkAudioClients (Send-Module) bekommen Clock +
+    // moduleId bei der Materialisierung (7.2)
+    graphManager.setLinkClock (&linkClock);
+
     // Globale Session-Skala (6.2): Defaults sicherstellen, Properties spiegeln
     ensureSessionScaleDefaults();
     rootState.addListener (this);

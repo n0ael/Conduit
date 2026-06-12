@@ -1,6 +1,7 @@
 #include "NodeComponent.h"
 
 #include "Modules/ConduitModule.h"
+#include "Modules/LinkAudioSendModule.h"
 #include "Modules/ScopeModule.h"
 #include "Modules/StepSequencerModule.h"
 
@@ -100,6 +101,12 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
         addAndMakeVisible (*sequencerControls);
         setSize (492, 380);
     }
+    else if (factoryKey == LinkAudioSendModule::staticModuleId)
+    {
+        linkAudioBadge = std::make_unique<LinkAudioStatusBadge> (graphManager, nodeUuid);
+        addAndMakeVisible (*linkAudioBadge);
+        setSize (defaultWidth, defaultHeight);
+    }
     else
     {
         setSize (defaultWidth, defaultHeight);
@@ -138,6 +145,9 @@ void NodeComponent::beginTeardown()
 
     if (sequencerControls != nullptr)
         sequencerControls->setEnabled (false);
+
+    if (linkAudioBadge != nullptr)
+        linkAudioBadge->stopUpdates();
 
     repaint();
 
@@ -295,6 +305,10 @@ void NodeComponent::resized()
         sequencerControls->setBounds (sequencerArea.removeFromBottom (SequencerControlPanel::preferredHeight));
         stepGrid->setBounds (sequencerArea.withTrimmedBottom (6));
     }
+
+    if (linkAudioBadge != nullptr)
+        linkAudioBadge->setBounds (getLocalBounds().removeFromBottom (touchTarget)
+                                       .reduced (28, 8));  // Slider-Streifen — kein Slider ohne Parameter
 
     const auto placePorts = [this] (std::vector<std::unique_ptr<PortComponent>>& ports)
     {

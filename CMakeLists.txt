@@ -100,11 +100,13 @@ set(CONDUIT_CPP_SOURCES
     Source/Modules/ModuleFactory.cpp
     Source/Modules/AttenuatorModule.cpp
     Source/Modules/LfoModule.cpp
+    Source/Modules/LinkAudioSendModule.cpp
     Source/Modules/ScopeModule.cpp
     Source/Modules/StepSequencerModule.cpp
     Source/UI/CaptureAllButton.cpp
     Source/UI/CapturePanel.cpp
     Source/UI/CaptureToast.cpp
+    Source/UI/LinkAudioStatusBadge.cpp
     Source/UI/NodeCanvas.cpp
     Source/UI/NodeComponent.cpp
     Source/UI/PortComponent.cpp
@@ -135,19 +137,24 @@ target_sources(Conduit PRIVATE
     Source/Core/Capture/SampleClock.h
     Source/Interfaces/IClockSlave.h
     Source/Interfaces/IClockSource.h
+    Source/Interfaces/ILinkAudioClient.h
     Source/Interfaces/IStochastic.h
     Source/Modules/AnalysisModule.h
     Source/Modules/ConduitModule.h
     Source/Modules/GeneratorModule.h
+    Source/Modules/IOModule.h
     Source/Modules/ModuleFactory.h
+    Source/Modules/NetworkIOModule.h
     Source/Modules/UtilityModule.h
     Source/Modules/AttenuatorModule.h
     Source/Modules/LfoModule.h
+    Source/Modules/LinkAudioSendModule.h
     Source/Modules/ScopeModule.h
     Source/Modules/StepSequencerModule.h
     Source/UI/CaptureAllButton.h
     Source/UI/CapturePanel.h
     Source/UI/CaptureToast.h
+    Source/UI/LinkAudioStatusBadge.h
     Source/UI/NodeCanvas.h
     Source/UI/NodeComponent.h
     Source/UI/PortComponent.h
@@ -241,6 +248,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/GraphFaderTests.cpp
         Tests/Core/NamedIdTests.cpp
         Tests/Core/GraphManagerTests.cpp
+        Tests/Core/LinkAudioSendTests.cpp
         Tests/Core/OscControllerTests.cpp
         Tests/Core/PatchingTests.cpp
         Tests/Core/PresetTests.cpp
@@ -272,11 +280,13 @@ if(CONDUIT_BUILD_TESTS)
         Source/Modules/ModuleFactory.cpp
         Source/Modules/AttenuatorModule.cpp
         Source/Modules/LfoModule.cpp
+        Source/Modules/LinkAudioSendModule.cpp
         Source/Modules/ScopeModule.cpp
         Source/Modules/StepSequencerModule.cpp
         Source/UI/CaptureAllButton.cpp
         Source/UI/CapturePanel.cpp
         Source/UI/CaptureToast.cpp
+        Source/UI/LinkAudioStatusBadge.cpp
         Source/UI/NodeCanvas.cpp
         Source/UI/NodeComponent.cpp
         Source/UI/PortComponent.cpp

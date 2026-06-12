@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 
 #include <juce_events/juce_events.h>
@@ -90,7 +91,8 @@ public:
         Destruktion des Sinks (Phase 1 des zweiphasigen Delete — sonst
         Zombie-Kanäle bei den Peers).
 
-        Alle Methoden: Message Thread.
+        Methoden: Message Thread, außer commitFromClockState (Audio Thread)
+        und getMaxNumSamples (beliebiger Thread, Link-Garantie).
     */
     class Sink final
     {
@@ -99,8 +101,43 @@ public:
 
         [[nodiscard]] juce::String getName() const;
 
-        /** Rename wird live zu den Peers propagiert (7.2). */
+        /** Rename wird live zu den Peers propagiert (7.2). Parallel zum
+            RT-Commit unkritisch: der Name liegt Link-intern hinter einem
+            util::Locked, der Buffer-Pfad fasst ihn nicht an. */
         void setName (const juce::String& newName);
+
+        /** Aktuelle Buffer-Kapazität in SAMPLES (Frames × Kanäle, 7.2). */
+        [[nodiscard]] std::size_t getMaxNumSamples() const noexcept;
+
+        /** Kapazität anheben (in SAMPLES) — No-op, wenn kleiner als die
+            aktuelle (Link-Semantik). Für Re-Prepare mit größerem Block. */
+        void requestMaxNumSamples (std::size_t numSamples) noexcept;
+
+        //======================================================================
+        enum class CommitResult
+        {
+            committed,   // Buffer geschrieben + committed — Peers streamen
+            noBuffer,    // kein Buffer verfügbar: kein Subscriber ODER Queue
+                         // voll (Overrun) — die Link-API unterscheidet das
+                         // nach außen nicht
+            rejected     // Größe > Kapazität oder kein captureClockState in
+                         // diesem Callback — Programmierfehler, nie im Betrieb
+        };
+
+        /** RT-Schreibpfad (CLAUDE.md 7.2) — NUR Audio Thread, RT-safe.
+
+            Muss im selben Audio-Callback NACH LinkClock::captureClockState()
+            laufen (der EngineProcessor füllt den ClockBus vor dem Graph-
+            Render): commit() nutzt den dort gestashten SessionState plus
+            Beat/Quantum-Basis — exakt die des lokalen Renderings, kein
+            zweites captureAudioSessionState im Modul.
+
+            interleavedSamples: numFrames × numChannels Samples, interleaved,
+            16-bit signed (Dither macht der Aufrufer, 7.2). clock ist der
+            ClockState des Blocks (beatAtBlockStart, sampleRate). */
+        [[nodiscard]] CommitResult commitFromClockState (const std::int16_t* interleavedSamples,
+                                                         int numFrames, int numChannels,
+                                                         const ClockState& clock) noexcept;
 
     private:
         friend class LinkClock;
