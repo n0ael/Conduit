@@ -1,6 +1,8 @@
 // Link/asio zuerst — die Netzwerk-Header (WinSock2 etc.) müssen vor allem
-// stehen, was windows.h einziehen könnte (JUCE).
-#include <ableton/Link.hpp>
+// stehen, was windows.h einziehen könnte (JUCE). LinkAudio.hpp ERSETZT
+// Link.hpp (CLAUDE.md 7.2) und muss in jeder Compilation Unit stehen, die
+// LinkAudio-Typen berührt — die Link-Header sind nicht selbsttragend.
+#include <ableton/LinkAudio.hpp>
 
 #include "LinkClock.h"
 
@@ -9,20 +11,46 @@ namespace conduit
 
 struct LinkClock::Impl
 {
-    explicit Impl (double initialBpm)
-        : link (initialBpm)
+    Impl (double initialBpm, const juce::String& peerName)
+        : link (initialBpm, peerName.toStdString())
     {
         link.enableStartStopSync (true);
         link.enable (true);
+
+        // Audio-Sharing aktiviert erst das erste Send-Modul (7.2) —
+        // bis dahin verhält sich LinkAudio exakt wie Link.
+        link.enableLinkAudio (false);
     }
 
-    ableton::Link link;
+    ableton::LinkAudio link;
+};
+
+struct LinkClock::Sink::Impl
+{
+    Impl (ableton::LinkAudio& link, const juce::String& name, std::size_t maxNumSamples)
+        : sink (link, name.toStdString(), maxNumSamples)
+    {
+    }
+
+    ableton::LinkAudioSink sink;
 };
 
 //==============================================================================
-LinkClock::LinkClock (double initialBpm)
-    : impl (std::make_unique<Impl> (initialBpm))
+LinkClock::LinkClock (double initialBpm, const juce::String& peerName)
+    : impl (std::make_unique<Impl> (initialBpm, peerName))
 {
+    // ChannelsChangedCallback kommt auf einem Link-Thread (7.2) — Marshalling
+    // auf den Message Thread; WeakReference deckt den Fall ab, dass die
+    // LinkClock vor Zustellung des async Calls destruiert wird.
+    impl->link.setChannelsChangedCallback (
+        [weakThis = juce::WeakReference<LinkClock> (this)]
+        {
+            juce::MessageManager::callAsync ([weakThis]
+            {
+                if (auto* clock = weakThis.get())
+                    clock->sendChangeMessage();
+            });
+        });
 }
 
 LinkClock::~LinkClock() = default;
@@ -48,6 +76,58 @@ double LinkClock::getTempo() const
 std::size_t LinkClock::getNumPeers() const
 {
     return impl->link.numPeers();
+}
+
+//==============================================================================
+void LinkClock::enableAudio (bool shouldBeEnabled)
+{
+    audioRefCount += shouldBeEnabled ? 1 : -1;
+    jassert (audioRefCount >= 0);  // unbalancierter enableAudio(false)-Aufruf
+    audioRefCount = juce::jmax (audioRefCount, 0);
+
+    impl->link.enableLinkAudio (audioRefCount > 0);
+}
+
+bool LinkClock::isAudioEnabled() const
+{
+    return impl->link.isLinkAudioEnabled();
+}
+
+juce::String LinkClock::peerName() const
+{
+    return juce::String (impl->link.peerName());
+}
+
+void LinkClock::setPeerName (const juce::String& name)
+{
+    impl->link.setPeerName (name.toStdString());
+}
+
+//==============================================================================
+LinkClock::Sink::Sink (std::unique_ptr<Impl> implToUse)
+    : impl (std::move (implToUse))
+{
+}
+
+LinkClock::Sink::~Sink() = default;
+
+juce::String LinkClock::Sink::getName() const
+{
+    return juce::String (impl->sink.name());
+}
+
+void LinkClock::Sink::setName (const juce::String& newName)
+{
+    impl->sink.setName (newName.toStdString());
+}
+
+std::unique_ptr<LinkClock::Sink> LinkClock::createSink (const juce::String& name,
+                                                        std::size_t maxNumSamples)
+{
+    // new statt make_unique: der Sink-Ctor ist privat (friend LinkClock),
+    // das Ergebnis landet unmittelbar im unique_ptr.
+    return std::unique_ptr<Sink> (
+        new Sink (std::make_unique<Sink::Impl> (impl->link, name, maxNumSamples)));
 }
 
 //==============================================================================

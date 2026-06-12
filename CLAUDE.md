@@ -1,5 +1,5 @@
 # Conduit Alpha v2 — Claude Code Anweisungen
-> C++20 + JUCE 8+  |  Modulares Audio/CV-Instrument  |  Stand: April 2026
+> C++20 + JUCE 8+  |  Modulares Audio/CV-Instrument  |  Stand: Juni 2026
 
 ---
 

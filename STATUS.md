@@ -16,7 +16,13 @@
 
 ## Aktueller Meilenstein (Juni 2026 — abgeschlossen)
 
-**Capture & Record — Meilenstein komplett (Bausteine 1–7).** Audio-Pendant zu "Capture MIDI": permanenter Pre-Roll, Gate-Detektion mit Auto-Kalibrierung, bedarfsgesteuerte RAM-Ringe, samplegenau alignter BWF-Export bei laufender Aufnahme, Toolbar/Panel-UI. Abschluss-Baustein 7 — Härtung (RT-Audit + Stress-Suite):
+**Link Audio, Schritt 1 — LinkClock auf ableton::LinkAudio (CLAUDE.md 7.2, verhaltensneutral):**
+- `LinkClock`-Pimpl hält jetzt die einzige `ableton::LinkAudio`-Instanz (ERSETZT `ableton::Link`, nie parallel) — Ctor `(bpm, peerName)`, Default-Peer-Name "Conduit"; `enableLinkAudio(false)` initial, Audio aktiviert erst das erste Send-Modul
+- Neue API [Message Thread]: `enableAudio(bool)` mit Refcount (n aktive Sinks → enabled), `isAudioEnabled()` (RT-safe), `peerName()`/`setPeerName()`, `createSink(name, maxNumSamples)` → opaker Pimpl-Wrapper `LinkClock::Sink` (Design im Header dokumentiert: Link-/asio-Header bleiben in der .cpp, RT-Schreib-API folgt mit dem LinkAudioSendModule)
+- `ChannelsChangedCallback` (Link-Thread) wird via `MessageManager::callAsync` + `WeakReference` auf den Message Thread gemarshallt; LinkClock ist nach außen `juce::ChangeBroadcaster`
+- Verhaltensneutralität belegt: alle 99 Tests (9637 Assertions) unverändert grün, ASan-Lauf sauber, Transport-UI im Smoke-Test identisch (Tempo/Peers)
+
+**Davor: Capture & Record — Meilenstein komplett (Bausteine 1–7).** Audio-Pendant zu "Capture MIDI": permanenter Pre-Roll, Gate-Detektion mit Auto-Kalibrierung, bedarfsgesteuerte RAM-Ringe, samplegenau alignter BWF-Export bei laufender Aufnahme, Toolbar/Panel-UI. Abschluss-Baustein 7 — Härtung (RT-Audit + Stress-Suite):
 
 - **RT-Audit-Util `Source/Util/RtAllocationGuard`** (wiederverwendbar, auch für bestehende Modul-Pfade): Dev-Builds (`CONDUIT_RT_ALLOCATION_CHECKS=1`, CMake setzt es für Debug beider Targets) ersetzen die globalen operator new/delete; `ScopedRealtimeSection` (thread_local, nestbar) markiert RT-Abschnitte — jede (De-)Allokation darin zählt als Violation (globaler Atomic-Zähler) und hält unter angehängtem Debugger per `__debugbreak` an (bewusst kein jassert: dessen Logging allokiert selbst → Rekursion). Verdrahtet um den Input-Tap in `EngineProcessor::processBlock`; Grenzen dokumentiert (rohes malloc/HeapBlock nicht erfasst — dafür TSan/Review)
 - **Device-/Samplerate-Wechsel-Sicherheitsnetz (Entscheidung umgesetzt):** `CaptureService::prepare()` exportiert aktives Material (recording/held) automatisch VOR der Invalidierung — mit der ALTEN Samplerate, die Export-Pins halten den alten Puffersatz bis zum Writer-Abschluss am Leben; danach Clock-Reset + Reallokation. Dokumentiert als EINZIGE Ausnahme von "Verwerfen ohne Auto-Export" (Resize bestätigt der User per Dialog, der Device-Wechsel kommt von außen ohne Rückfrage-Gelegenheit)
@@ -69,6 +75,7 @@
 
 ## Nächste Kandidaten (offen, Reihenfolge nicht festgelegt)
 
+- LinkAudioSendModule (CLAUDE.md 7.2, Schritt 2): Sink-Schreib-API (TPDF-Dither Float→Int16, `BufferHandle::commit` aus dem ClockState des Blocks), Sink-Lifecycle ins zweiphasige Delete
 - Mixer-Modul (mehrere Inputs) — Capture-Kanal-Buttons wandern dann vom CapturePanel in die Channel-Strips, `stripName` ersetzt `in{N}` im Export-Dateinamen
 - Live-FIFO (kontinuierliches Multitrack-Recording) über die bestehende CaptureWriter-Pipeline (TrackSource-Interface liegt bereit)
 - Capture-Restpunkte (aus der Baustein-5-Planung): LinkBox-Zielordner (feste Partition vs. USB-Stick-Erkennung "Take mitnehmen" — Writer nimmt das Verzeichnis schon pro Job, nur ein Mount-Watcher fehlt, gehört zum LinkBox-Meilenstein); 24-bit-Packing im RAM (−25 %) erst nach Messung via `getCommittedBytes()` — Float bleibt Default
