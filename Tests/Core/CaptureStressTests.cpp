@@ -162,29 +162,32 @@ TEST_CASE ("RtAllocationGuard: Section-Flag und Violation-Zähler", "[capture][s
     REQUIRE_FALSE (conduit::rt::isRealtimeSection());
     REQUIRE (conduit::rt::getAllocationViolations() == before);  // nichts allokiert
 
-   #if CONDUIT_RT_ALLOCATION_CHECKS
-    SECTION ("Hook zählt new/delete innerhalb einer Section (Dev-Build)")
+    // Unter TSan ist die Ersetzung nicht einkompiliert (Link-Kollision mit
+    // der TSan-Runtime) — dann gibt es nichts zu zählen
+    if (conduit::rt::isHookActive())
     {
-        // Hinweis: unter einem ANGEHÄNGTEN Debugger hält die absichtliche
-        // Violation hier per __debugbreak an — gewolltes Audit-Verhalten.
-        const auto baseline = conduit::rt::getAllocationViolations();
+        SECTION ("Hook zählt new/delete innerhalb einer Section (Dev-Build)")
         {
-            const conduit::rt::ScopedRealtimeSection section;
-            auto* violation = new int (42);
-            delete violation;
-        }
-        REQUIRE (conduit::rt::getAllocationViolations() >= baseline + 2);  // new + delete
+            // Hinweis: unter einem ANGEHÄNGTEN Debugger hält die absichtliche
+            // Violation hier per __debugbreak an — gewolltes Audit-Verhalten.
+            const auto baseline = conduit::rt::getAllocationViolations();
+            {
+                const conduit::rt::ScopedRealtimeSection section;
+                auto* violation = new int (42);
+                delete violation;
+            }
+            REQUIRE (conduit::rt::getAllocationViolations() >= baseline + 2);  // new + delete
 
-        const auto afterViolation = conduit::rt::getAllocationViolations();
-        {
-            const conduit::rt::ScopedRealtimeSection section;
-            const conduit::rt::ScopedAllocationAllowance allowance;
-            auto* allowed = new int (7);
-            delete allowed;
+            const auto afterViolation = conduit::rt::getAllocationViolations();
+            {
+                const conduit::rt::ScopedRealtimeSection section;
+                const conduit::rt::ScopedAllocationAllowance allowance;
+                auto* allowed = new int (7);
+                delete allowed;
+            }
+            REQUIRE (conduit::rt::getAllocationViolations() == afterViolation);
         }
-        REQUIRE (conduit::rt::getAllocationViolations() == afterViolation);
     }
-   #endif
 }
 
 //==============================================================================

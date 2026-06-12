@@ -49,6 +49,12 @@ namespace conduit::rt
 /** true, wenn der AKTUELLE Thread in einer ScopedRealtimeSection läuft. */
 [[nodiscard]] bool isRealtimeSection() noexcept;
 
+/** true, wenn die operator-new/delete-Ersetzung einkompiliert ist.
+    Unter TSan immer false: dessen Runtime definiert die Operatoren selbst
+    (Link-Kollision) — TSan prüft Races, das Allokations-Audit übernehmen
+    ASan-/MSVC-Debug-Builds. Tests prüfen Violations nur bei true. */
+[[nodiscard]] bool isHookActive() noexcept;
+
 /** Globaler Violation-Zähler — nur in Dev-Builds kann er wachsen.
     Tests vergleichen vorher/nachher statt auf 0 zu bestehen (andere
     Testfälle desselben Laufs könnten bereits gezählt haben). */

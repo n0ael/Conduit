@@ -4,7 +4,23 @@
 #include <cstdlib>
 #include <new>
 
-#if CONDUIT_RT_ALLOCATION_CHECKS && defined (_MSC_VER)
+// TSan liefert eigene STARKE operator-new/delete-Definitionen in seiner
+// Runtime (tsan_new_delete.cpp) — eine Ersetzung kollidiert beim Linken
+// (multiple definition). Unter TSan bleibt der Hook deshalb aus: TSan
+// prüft Races, das Allokations-Audit übernehmen ASan-/MSVC-Debug-Builds.
+#if defined (__has_feature)
+ #if __has_feature (thread_sanitizer)
+  #define CONDUIT_RT_NEW_DELETE_HOOK 0
+ #endif
+#endif
+#if defined (__SANITIZE_THREAD__)
+ #define CONDUIT_RT_NEW_DELETE_HOOK 0
+#endif
+#ifndef CONDUIT_RT_NEW_DELETE_HOOK
+ #define CONDUIT_RT_NEW_DELETE_HOOK CONDUIT_RT_ALLOCATION_CHECKS
+#endif
+
+#if CONDUIT_RT_NEW_DELETE_HOOK && defined (_MSC_VER)
  #include <intrin.h>
  extern "C" __declspec (dllimport) int __stdcall IsDebuggerPresent();
 #endif
@@ -19,7 +35,7 @@ thread_local bool realtimeSectionActive = false;
 
 std::atomic<std::uint64_t> violationCount { 0 };
 
-#if CONDUIT_RT_ALLOCATION_CHECKS
+#if CONDUIT_RT_NEW_DELETE_HOOK
 
 void noteViolation() noexcept
 {
@@ -54,7 +70,7 @@ void checkedFree (void* pointer) noexcept
     std::free (pointer);
 }
 
-#endif // CONDUIT_RT_ALLOCATION_CHECKS
+#endif // CONDUIT_RT_NEW_DELETE_HOOK
 
 } // namespace
 
@@ -64,6 +80,11 @@ namespace conduit::rt
 bool isRealtimeSection() noexcept
 {
     return realtimeSectionActive;
+}
+
+bool isHookActive() noexcept
+{
+    return CONDUIT_RT_NEW_DELETE_HOOK != 0;
 }
 
 std::uint64_t getAllocationViolations() noexcept
@@ -95,14 +116,13 @@ ScopedAllocationAllowance::~ScopedAllocationAllowance() noexcept
 
 } // namespace conduit::rt
 
-#if CONDUIT_RT_ALLOCATION_CHECKS
+#if CONDUIT_RT_NEW_DELETE_HOOK
 
 //==============================================================================
 // Globale operator-new/delete-Ersetzungen (nur Dev-Builds, binärweite
 // Wirkung inkl. JUCE/Catch2). Allokation via malloc, Freigabe via free —
-// in sich konsistent, verträgt sich mit ASan (malloc bleibt interceptiert)
-// und TSan (unsere starken Definitionen ersetzen die schwachen Interceptor-
-// Varianten, malloc wird weiterhin instrumentiert).
+// in sich konsistent, verträgt sich mit ASan (malloc bleibt interceptiert).
+// Unter TSan ist dieser Block AUS (Kollision mit der TSan-Runtime, oben).
 // Aligned-Varianten (align_val_t) werden bewusst nicht ersetzt: deren
 // Default-Implementierung bildet ein eigenes konsistentes Paar.
 
@@ -151,4 +171,4 @@ void operator delete[] (void* pointer, const std::nothrow_t&) noexcept { checked
  #pragma clang diagnostic pop
 #endif
 
-#endif // CONDUIT_RT_ALLOCATION_CHECKS
+#endif // CONDUIT_RT_NEW_DELETE_HOOK
