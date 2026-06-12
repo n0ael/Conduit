@@ -16,7 +16,15 @@
 
 ## Aktueller Meilenstein (Juni 2026 — abgeschlossen)
 
-**Capture-System, Baustein 2 — CaptureSettings + Resize-Policy:**
+**Capture-System, Baustein 3 — Puffer-Herzstück (`Source/Core/Capture/`):**
+- `PreRollBuffer` pro Kanal, IMMER aktiv: positionsadressierter Mono-Ring (Sample p bei `p % capacity`), Allokation nur in `prepare()`; überbrückt die Pool-Latenz nach Gate-Open
+- `BufferPool`: RAM erst bei Bedarf — MT besitzt Segmente (HeapBlock, bewusst uninitialisiert, kein Gigabyte-Memset), Audio fordert per atomarem Zähler an, Publikation/Rückgabe über zwei `SpscQueue<float*>`; Vorhalteziel 1 Segment, Surplus wird abgebaut
+- `CaptureRingBuffer` pro Kanal: positionsadressierter Aufnahme-Ring (Speicher vom Pool), `startSamplePosition`/`endPosition` atomar — jede Position absolut rekonstruierbar; Leser-Disziplin wie `SpscQueue` (hinter dem Schreib-Cursor)
+- `CaptureChannel`: Zustandsmaschine idle/awaitingSegment/recording/held; amortisierte Pre-Roll-Übernahme (Budget 4× Blockgröße, ≥ 2× nötig gegen Verdrängung, Kopieren VOR dem Pre-Roll-Write); `startSamplePosition = clock − preRollLength`; nahtlose Wiedereröffnung aus held, wenn die Gate-Pause im Pre-Roll-Fenster liegt
+- `CaptureService`: Puffersatz-Swap via Exchange-Mailbox + Retire-SPSC-Queue (das in Baustein 2 angekündigte Handoff-Protokoll — Reallokation bei laufendem Audio ist jetzt gefahrlos); RAM-Wächter-Timer (200 ms): Pool-Service, Summe committeter Puffer gegen `ramLimitGb`, gibt pro Tick den ältesten GEHALTENEN Kanal frei, `ChangeBroadcaster`-Warnung für die UI; Gate-API `openGate`/`closeGate` als Test-Seam für Baustein 4
+- Tests (`Tests/Core/CaptureBufferTests.cpp`): Wraparound (PreRoll + Ring), Übernahme sample-genau gegen synthetische Rampe (inkl. Pool-Brücke, nahtloser Reopen, Neu-Ankern), Amortisierung terminiert im Budget ohne verdrängte Reads, Pool-Handshake mit echten Threads (TSan-Ziel), RAM-Wächter end-to-end
+
+**Davor: Capture-System, Baustein 2 — CaptureSettings + Resize-Policy:**
 - `CaptureSettings`: App-Zustand via `juce::ApplicationProperties` (NICHT im ValueTree — loadPreset lässt Capture unberührt, gleiche Trennung wie Link-Tempo); RT-Felder als Atomics [MT→Audio], `ChangeBroadcaster` für die UI
 - Felder: bufferMinutes 15 (5–30), preRollSeconds 60 (10–120), thresholdDb −40 (−80…−20), holdMinutes 10 (1–30), autoCalibrate, ramLimitGb 3, exportDirectory, exportBitDepth 24
 - Resize-Policy: Kanal aktiv → Wert nicht übernehmen, `PendingResizeRequest`-Callback an die UI (async Confirm), bestätigt → `invalidateAllBuffers()` (kein Auto-Export) + Reallokation; inaktiv → still. Über `ICaptureBufferHost`-Interface getestet (Mock)
@@ -34,7 +42,7 @@
 
 ## Nächste Kandidaten (offen, Reihenfolge nicht festgelegt)
 
-- Capture-Baustein 3–4: PreRoll-Ring-Schreibpfad (Handoff-Protokoll gegen Reallokation!), Gate (Signal über Noise-Floor), Capture-Trigger/Export; danach Settings-UI (async Resize-Confirm)
+- Capture-Baustein 4–5: Gate (Signal über Noise-Floor, Hold-Zeit, Auto-Calibrate) ruft die vorhandene `openGate`/`closeGate`-Seam; Capture-Trigger/Export (WAV, Leser-Halte-Protokoll am `CaptureRingBuffer`); danach Settings-UI (async Resize-Confirm, RAM-Warnungs-Listener)
 
 - Mixer-Modul (mehrere Inputs)
 - Envelope-Modul (`IClockSlave`)

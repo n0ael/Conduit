@@ -84,6 +84,7 @@ public:
     [[nodiscard]] OscController& getOscController() noexcept;
     [[nodiscard]] LinkClock& getLinkClock() noexcept;
     [[nodiscard]] const CaptureService& getCaptureService() const noexcept;
+    [[nodiscard]] CaptureService& getCaptureService() noexcept;  // UI: ChangeListener (RAM-Warnung)
     [[nodiscard]] CaptureSettings& getCaptureSettings() noexcept;
 
 private:

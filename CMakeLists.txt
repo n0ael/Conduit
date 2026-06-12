@@ -90,6 +90,8 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/LinkClock.cpp
     Source/Core/NodeUiRegistry.cpp
     Source/Core/OscController.cpp
+    Source/Core/Capture/BufferPool.cpp
+    Source/Core/Capture/CaptureChannel.cpp
     Source/Core/Capture/CaptureService.cpp
     Source/Core/Capture/CaptureSettings.cpp
     Source/Core/Capture/InputMeter.cpp
@@ -116,9 +118,13 @@ target_sources(Conduit PRIVATE
     Source/Core/LinkClock.h
     Source/Core/NodeUiRegistry.h
     Source/Core/OscController.h
+    Source/Core/Capture/BufferPool.h
+    Source/Core/Capture/CaptureChannel.h
+    Source/Core/Capture/CaptureRingBuffer.h
     Source/Core/Capture/CaptureService.h
     Source/Core/Capture/CaptureSettings.h
     Source/Core/Capture/InputMeter.h
+    Source/Core/Capture/PreRollBuffer.h
     Source/Core/Capture/SampleClock.h
     Source/Interfaces/IClockSlave.h
     Source/Interfaces/IClockSource.h
@@ -211,6 +217,7 @@ if(CONDUIT_BUILD_TESTS)
     juce_add_console_app(ConduitTests PRODUCT_NAME "ConduitTests")
 
     set(CONDUIT_TEST_CPP_SOURCES
+        Tests/Core/CaptureBufferTests.cpp
         Tests/Core/CaptureMeterTests.cpp
         Tests/Core/CaptureSettingsTests.cpp
         Tests/Core/ClockTests.cpp
@@ -238,6 +245,8 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/LinkClock.cpp
         Source/Core/NodeUiRegistry.cpp
         Source/Core/OscController.cpp
+        Source/Core/Capture/BufferPool.cpp
+        Source/Core/Capture/CaptureChannel.cpp
         Source/Core/Capture/CaptureService.cpp
         Source/Core/Capture/CaptureSettings.cpp
         Source/Core/Capture/InputMeter.cpp

@@ -1,10 +1,20 @@
 #pragma once
 
-#include <juce_audio_basics/juce_audio_basics.h>
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <vector>
 
+#include <juce_audio_basics/juce_audio_basics.h>
+#include <juce_events/juce_events.h>
+
+#include "BufferPool.h"
+#include "CaptureChannel.h"
 #include "CaptureSettings.h"
 #include "InputMeter.h"
+#include "PreRollBuffer.h"
 #include "SampleClock.h"
+#include "Util/SpscQueue.h"
 
 namespace conduit
 {
@@ -17,34 +27,67 @@ namespace conduit
     Hardware-Input, bevor clockBus/graph/graphFader den Buffer anfassen.
     Graph-Fades und Modul-Outputs gehören nicht in die Aufzeichnung.
 
-    Konfiguration kommt aus den CaptureSettings (App-Zustand, kein Patch-
-    Zustand): prepare() dimensioniert den Capture-Ring nach bufferMinutes,
-    gedeckelt durch ramLimitGb; die RT-relevanten Settings-Atomics werden
-    pro Block im Input-Tap gelesen.
+    Puffer-Architektur (Source/Core/Capture/):
+      - PreRollBuffer pro Kanal, IMMER aktiv — hält die letzten
+        preRollSeconds und überbrückt die Pool-Latenz nach Gate-Open
+      - CaptureRingBuffer pro Kanal, aktiv ab erstem Gate-Open — Speicher
+        kommt bedarfsgesteuert aus dem BufferPool (SPSC-Handshake)
+      - CaptureChannel verbindet beides: Zustandsmaschine, amortisierte
+        Pre-Roll-Übernahme, absolute Positionen (SampleClock)
+
+    Reihenfolge im Tap (pro Kanal, entscheidend): erst
+    CaptureChannel::process() — die Übernahme liest die ältesten
+    Pre-Roll-Inhalte —, DANN PreRollBuffer::write() des aktuellen Blocks.
+
+    Puffersatz-Swap (Handoff-Protokoll für reallocateBuffers bei laufendem
+    Audio — angekündigt in Baustein 2): alle Audio-seitigen Puffer leben in
+    einem unveränderlichen BufferSet. Der Message Thread baut bei
+    Reallokation einen komplett neuen Satz und legt ihn in die
+    Exchange-Mailbox (std::atomic<BufferSet*>); ersetzt er dabei einen noch
+    nicht abgeholten Satz, zerstört er den sofort (Audio hat ihn nie
+    gesehen — kein Pile-up). Der Audio Thread holt den Satz am Tap-Anfang
+    ab und quittiert den alten über eine SPSC-Queue zurück; der
+    RAM-Wächter-Timer sammelt die Quittungen ein und zerstört die Sätze.
+    prepare() läuft mit stehendem Audio (prepareToPlay-Kontrakt) und darf
+    deshalb direkt installieren.
+
+    RAM-Wächter [Message Thread, Timer]: vergleicht die Summe committeter
+    Puffer (Pool-Segmente + Pre-Rolls) gegen ramLimitGb und reagiert auf
+    einen ausgehungerten Pool (Gate offen, aber kein Segment-Budget): pro
+    Tick wird der älteste GEHALTENE Kanal freigegeben (atomares Flag, der
+    Audio Thread quittiert im nächsten Block). Jeder Wechsel des
+    Warnzustands feuert einen ChangeBroadcast für die UI.
 
     Als ICaptureBufferHost beantwortet der Service die Resize-Policy der
-    Settings (siehe CaptureSettings-Doku): Aktivitäts-Status, Invalidierung
-    (Gates zu, Puffer verwerfen, kein Auto-Export) und Reallokation.
+    Settings: Aktivitäts-Status (Gate offen oder held), Invalidierung
+    (Gates zu, Puffer verwerfen, bewusst KEIN Auto-Export) und Reallokation.
 
-    Stand Baustein 2: Ring wird allokiert, aber vom Audio Thread noch nicht
-    beschrieben — Reallokation auf dem Message Thread ist deshalb gefahrlos.
-    Baustein 3 (PreRoll-Ring im Tap) braucht dann ein Handoff-Protokoll
-    (atomic Swap), bevor der Message Thread Puffer austauschen darf.
+    Die Gate-API (openGate/closeGate) ist der Einstichpunkt für Baustein 4
+    (Signal-über-Noise-Floor-Detektion) — bis dahin Test-Seam.
 */
-class CaptureService : public ICaptureBufferHost
+class CaptureService : public ICaptureBufferHost,
+                       public juce::ChangeBroadcaster,
+                       private juce::Timer
 {
 public:
     explicit CaptureService (CaptureSettings& settingsToUse);
+    ~CaptureService() override;
 
     /** [Message Thread, aus EngineProcessor::prepareToPlay — Audio steht]
         Resettet die SampleClock (Samplerate-Wechsel invalidiert alle
-        Positionen), konfiguriert das Metering und allokiert den Ring
-        anhand der Settings. */
+        Positionen), konfiguriert das Metering und installiert einen
+        frischen Puffersatz anhand der Settings. */
     void prepare (double sampleRate, int samplesPerBlock, int numInputChannels);
 
     /** [Audio Thread] ERSTE Operation in processBlock() — allocation-free,
-        lock-free. Misst, taktet und (später) puffert den rohen Input. */
+        lock-free. Misst, puffert (Pre-Roll + aktive Capture-Ringe) und
+        taktet den rohen Input. */
     void processInputTap (const juce::AudioBuffer<float>& buffer, int numInputChannels) noexcept;
+
+    //==========================================================================
+    // Gate-API [Audio Thread] — Baustein 4 ruft sie aus der Detektion
+    void openGate (int channel) noexcept;
+    void closeGate (int channel) noexcept;
 
     //==========================================================================
     // ICaptureBufferHost [Message Thread] — Gegenstück der Resize-Policy
@@ -53,35 +96,91 @@ public:
     void reallocateBuffers() override;
 
     //==========================================================================
-    /** Ring-Dimensionierung: bufferMinutes bei sampleRate, gedeckelt durch
-        ramLimitGb über alle Kanäle. Pur und allokationsfrei — testbar ohne
-        echte Allokation. */
+    /** [Message Thread] RAM-Wächter-Tick — der Timer ruft das periodisch;
+        public, damit Tests ohne Dispatch-Loop takten können. */
+    void runRamGuard();
+
+    /** Summe committeter Puffer: Pool-Segmente + Pre-Roll-Ringe. */
+    [[nodiscard]] std::int64_t getCommittedBytes() const noexcept;
+
+    [[nodiscard]] bool isRamWarningActive() const noexcept
+    {
+        return ramWarningActive.load (std::memory_order_relaxed);
+    }
+
+    //==========================================================================
+    // Dimensionierung — pur und allokationsfrei, testbar ohne Allokation
+
+    /** Ring-Kapazität pro Kanal: bufferMinutes bei sampleRate, gedeckelt
+        durch ramLimitGb über alle Kanäle. */
     [[nodiscard]] static int computeRingCapacitySamples (int bufferMinutes, double sampleRate,
                                                          int numChannels, int ramLimitGb) noexcept;
 
-    [[nodiscard]] int getRingCapacitySamples() const noexcept { return ringBuffer.getNumSamples(); }
-    [[nodiscard]] int getRingNumChannels() const noexcept     { return ringBuffer.getNumChannels(); }
+    [[nodiscard]] static int computePreRollCapacitySamples (int preRollSeconds,
+                                                            double sampleRate) noexcept;
+
+    /** Wie viele Pool-Segmente das RAM-Budget nach Abzug der Pre-Rolls
+        hergibt (höchstens eins pro Kanal). */
+    [[nodiscard]] static int computeMaxSegments (int ramLimitGb, std::int64_t segmentBytes,
+                                                 std::int64_t preRollBytesTotal,
+                                                 int numChannels) noexcept;
+
+    //==========================================================================
+    // Status des aktuellen (neuesten) Puffersatzes [Message Thread]
+    [[nodiscard]] int getRingCapacitySamples() const noexcept;
+    [[nodiscard]] int getRingNumChannels() const noexcept;
+
+    /** nullptr außerhalb des Kanalbereichs. Status-Getter des Kanals sind
+        von jedem Thread lesbar; read() folgt der Leser-Disziplin. */
+    [[nodiscard]] const CaptureChannel* getChannel (int channel) const noexcept;
 
     [[nodiscard]] const SampleClock& getSampleClock() const noexcept { return sampleClock; }
     [[nodiscard]] const InputMeter& getInputMeter() const noexcept   { return inputMeter; }
 
 private:
-    void allocateRing();
+    //==========================================================================
+    /** Unveränderlicher Audio-Puffersatz — komplett ersetzt statt mutiert. */
+    struct BufferSet
+    {
+        std::vector<std::unique_ptr<PreRollBuffer>> preRolls;
+        std::vector<std::unique_ptr<CaptureChannel>> channels;
+        BufferPool pool;
+        int numChannels = 0;
+        int ringCapacity = 0;     // Samples pro Kanal
+        int preRollCapacity = 0;  // Samples pro Kanal
+    };
+
+    BufferSet* buildSet();              // [MT] erzeugt + registriert als currentSet
+    void destroySet (BufferSet* set);   // [MT] aus ownedSets entfernen
+    void drainRetiredSets();            // [MT] Audio-Quittungen einsammeln
+    void timerCallback() override { runRamGuard(); }
+
+    static constexpr int guardIntervalMs = 200;
 
     CaptureSettings& settings;
 
     SampleClock sampleClock;
     InputMeter  inputMeter;
 
-    double preparedSampleRate = 0.0;  // nur Message Thread (prepare/realloc)
+    // Nur Message Thread (prepare/realloc)
+    double preparedSampleRate = 0.0;
+    int preparedBlockSize = 0;
     int preparedChannels = 0;
 
-    // PreRoll-/Capture-Ring — Baustein 3 verdrahtet ihn in den Input-Tap
-    juce::AudioBuffer<float> ringBuffer;
+    // -- Puffersatz-Handoff (Protokoll siehe Klassendoku) ----------------------
+    std::vector<std::unique_ptr<BufferSet>> ownedSets;  // MT: Besitz aller lebenden Sätze
+    BufferSet* currentSet = nullptr;                    // MT-Sicht: neuester Satz
+    std::atomic<BufferSet*> pendingSet { nullptr };     // Mailbox MT → Audio (exchange)
+    SpscQueue<BufferSet*> retiredSets { 8 };            // Quittung Audio → MT
+    BufferSet* audioSet = nullptr;                      // NUR Audio Thread
+                                                        // (Ausnahme: prepare/Dtor, Audio steht)
 
-    // Gate-Status [Audio schreibt (Baustein 4), Message liest via
-    // isAnyChannelActive für die Resize-Policy]
+    std::atomic<bool> invalidateRequested { false };
+
+    // Gate-Status [Audio schreibt pro Block, Message liest für die Policy]
     std::atomic<bool> anyChannelActive { false };
+
+    std::atomic<bool> ramWarningActive { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CaptureService)
 };

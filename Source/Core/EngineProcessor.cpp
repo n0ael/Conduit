@@ -260,6 +260,7 @@ NodeUiRegistry& EngineProcessor::getNodeUiRegistry() noexcept  { return nodeUiRe
 OscController& EngineProcessor::getOscController() noexcept    { return oscController; }
 LinkClock& EngineProcessor::getLinkClock() noexcept            { return linkClock; }
 const CaptureService& EngineProcessor::getCaptureService() const noexcept { return captureService; }
+CaptureService& EngineProcessor::getCaptureService() noexcept   { return captureService; }
 CaptureSettings& EngineProcessor::getCaptureSettings() noexcept { return captureSettings; }
 
 } // namespace conduit
