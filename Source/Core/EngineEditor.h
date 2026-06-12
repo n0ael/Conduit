@@ -3,6 +3,10 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "LinkClock.h"
+#include "Capture/CaptureWriter.h"
+#include "UI/CaptureAllButton.h"
+#include "UI/CapturePanel.h"
+#include "UI/CaptureToast.h"
 #include "UI/NodeCanvas.h"
 
 namespace conduit
@@ -19,16 +23,28 @@ class EngineProcessor;
     über dem NodeCanvas; die audioSetupWarning (9.1) erscheint rechts.
 
     Link-Transport: Tempo und Peer-Zahl kommen aus der Link-Session — NICHT
-    aus dem ValueTree (Session-Zustand, kein Patch-Zustand). Ein 4-Hz-Timer
+    aus dem ValueTree (Session-Zustand, kein Patch-Zustand). Der Editor-Timer
     pollt die thread-sicheren LinkClock-Getter, damit Peer-Änderungen aus
     dem Netz in der UI ankommen; der Slider schreibt via setTempo() zurück.
+
+    Capture-UI (Baustein 6): CaptureAllButton neben dem Link-Transport,
+    einklappbares CapturePanel unter der Toolbar, nicht-modaler Toast für
+    Export-Ergebnisse. Der EINE Editor-Timer läuft mit 15 Hz statt eines
+    zweiten Capture-Timers: alle gepollten Quellen (LinkClock, Capture-
+    Status-Atomics) sind lock-freie Reads im Nanosekundenbereich, Repaints
+    passieren nur bei sichtbarer Änderung — ein zweiter Timer wäre reine
+    Verdrahtungs-Komplexität ohne messbare Ersparnis.
+
+    "Nach Export freigeben": auf User-Wunsch wird der RAM-Puffer NIE ohne
+    Rückfrage geleert — handleExportReport() zeigt immer erst einen
+    Ok/Cancel-Dialog, bevor gehaltene Kanäle freigegeben werden.
 */
 class EngineEditor final : public juce::AudioProcessorEditor,
                            private juce::Timer
 {
 public:
     explicit EngineEditor (EngineProcessor& engineProcessor);
-    ~EngineEditor() override = default;
+    ~EngineEditor() override;
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -37,6 +53,7 @@ public:
 private:
     void timerCallback() override;
     void launchPresetChooser (bool saving);
+    void handleExportReport (const CaptureWriter::Report& report);
 
     static constexpr int toolbarHeight = 56;
 
@@ -63,6 +80,12 @@ private:
 
     // Muss den async Callback überleben (JUCE_MODAL_LOOPS_PERMITTED=0)
     std::unique_ptr<juce::FileChooser> presetChooser;
+
+    // Capture-UI (Baustein 6)
+    CaptureAllButton captureAllButton;
+    juce::TextButton capturePanelToggle { "Capture" };
+    CapturePanel capturePanel;
+    CaptureToast captureToast;
 
     NodeCanvas canvas;
 

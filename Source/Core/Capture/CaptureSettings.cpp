@@ -11,8 +11,9 @@ namespace
     constexpr const char* keyHoldMinutes     = "capture.holdMinutes";
     constexpr const char* keyAutoCalibrate   = "capture.autoCalibrate";
     constexpr const char* keyRamLimitGb      = "capture.ramLimitGb";
-    constexpr const char* keyExportDirectory = "capture.exportDirectory";
-    constexpr const char* keyExportBitDepth  = "capture.exportBitDepth";
+    constexpr const char* keyExportDirectory    = "capture.exportDirectory";
+    constexpr const char* keyExportBitDepth     = "capture.exportBitDepth";
+    constexpr const char* keyReleaseAfterExport = "capture.releaseAfterExport";
 
     /** Nur 16/24/32 sind gültige Export-Bittiefen — alles andere fällt
         defensiv auf den Default zurück (auch bei editierter Settings-Datei). */
@@ -76,6 +77,8 @@ void CaptureSettings::loadFromFile()
                       std::memory_order_relaxed);
     exportBitDepth.store (snapBitDepth (file.getIntValue (keyExportBitDepth, defaultExportBitDepth)),
                           std::memory_order_relaxed);
+    releaseAfterExport.store (file.getBoolValue (keyReleaseAfterExport, defaultReleaseAfterExport),
+                              std::memory_order_relaxed);
 
     exportDirectoryPath = file.getValue (keyExportDirectory,
                                          defaultExportDirectory().getFullPathName());
@@ -102,6 +105,7 @@ int   CaptureSettings::getHoldMinutes() const noexcept    { return holdMinutes.l
 bool  CaptureSettings::getAutoCalibrate() const noexcept  { return autoCalibrate.load (std::memory_order_relaxed); }
 int   CaptureSettings::getRamLimitGb() const noexcept     { return ramLimitGb.load (std::memory_order_relaxed); }
 int   CaptureSettings::getExportBitDepth() const noexcept { return exportBitDepth.load (std::memory_order_relaxed); }
+bool  CaptureSettings::getReleaseAfterExport() const noexcept { return releaseAfterExport.load (std::memory_order_relaxed); }
 
 juce::File CaptureSettings::getExportDirectory() const    { return juce::File (exportDirectoryPath); }
 
@@ -173,6 +177,16 @@ void CaptureSettings::setExportBitDepth (int bits)
 
     exportBitDepth.store (snapped, std::memory_order_relaxed);
     writeValue (keyExportBitDepth, snapped);
+    sendChangeMessage();
+}
+
+void CaptureSettings::setReleaseAfterExport (bool enabled)
+{
+    if (enabled == getReleaseAfterExport())
+        return;
+
+    releaseAfterExport.store (enabled, std::memory_order_relaxed);
+    writeValue (keyReleaseAfterExport, enabled);
     sendChangeMessage();
 }
 

@@ -13,6 +13,7 @@
 #include "CaptureChannel.h"
 #include "CaptureGate.h"
 #include "CaptureSettings.h"
+#include "CaptureWriter.h"
 #include "InputMeter.h"
 #include "PreRollBuffer.h"
 #include "SampleClock.h"
@@ -78,10 +79,26 @@ namespace conduit
     autoCalibrate max(Settings-Threshold, NoiseFloor + 12 dB), der manuelle
     Threshold wirkt als Override-Untergrenze; ohne autoCalibrate der
     Settings-Threshold direkt.
+
+    Export (Baustein 5): exportAll() [Message Thread] friert pro aktivem
+    Kanal (recording/held) die ReadableRange ein und reiht einen Job beim
+    CaptureWriter ein — die Aufnahme läuft währenddessen weiter. Damit
+    weder ein Puffersatz-Swap noch eine Freigabe dem Writer den Speicher
+    unter den Füßen wegzieht, gilt zweistufiges Pinning:
+      - Kanal-Ebene: tryBeginExportRead()/endExportRead() (CaptureChannel,
+        Dekker-Protokoll — Freigaben werden bei aktiven Lesern aufgeschoben)
+      - Satz-Ebene: BufferSet::exportPins (atomar) — ausgemusterte Sätze
+        landen in retiredAwaitingDestroy und werden erst zerstört, wenn
+        ihre Pins auf null sind (Sweep im Guard-Timer-Tick)
+    Job::releaseResources (läuft IMMER auf dem Writer-Thread) löst erst die
+    Kanal-Leser, dann den Satz-Pin. Der Writer-Report wird per AsyncUpdater
+    auf den Message Thread gehoben (onExportFinished); der Writer-Thread
+    wird im Dtor VOR den Puffersätzen gestoppt.
 */
 class CaptureService : public ICaptureBufferHost,
                        public juce::ChangeBroadcaster,
-                       private juce::Timer
+                       private juce::Timer,
+                       private juce::AsyncUpdater
 {
 public:
     explicit CaptureService (CaptureSettings& settingsToUse);
@@ -108,6 +125,37 @@ public:
     /** [Message Thread] AutoCalibrator-Tick (1 Hz via Guard-Timer) — public,
         damit Tests ohne Dispatch-Loop kalibrieren können. */
     void runAutoCalibration();
+
+    //==========================================================================
+    // Export (Baustein 5) — Schreiben NIE auf dem Audio-Thread
+
+    /** [Message Thread] "Capture All": friert für jeden aktiven Kanal
+        (recording/held) den lesbaren Bereich ein und reiht einen Export-Job
+        ein; die Aufnahme läuft weiter. Liefert die Zahl der eingereihten
+        Spuren (0 = nichts Aktives oder Service nicht prepared). */
+    int exportAll();
+
+    /** [Message Thread] Nach Export + User-Bestätigung: die genannten Kanäle
+        freigeben, sofern sie (noch) im Zustand held sind — die Quittung
+        kommt vom Audio Thread im nächsten Block. */
+    void releaseExportedHeldChannels (const std::vector<int>& channelIndices);
+
+    /** [Message Thread] Export-Abschluss — per AsyncUpdater vom
+        Writer-Thread gehoben. Der Editor setzt und cleart den Callback. */
+    std::function<void (const CaptureWriter::Report&)> onExportFinished;
+
+    [[nodiscard]] bool isExportBusy() const noexcept { return writer.isBusy(); }
+
+    /** Toolbar-Aggregat (CaptureAllButton): Status + Füllstand über alle
+        Kanäle. [Message Thread] — liest currentSet. */
+    struct UiStatus
+    {
+        bool anyRecording = false;
+        bool anyHeld = false;
+        bool exporting = false;
+        float fillNorm = 0.0f;  // vollster Kanal-Ring, 0..1
+    };
+    [[nodiscard]] UiStatus getUiStatus() const;
 
     //==========================================================================
     // ICaptureBufferHost [Message Thread] — Gegenstück der Resize-Policy
@@ -183,12 +231,18 @@ private:
         int numChannels = 0;
         int ringCapacity = 0;     // Samples pro Kanal
         int preRollCapacity = 0;  // Samples pro Kanal
+
+        // Export-Pinning: > 0 solange ein Writer-Job aus dem Satz liest —
+        // ausgemusterte Sätze werden erst bei 0 zerstört
+        std::atomic<int> exportPins { 0 };
     };
 
     BufferSet* buildSet();              // [MT] erzeugt + registriert als currentSet
     void destroySet (BufferSet* set);   // [MT] aus ownedSets entfernen
-    void drainRetiredSets();            // [MT] Audio-Quittungen einsammeln
+    void retireSet (BufferSet* set);    // [MT] zum Sweep vormerken (einmalig)
+    void drainRetiredSets();            // [MT] Quittungen einsammeln + Sweep
     void timerCallback() override;      // RAM-Wächter + 1-Hz-AutoCalibrator
+    void handleAsyncUpdate() override;  // Writer-Reports auf den MT heben
 
     static constexpr int guardIntervalMs = 200;
     static constexpr int guardTicksPerCalibration = 5;     // 5 × 200 ms = 1 Hz
@@ -218,8 +272,15 @@ private:
     BufferSet* currentSet = nullptr;                    // MT-Sicht: neuester Satz
     std::atomic<BufferSet*> pendingSet { nullptr };     // Mailbox MT → Audio (exchange)
     SpscQueue<BufferSet*> retiredSets { 8 };            // Quittung Audio → MT
+    std::vector<BufferSet*> retiredAwaitingDestroy;     // MT: wartet auf exportPins == 0
     BufferSet* audioSet = nullptr;                      // NUR Audio Thread
                                                         // (Ausnahme: prepare/Dtor, Audio steht)
+
+    // -- Export (Baustein 5) ---------------------------------------------------
+    CaptureWriter writer;                // eigener Schreib-Thread (nie Audio)
+    int nextTakeNumber = 1;              // nur Message Thread
+    juce::CriticalSection reportLock;    // Writer → MT (kein RT-Pfad)
+    std::vector<CaptureWriter::Report> pendingReports;
 
     std::atomic<bool> invalidateRequested { false };
 

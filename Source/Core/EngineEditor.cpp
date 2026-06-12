@@ -17,6 +17,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
       undoManager (engineProcessor.getUndoManager()),
       graphManager (engineProcessor.getGraphManager()),
       linkClock (engineProcessor.getLinkClock()),
+      capturePanel (engineProcessor.getCaptureSettings(), engineProcessor.getCaptureService()),
       canvas (rootState, engineProcessor.getGraphManager(), engineProcessor.getNodeUiRegistry())
 {
     const auto addModule = [this] (const char* moduleId)
@@ -74,6 +75,25 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
         };
     }
 
+    // -- Capture-UI (Baustein 6) -----------------------------------------------
+    captureAllButton.onClick = [this]
+    {
+        const auto numTracks = engine.getCaptureService().exportAll();
+        if (numTracks == 0)
+            captureToast.show ("Keine aktive Aufnahme");
+    };
+
+    capturePanelToggle.setClickingTogglesState (true);
+    capturePanelToggle.onClick = [this]
+    {
+        capturePanel.setVisible (capturePanelToggle.getToggleState());
+        resized();
+    };
+    capturePanel.setVisible (false);
+
+    engine.getCaptureService().onExportFinished =
+        [this] (const CaptureWriter::Report& report) { handleExportReport (report); };
+
     // OSC-Status (verbunden in Main::initialise)
     const auto oscPort = engine.getOscController().getConnectedPort();
     oscLabel.setText (oscPort > 0 ? "OSC :" + juce::String (oscPort)
@@ -106,14 +126,28 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
     addAndMakeVisible (peersLabel);
     addAndMakeVisible (oscLabel);
     addAndMakeVisible (warningLabel);
+    addAndMakeVisible (captureAllButton);
+    addAndMakeVisible (capturePanelToggle);
+    addChildComponent (capturePanel);    // eingeklappt bis zum Toggle
     addAndMakeVisible (canvas);
+    addChildComponent (captureToast);    // Overlay, zeigt sich selbst
 
     setWantsKeyboardFocus (true);
     setResizable (true, true);
-    setSize (1320, 720);
+    setSize (1480, 720);
 
-    timerCallback();    // Peer-Label sofort befüllen, nicht erst nach 250ms
-    startTimerHz (4);   // Session-Polling — Tempo/Peers können sich im Netz ändern
+    timerCallback();      // Peer-Label sofort befüllen, nicht erst nach 66ms
+    // EIN Editor-Timer mit 15 Hz statt 4 Hz + Capture-Extra-Timer: alle
+    // gepollten Getter sind lock-freie Atomics, Repaints nur bei Änderung —
+    // die Capture-Statusanzeige braucht ~15 Hz, Link-Polling verträgt das
+    startTimerHz (15);
+}
+
+EngineEditor::~EngineEditor()
+{
+    // Der Service überlebt den Editor — Callback lösen, sonst zeigte ein
+    // späterer Export-Report ins Leere
+    engine.getCaptureService().onExportFinished = nullptr;
 }
 
 //==============================================================================
@@ -156,6 +190,50 @@ void EngineEditor::launchPresetChooser (bool saving)
 }
 
 //==============================================================================
+void EngineEditor::handleExportReport (const CaptureWriter::Report& report)
+{
+    const auto total = report.numSucceeded + report.numFailed;
+
+    // Pfeil als escaped UTF-8 — MSVC liest BOM-lose Quellen als CP1252
+    const auto arrow = juce::String::fromUTF8 (" \xe2\x86\x92 ");
+    if (report.numFailed == 0)
+        captureToast.show (juce::String (report.numSucceeded)
+                           + (report.numSucceeded == 1 ? " Spur" : " Spuren") + arrow
+                           + report.directory.getFullPathName());
+    else
+        captureToast.show (juce::String (report.numSucceeded) + " von "
+                           + juce::String (total) + " Spuren exportiert ("
+                           + juce::String (report.numFailed) + " fehlgeschlagen)");
+
+    // "Nach Export freigeben": NIE ohne Rückfrage (User-Vorgabe) — nur
+    // erfolgreich exportierte Kanäle, die noch im Zustand held sind
+    if (! engine.getCaptureSettings().getReleaseAfterExport())
+        return;
+
+    std::vector<int> releasable;
+    for (const auto& task : report.tasks)
+        if (task.success && task.channelIndex >= 0)
+            if (const auto* channel = engine.getCaptureService().getChannel (task.channelIndex))
+                if (channel->getState() == CaptureChannel::State::held)
+                    releasable.push_back (task.channelIndex);
+
+    if (releasable.empty())
+        return;
+
+    auto* enginePtr = &engine;  // Processor überlebt den Editor
+    juce::AlertWindow::showOkCancelBox (
+        juce::MessageBoxIconType::QuestionIcon, "RAM-Puffer freigeben?",
+        juce::String (static_cast<int> (releasable.size()))
+            + " exportierte Spur(en) sind weiterhin im RAM gehalten. Jetzt freigeben?",
+        "Freigeben", "Behalten", this,
+        juce::ModalCallbackFunction::create ([enginePtr, releasable] (int result)
+        {
+            if (result == 1)
+                enginePtr->getCaptureService().releaseExportedHeldChannels (releasable);
+        }));
+}
+
+//==============================================================================
 void EngineEditor::timerCallback()
 {
     // Kein Kampf mit dem User: während des Drags gewinnt der Slider
@@ -170,6 +248,12 @@ void EngineEditor::timerCallback()
 
     if (peersLabel.getText() != text)
         peersLabel.setText (text, juce::dontSendNotification);
+
+    // Capture-Status: Button-Ring immer, Panel nur wenn aufgeklappt —
+    // beides repaintet nur bei sichtbarer Änderung
+    captureAllButton.setStatus (engine.getCaptureService().getUiStatus());
+    if (capturePanel.isVisible())
+        capturePanel.refresh();
 }
 
 //==============================================================================
@@ -198,13 +282,23 @@ void EngineEditor::resized()
     place (saveButton,      65);
     place (loadButton,      65, 16);
     place (tempoSlider,    130);
+    place (captureAllButton, 60);            // neben dem Link-Transport
+    place (capturePanelToggle, 85, 16);
     place (rootCombo,       60);
     place (scaleCombo,     110, 16);
     place (peersLabel,     115);
     place (oscLabel,        80);
     warningLabel.setBounds (toolbar);
 
+    if (capturePanel.isVisible())
+        capturePanel.setBounds (bounds.removeFromTop (CapturePanel::preferredHeight));
+
     canvas.setBounds (bounds);
+
+    // Toast: unten mittig über dem Canvas
+    captureToast.setBounds (getLocalBounds()
+                                .withSizeKeepingCentre (460, 44)
+                                .withY (getHeight() - 60));
 }
 
 bool EngineEditor::keyPressed (const juce::KeyPress& key)

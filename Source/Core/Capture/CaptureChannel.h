@@ -48,8 +48,21 @@ namespace conduit
     das der Audio Thread im nächsten Block quittiert (nur im Zustand held).
     Status-Getter sind atomare Momentaufnahmen von jedem Thread. read()
     folgt der Leser-Disziplin des CaptureRingBuffer: hinter dem
-    Schreib-Cursor, kein paralleles attach/detach (Baustein 5 definiert
-    das Halte-Protokoll des Exports).
+    Schreib-Cursor, kein paralleles attach/detach.
+
+    Export-Halte-Protokoll (Baustein 5): tryBeginExportRead() /
+    endExportRead() [Message- bzw. Writer-Thread] zählen aktive Export-
+    Leser. releaseStorage() [Audio] detacht NIE bei aktiven Lesern —
+    es setzt die releaseBarrier (Dekker-Paar, beidseitig seq_cst: entweder
+    sieht der Leser die Barriere und zieht zurück, oder der Audio Thread
+    sieht den Leser und schiebt auf) und merkt die Freigabe audio-lokal
+    vor (detachPending). process() holt sie nach, sobald der letzte Leser
+    fertig ist; bis dahin ist der Kanal stillgelegt (keine Übernahme,
+    keine Live-Writes, openGate wirkt nicht — das Material ist verworfen,
+    neues landet im nächsten Puffersatz oder nach der echten Freigabe).
+    read() validiert seinen Bereich NACH dem Kopieren erneut — wandert
+    die ReadableRange während des Kopierens per Wrap über den gelesenen
+    Bereich, wird das Ergebnis verworfen (false).
 */
 class CaptureChannel
 {
@@ -89,6 +102,29 @@ public:
     void requestRelease() noexcept
     {
         releaseRequested.store (true, std::memory_order_release);
+    }
+
+    //==========================================================================
+    // Export-Halte-Protokoll (Klassendoku) [Message-/Writer-Thread]
+
+    /** Export-Leser anmelden. false, wenn die releaseBarrier steht (Freigabe
+        läuft oder ist vorgemerkt) — dann NICHT lesen. */
+    [[nodiscard]] bool tryBeginExportRead() noexcept
+    {
+        exportReaders.fetch_add (1, std::memory_order_seq_cst);
+        if (releaseBarrier.load (std::memory_order_seq_cst))
+        {
+            exportReaders.fetch_sub (1, std::memory_order_seq_cst);
+            return false;
+        }
+        return true;
+    }
+
+    /** Export-Leser abmelden — eine aufgeschobene Freigabe wird im nächsten
+        process()-Block nachgeholt. */
+    void endExportRead() noexcept
+    {
+        exportReaders.fetch_sub (1, std::memory_order_seq_cst);
     }
 
     //==========================================================================
@@ -142,6 +178,7 @@ private:
     float* segment = nullptr;
 
     // Nur Audio Thread
+    bool detachPending = false;  // Freigabe wartet auf Export-Leser
     int takeoverBudget = 0;
     int windowSamples = 0;
     std::uint64_t gateOpenPosition = 0;
@@ -152,6 +189,8 @@ private:
     // Publiziert [Audio → beliebiger Thread]
     std::atomic<State> state { State::idle };
     std::atomic<bool> releaseRequested { false };
+    std::atomic<int>  exportReaders { 0 };      // Export-Halte-Protokoll
+    std::atomic<bool> releaseBarrier { false }; // Dekker-Flag (Audio → Leser)
     std::atomic<std::uint64_t> heldSince { 0 };
     std::atomic<std::uint64_t> takeoverCursor { 0 };
     std::atomic<std::uint64_t> takeoverEnd { 0 };

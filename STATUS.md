@@ -16,7 +16,19 @@
 
 ## Aktueller Meilenstein (Juni 2026 — abgeschlossen)
 
-**Capture-System, Baustein 4 — Gate-Detektion + AutoCalibrator (`Source/Core/Capture/`):**
+**Capture-System, Baustein 5+6 — Export-Backend + UI (`Source/Core/Capture/`, `Source/UI/`):**
+- `CaptureWriter : juce::Thread`: Export NIE im Audio-Thread — Jobs vom MT (Lock + notify erlaubt), Snapshots (start/end) beim Trigger eingefroren, Aufnahme läuft weiter (SPSC-Leser hinter dem Schreib-Cursor)
+- ALIGNMENT (Kern-Feature): `exportStart = min(start aller Kanäle)`, `padSamples = start − exportStart` Null-Samples vorweg, bext TimeReference = exportStart für ALLE Dateien → DAW-Import liegt samplegenau übereinander, spätere Spuren beginnen mit Stille
+- Format: BWF via `WavAudioFormat` (RF64 ab 4 GB automatisch), Bit-Tiefe aus Settings; Datei vorab in Blöcken allokiert (ENOSPC früh), Header-Flush alle 10 s, Fehler brechen nur den betroffenen Kanal ab (Datei gelöscht, Rest läuft weiter); Dateiname `{timestamp}_{inN|stripName}_{take}.wav`
+- Überholschutz dokumentiert: Chunk-Vergabe priorisiert den vollsten Ring, Abbruch unter Sicherheitsmarge (Kapazität/8), `read()` validiert nach dem Kopieren nach
+- Export-Halte-Protokoll: `tryBeginExportRead`/`endExportRead` am `CaptureChannel` (Dekker-Paar mit `releaseBarrier`, seq_cst) — Freigaben werden bei aktiven Lesern aufgeschoben (`detachPending`); Satz-Ebene: `BufferSet::exportPins`, ausgemusterte Sätze erst bei Pins == 0 zerstört; Re-Anker aus held nutzt `reanchor()` (nur Atomics, kein attach bei laufendem Leser)
+- `CaptureService::exportAll()` [MT], Report per AsyncUpdater auf den MT (`onExportFinished`); `releaseExportedHeldChannels()` für die Nach-Export-Freigabe; TrackSource-Interface so geschnitten, dass ein Live-FIFO (kontinuierliches Multitrack-Recording) später dieselbe Pipeline nutzt
+- UI (Baustein 6): `CaptureAllButton` in der Toolbar neben dem Link-Transport (Ring = Status idle/recording/held + Füllstand + Export-Indikator), einklappbares `CapturePanel` (Settings-Controls inkl. Resize-Confirm-Dialog, Kanal-Status-Leiste), `CaptureToast` ("N Spuren → Ordner", kein AlertWindow); Editor-Timer von 4 auf 15 Hz (EIN Timer, lock-freie Reads, Repaint nur bei Änderung — begründet im EngineEditor-Doc)
+- Settings neu: `releaseAfterExport` (Default AUS = behalten); Freigabe läuft IMMER über einen Ok/Cancel-Dialog — der RAM-Puffer wird nie ohne Rückfrage geleert (User-Vorgabe)
+- Non-ASCII-UI-Literale als escaped UTF-8 (`String::fromUTF8`) — MSVC liest BOM-lose Quellen als CP1252 (Mojibake im ersten Smoke-Test)
+- Tests (`Tests/Core/CaptureWriterTests.cpp`): pure Alignment-Helfer, Padding + BWF-TimeReference im echten File-Roundtrip, Snapshot bei laufender Aufnahme (Producer schreibt parallel weiter, Datei endet exakt bei endPosition), Fehler-Isolation pro Kanal, Überholschutz-Abbruch, Halte-Protokoll (aufgeschobene Freigabe + Barriere)
+
+**Davor: Capture-System, Baustein 4 — Gate-Detektion + AutoCalibrator (`Source/Core/Capture/`):**
 - `CaptureGate` pro Kanal (header-only, läuft im Input-Tap): Zustandsmaschine IDLE → OPEN → (Hold abgelaufen) → IDLE; öffnet bei Block-RMS über der effektiven Schwelle, schließt erst nach holdMinutes durchgehend unter Schwelle − 6 dB (Hysterese — Flattern an der Schwelle resettet den Hold-Zähler); Hold zählt in SAMPLES (`computeHoldSamples`: holdMinutes × 60 × sampleRate), nie Wall-Clock
 - UI-Status pro Kanal als Atomic (idle/recording/held): recording solange offen, held nach dem Schließen bis Export/RAM-Reclaim — `CaptureService` quittiert Freigaben über `notifyContentDiscarded()`; dB→Gain audio-seitig gecacht (kein pow pro Block)
 - AutoCalibrator [Message Thread, 1 Hz über den Guard-Timer]: publiziert `effectiveThreshold = max(Settings-Threshold, NoiseFloor + 12 dB)` in die Kanal-Atomics (`autoCalibrate`), manueller Threshold als Override-Untergrenze; `runAutoCalibration()` public für Tests
@@ -49,9 +61,8 @@
 
 ## Nächste Kandidaten (offen, Reihenfolge nicht festgelegt)
 
-- Capture-Baustein 5: Capture-Trigger/Export (WAV, Leser-Halte-Protokoll am `CaptureRingBuffer`); danach Settings-UI (async Resize-Confirm, RAM-Warnungs-Listener, Gate-Status pro Kanal via `getGate()`)
-
-- Mixer-Modul (mehrere Inputs)
+- Mixer-Modul (mehrere Inputs) — Capture-Kanal-Buttons wandern dann vom CapturePanel in die Channel-Strips, `stripName` ersetzt `in{N}` im Export-Dateinamen
+- Live-FIFO (kontinuierliches Multitrack-Recording) über die bestehende CaptureWriter-Pipeline (TrackSource-Interface liegt bereit)
 - Envelope-Modul (`IClockSlave`)
 - CVTunerModule + Kalibrierungs-Workflow (CLAUDE.md 8)
 - Touch-Gesten P0: Pinch-Zoom, 10-Finger-Panic (CLAUDE.md 10.1)

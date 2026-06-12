@@ -9,11 +9,27 @@ namespace conduit
 CaptureService::CaptureService (CaptureSettings& settingsToUse)
     : settings (settingsToUse)
 {
+    // Vor dem ersten enqueueJob setzen (CaptureWriter-Kontrakt): Reports
+    // landen in der Mailbox und werden per AsyncUpdater auf den MT gehoben
+    writer.onJobFinished = [this] (const CaptureWriter::Report& report)
+    {
+        {
+            const juce::ScopedLock lock (reportLock);
+            pendingReports.push_back (report);
+        }
+        triggerAsyncUpdate();
+    };
+
     startTimer (guardIntervalMs);
 }
 
 CaptureService::~CaptureService()
 {
+    // Writer ZUERST stoppen: laufende Jobs brechen ab und lösen ihre Pins
+    // (releaseResources läuft IMMER) — erst danach darf ownedSets die
+    // Puffersätze gefahrlos zerstören
+    writer.stopThread (10'000);
+    cancelPendingUpdate();
     stopTimer();
     // ownedSets räumt alle Sätze ab — beim Teardown steht das Audio-Device
     // bereits (EngineProcessor-Lebenszyklus), kein Handoff mehr nötig
@@ -38,17 +54,17 @@ void CaptureService::prepare (double sampleRate, int samplesPerBlock, int numInp
     // Audio steht (prepareToPlay-Kontrakt) → Handoff synchron abwickeln:
     // ungelesene Mailbox leeren, Quittungen einsammeln, direkt installieren
     if (auto* unclaimed = pendingSet.exchange (nullptr, std::memory_order_acq_rel))
-        destroySet (unclaimed);
-    drainRetiredSets();
+        retireSet (unclaimed);
     audioSet = nullptr;
 
     auto* fresh = buildSet();
 
-    // Alle älteren Sätze sind jetzt unreferenziert
-    ownedSets.erase (std::remove_if (ownedSets.begin(), ownedSets.end(),
-                                     [fresh] (const std::unique_ptr<BufferSet>& set)
-                                     { return set.get() != fresh; }),
-                     ownedSets.end());
+    // Alle älteren Sätze sind unreferenziert vom Audio — zerstört werden
+    // sie aber erst, wenn kein Export-Job mehr aus ihnen liest (exportPins)
+    for (auto& owned : ownedSets)
+        if (owned.get() != fresh)
+            retireSet (owned.get());
+    drainRetiredSets();
 
     audioSet = fresh;
 }
@@ -186,17 +202,38 @@ CaptureService::BufferSet* CaptureService::buildSet()
 void CaptureService::destroySet (BufferSet* set)
 {
     jassert (set != currentSet);
+    jassert (set->exportPins.load (std::memory_order_acquire) == 0);
     ownedSets.erase (std::remove_if (ownedSets.begin(), ownedSets.end(),
                                      [set] (const std::unique_ptr<BufferSet>& owned)
                                      { return owned.get() == set; }),
                      ownedSets.end());
 }
 
+void CaptureService::retireSet (BufferSet* set)
+{
+    if (std::find (retiredAwaitingDestroy.begin(), retiredAwaitingDestroy.end(), set)
+        == retiredAwaitingDestroy.end())
+        retiredAwaitingDestroy.push_back (set);
+}
+
 void CaptureService::drainRetiredSets()
 {
     BufferSet* retired = nullptr;
     while (retiredSets.pop (retired))
-        destroySet (retired);
+        retireSet (retired);
+
+    // Sweep: nur Sätze ohne aktive Export-Leser zerstören — der Rest wartet
+    // auf den nächsten Tick (der Writer löst seine Pins in releaseResources)
+    retiredAwaitingDestroy.erase (
+        std::remove_if (retiredAwaitingDestroy.begin(), retiredAwaitingDestroy.end(),
+                        [this] (BufferSet* set)
+                        {
+                            if (set->exportPins.load (std::memory_order_acquire) > 0)
+                                return false;
+                            destroySet (set);
+                            return true;
+                        }),
+        retiredAwaitingDestroy.end());
 }
 
 //==============================================================================
@@ -282,7 +319,9 @@ void CaptureService::processInputTap (const juce::AudioBuffer<float>& buffer,
         anyChannelActive.store (anyActive, std::memory_order_relaxed);
     }
 
-    // -- [Capture-Baustein 5] Capture-Trigger / Export -------------------------
+    // Export (Baustein 5) braucht hier nichts: exportAll() friert Snapshots
+    // auf dem Message Thread ein, der CaptureWriter liest hinter dem
+    // Schreib-Cursor — der Tap schreibt einfach weiter.
 
     // SampleClock zuletzt: erst wenn alle Bausteine die Samples dieses Blocks
     // verarbeitet haben, wird die neue Position publiziert (release) — Leser,
@@ -338,12 +377,142 @@ void CaptureService::reallocateBuffers()
     auto* fresh = buildSet();
 
     // Mailbox-Übergabe: ein dort noch liegender, nie abgeholter Satz wird
-    // sofort zerstört — Audio hat ihn nie gesehen, kein Pile-up möglich.
+    // ausgemustert — Audio hat ihn nie gesehen, kein Pile-up möglich; der
+    // Sweep zerstört ihn, sobald keine Export-Pins mehr darauf liegen.
     // Läuft kein Audio, holt das nächste prepare() den Satz aus der Mailbox.
     if (auto* unclaimed = pendingSet.exchange (fresh, std::memory_order_acq_rel))
-        destroySet (unclaimed);
+        retireSet (unclaimed);
 
     drainRetiredSets();
+}
+
+//==============================================================================
+int CaptureService::exportAll()
+{
+    if (currentSet == nullptr || preparedSampleRate <= 0.0)
+        return 0;
+
+    auto* set = currentSet;
+
+    CaptureWriter::Job job;
+    std::vector<CaptureChannel*> pinnedChannels;
+
+    for (int ch = 0; ch < set->numChannels; ++ch)
+    {
+        auto* channel = set->channels[static_cast<size_t> (ch)].get();
+
+        // Leser anmelden, DANN Zustand prüfen (Dekker-Protokoll): schlägt
+        // tryBeginExportRead fehl, läuft gerade eine Freigabe — überspringen
+        if (! channel->tryBeginExportRead())
+            continue;
+
+        const auto state = channel->getState();
+        const auto range = channel->getReadableRange();
+
+        if ((state != CaptureChannel::State::recording
+             && state != CaptureChannel::State::held)
+            || range.to <= range.from)
+        {
+            channel->endExportRead();
+            continue;
+        }
+
+        CaptureWriter::Task task;
+        task.channelIndex  = ch;
+        task.trackName     = "in" + juce::String (ch + 1);  // Strip-Namen mit dem Mixer
+        task.startPosition = range.from;
+        task.endPosition   = range.to;
+        task.source.read = [channel] (std::uint64_t position, float* dest, int numSamples)
+        { return channel->read (position, dest, numSamples); };
+        task.source.getCurrentEnd = [channel] { return channel->getEndPosition(); };
+        task.source.ringCapacitySamples = set->ringCapacity;
+
+        job.tasks.push_back (std::move (task));
+        pinnedChannels.push_back (channel);
+    }
+
+    if (job.tasks.empty())
+        return 0;
+
+    set->exportPins.fetch_add (1, std::memory_order_acq_rel);
+
+    job.sampleRate = preparedSampleRate;
+    job.bitDepth   = settings.getExportBitDepth();
+    job.directory  = settings.getExportDirectory();
+    job.takeNumber = nextTakeNumber++;
+
+    // Läuft IMMER auf dem Writer-Thread: erst die Kanal-Leser lösen, dann
+    // den Satz-Pin — danach darf der Sweep den Satz zerstören
+    job.releaseResources = [set, channels = std::move (pinnedChannels)]
+    {
+        for (auto* channel : channels)
+            channel->endExportRead();
+        set->exportPins.fetch_sub (1, std::memory_order_acq_rel);
+    };
+
+    const auto numTracks = static_cast<int> (job.tasks.size());
+    writer.enqueueJob (std::move (job));
+    return numTracks;
+}
+
+void CaptureService::releaseExportedHeldChannels (const std::vector<int>& channelIndices)
+{
+    if (currentSet == nullptr)
+        return;
+
+    for (const auto ch : channelIndices)
+    {
+        if (ch < 0 || ch >= currentSet->numChannels)
+            continue;
+
+        auto& channel = *currentSet->channels[static_cast<size_t> (ch)];
+        if (channel.getState() == CaptureChannel::State::held)
+            channel.requestRelease();
+    }
+}
+
+CaptureService::UiStatus CaptureService::getUiStatus() const
+{
+    UiStatus status;
+    status.exporting = writer.isBusy();
+
+    if (currentSet == nullptr)
+        return status;
+
+    for (int ch = 0; ch < currentSet->numChannels; ++ch)
+    {
+        const auto& channel = *currentSet->channels[static_cast<size_t> (ch)];
+        const auto state = channel.getState();
+
+        if (state == CaptureChannel::State::recording
+            || state == CaptureChannel::State::awaitingSegment)
+            status.anyRecording = true;
+        else if (state == CaptureChannel::State::held)
+            status.anyHeld = true;
+
+        if (state != CaptureChannel::State::idle && currentSet->ringCapacity > 0)
+        {
+            const auto range = channel.getReadableRange();
+            const auto fill = static_cast<float> (range.to - range.from)
+                            / static_cast<float> (currentSet->ringCapacity);
+            status.fillNorm = juce::jmax (status.fillNorm, juce::jmin (1.0f, fill));
+        }
+    }
+
+    return status;
+}
+
+void CaptureService::handleAsyncUpdate()
+{
+    std::vector<CaptureWriter::Report> reports;
+    {
+        const juce::ScopedLock lock (reportLock);
+        reports.swap (pendingReports);
+    }
+
+    for (const auto& report : reports)
+        if (onExportFinished)
+            onExportFinished (report);
 }
 
 //==============================================================================

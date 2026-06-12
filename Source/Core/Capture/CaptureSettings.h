@@ -96,6 +96,12 @@ public:
 
     static constexpr int   defaultExportBitDepth = 24;  // erlaubt: 16 / 24 / 32
 
+    // Nach erfolgreichem Export gehaltene Kanäle freigeben? Default ist
+    // BEHALTEN (re-exportierbar, RAM-Wächter räumt). Die Freigabe selbst
+    // läuft IMMER über einen Bestätigungs-Dialog der UI — der RAM-Puffer
+    // wird nie ohne Rückfrage geleert.
+    static constexpr bool  defaultReleaseAfterExport = false;
+
     //==========================================================================
     /** Persistenz-Ziel der App: ApplicationProperties mit App-Name "Conduit". */
     [[nodiscard]] static juce::PropertiesFile::Options defaultOptions();
@@ -116,6 +122,7 @@ public:
     [[nodiscard]] bool  getAutoCalibrate() const noexcept;
     [[nodiscard]] int   getRamLimitGb() const noexcept;
     [[nodiscard]] int   getExportBitDepth() const noexcept;
+    [[nodiscard]] bool  getReleaseAfterExport() const noexcept;
 
     /** [Message Thread] */
     [[nodiscard]] juce::File getExportDirectory() const;
@@ -128,6 +135,7 @@ public:
     void setRamLimitGb (int gigabytes);
     void setExportDirectory (const juce::File& directory);  // ungültig/leer → Default
     void setExportBitDepth (int bits);                      // nicht 16/24/32 → Default
+    void setReleaseAfterExport (bool enabled);
 
     //==========================================================================
     // Resize-Policy (siehe Klassendoku)
@@ -185,8 +193,9 @@ private:
     std::atomic<bool>  autoCalibrate  { defaultAutoCalibrate };
 
     // Nur-MT-Felder (atomic für konsistente Getter-Signaturen)
-    std::atomic<int>   ramLimitGb     { defaultRamLimitGb };
-    std::atomic<int>   exportBitDepth { defaultExportBitDepth };
+    std::atomic<int>   ramLimitGb         { defaultRamLimitGb };
+    std::atomic<int>   exportBitDepth     { defaultExportBitDepth };
+    std::atomic<bool>  releaseAfterExport { defaultReleaseAfterExport };
     juce::String exportDirectoryPath;  // nur Message Thread
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CaptureSettings)

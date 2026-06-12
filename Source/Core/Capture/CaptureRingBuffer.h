@@ -28,8 +28,16 @@ namespace conduit
     Schreib-Cursor; ein Leser auf einem anderen Thread liest zuerst
     getEndPosition() (acquire) und konsumiert dann ausschließlich dahinter
     liegende Bereiche via copyOut(). attach()/detach() dürfen nur laufen,
-    solange kein fremder Thread liest — Tests sind single-threaded, der
-    Export (Capture-Baustein 5) definiert sein eigenes Halte-Protokoll.
+    solange kein fremder Thread liest — das stellt das Export-Halte-
+    Protokoll des CaptureChannel sicher (tryBeginExportRead/endExportRead,
+    Freigabe wird bei aktiven Lesern aufgeschoben). Während ein Export
+    liest, darf der Audio Thread deshalb nur reanchor() (reine Atomics)
+    aufrufen, nie attach()/detach().
+
+    Leser und Schreiber überlappen sich räumlich nie: der Export hält per
+    Überholschutz Abstand zum Live-Cursor (CaptureWriter bricht ab, BEVOR
+    der Wrap den Lesebereich erreicht) und CaptureChannel::read() validiert
+    seinen Bereich nach dem Kopieren erneut gegen die ReadableRange.
 
     Gültigkeit (Übernahme-Lücke, Wrap-Verdrängung, Aussetzer) bewertet der
     CaptureChannel über getReadableRange() — der Ring selbst ist reiner
@@ -60,6 +68,17 @@ public:
         startSamplePosition.store (0, std::memory_order_relaxed);
         endPosition.store (0, std::memory_order_release);
         return released;
+    }
+
+    /** Neu ankern ohne Storage-Wechsel (Wiedereröffnung aus held mit
+        Re-Anker): nur die Positions-Atomics wandern — keine Schreibzugriffe
+        auf Nicht-Atomics, ein parallel lesender Export sieht die
+        Verschiebung über die ReadableRange und validiert nach. */
+    void reanchor (std::uint64_t newStartPosition) noexcept
+    {
+        jassert (storage != nullptr);
+        startSamplePosition.store (newStartPosition, std::memory_order_relaxed);
+        endPosition.store (newStartPosition, std::memory_order_release);
     }
 
     [[nodiscard]] bool hasStorage() const noexcept { return storage != nullptr; }

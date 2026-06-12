@@ -94,6 +94,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/Capture/CaptureChannel.cpp
     Source/Core/Capture/CaptureService.cpp
     Source/Core/Capture/CaptureSettings.cpp
+    Source/Core/Capture/CaptureWriter.cpp
     Source/Core/Capture/InputMeter.cpp
     Source/Modules/ConduitModule.cpp
     Source/Modules/ModuleFactory.cpp
@@ -101,6 +102,9 @@ set(CONDUIT_CPP_SOURCES
     Source/Modules/LfoModule.cpp
     Source/Modules/ScopeModule.cpp
     Source/Modules/StepSequencerModule.cpp
+    Source/UI/CaptureAllButton.cpp
+    Source/UI/CapturePanel.cpp
+    Source/UI/CaptureToast.cpp
     Source/UI/NodeCanvas.cpp
     Source/UI/NodeComponent.cpp
     Source/UI/PortComponent.cpp
@@ -124,6 +128,7 @@ target_sources(Conduit PRIVATE
     Source/Core/Capture/CaptureRingBuffer.h
     Source/Core/Capture/CaptureService.h
     Source/Core/Capture/CaptureSettings.h
+    Source/Core/Capture/CaptureWriter.h
     Source/Core/Capture/InputMeter.h
     Source/Core/Capture/PreRollBuffer.h
     Source/Core/Capture/SampleClock.h
@@ -139,6 +144,9 @@ target_sources(Conduit PRIVATE
     Source/Modules/LfoModule.h
     Source/Modules/ScopeModule.h
     Source/Modules/StepSequencerModule.h
+    Source/UI/CaptureAllButton.h
+    Source/UI/CapturePanel.h
+    Source/UI/CaptureToast.h
     Source/UI/NodeCanvas.h
     Source/UI/NodeComponent.h
     Source/UI/PortComponent.h
@@ -222,6 +230,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/CaptureGateTests.cpp
         Tests/Core/CaptureMeterTests.cpp
         Tests/Core/CaptureSettingsTests.cpp
+        Tests/Core/CaptureWriterTests.cpp
         Tests/Core/ClockTests.cpp
         Tests/Core/GraphFaderTests.cpp
         Tests/Core/NamedIdTests.cpp
@@ -251,6 +260,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/Capture/CaptureChannel.cpp
         Source/Core/Capture/CaptureService.cpp
         Source/Core/Capture/CaptureSettings.cpp
+        Source/Core/Capture/CaptureWriter.cpp
         Source/Core/Capture/InputMeter.cpp
         Source/Modules/ConduitModule.cpp
         Source/Modules/ModuleFactory.cpp
@@ -258,6 +268,9 @@ if(CONDUIT_BUILD_TESTS)
         Source/Modules/LfoModule.cpp
         Source/Modules/ScopeModule.cpp
         Source/Modules/StepSequencerModule.cpp
+        Source/UI/CaptureAllButton.cpp
+        Source/UI/CapturePanel.cpp
+        Source/UI/CaptureToast.cpp
         Source/UI/NodeCanvas.cpp
         Source/UI/NodeComponent.cpp
         Source/UI/PortComponent.cpp
@@ -283,6 +296,7 @@ if(CONDUIT_BUILD_TESTS)
     target_link_libraries(ConduitTests
         PRIVATE
             Catch2::Catch2WithMain
+            juce::juce_audio_formats
             juce::juce_audio_processors
             juce::juce_osc
             Ableton::Link

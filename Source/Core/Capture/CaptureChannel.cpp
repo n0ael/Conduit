@@ -14,6 +14,9 @@ void CaptureChannel::prepare (PreRollBuffer& preRollToUse, BufferPool& poolToUse
 //==============================================================================
 void CaptureChannel::openGate (std::uint64_t clockNow, int preRollWindowSamples) noexcept
 {
+    if (detachPending)
+        return;  // Kanal stillgelegt, bis die aufgeschobene Freigabe durch ist
+
     switch (state.load (std::memory_order_relaxed))
     {
         case State::idle:
@@ -62,7 +65,18 @@ void CaptureChannel::process (const float* input, int numSamples,
     // RAM-Wächter-Quittung: Freigabe nur für gehaltenes (inaktives) Material
     if (releaseRequested.exchange (false, std::memory_order_acq_rel))
         if (state.load (std::memory_order_relaxed) == State::held)
+            releaseStorage();  // kann aufschieben (Export-Halte-Protokoll)
+
+    // Aufgeschobene Freigabe nachholen, sobald der letzte Export-Leser weg
+    // ist; bis dahin ist der Kanal stillgelegt (Klassendoku)
+    if (detachPending)
+    {
+        if (exportReaders.load (std::memory_order_seq_cst) == 0)
             releaseStorage();
+
+        if (detachPending)
+            return;
+    }
 
     if (state.load (std::memory_order_relaxed) == State::awaitingSegment && pool != nullptr)
         if (auto* claimed = pool->tryClaimSegment())
@@ -96,6 +110,18 @@ void CaptureChannel::process (const float* input, int numSamples,
 
 void CaptureChannel::releaseStorage() noexcept
 {
+    // Dekker-Paar mit tryBeginExportRead (beidseitig seq_cst): erst die
+    // Barriere setzen, DANN Leser zählen — entweder sieht ein einsteigender
+    // Leser die Barriere (und zieht zurück), oder wir sehen ihn hier und
+    // schieben die Freigabe auf. detach() bei aktivem Leser wäre eine
+    // Data Race auf dem Storage-Pointer.
+    releaseBarrier.store (true, std::memory_order_seq_cst);
+    if (exportReaders.load (std::memory_order_seq_cst) > 0)
+    {
+        detachPending = true;  // process() holt die Freigabe nach
+        return;
+    }
+
     if (segment != nullptr)
     {
         ring.detach();
@@ -107,10 +133,12 @@ void CaptureChannel::releaseStorage() noexcept
     takeoverCursorLocal = 0;
     takeoverEndLocal    = 0;
     lastLiveEnd         = 0;
+    detachPending       = false;
     takeoverCursor.store (0, std::memory_order_relaxed);
     takeoverEnd.store (0, std::memory_order_relaxed);
     contiguousFrom.store (0, std::memory_order_relaxed);
     state.store (State::idle, std::memory_order_release);
+    releaseBarrier.store (false, std::memory_order_seq_cst);
 }
 
 //==============================================================================
@@ -159,12 +187,14 @@ void CaptureChannel::reopenFromHeld (std::uint64_t clockNow, int newWindowSample
     else
     {
         // Pause länger als das Pre-Roll-Fenster (oder alte Übernahme nie
-        // fertig geworden): neu ankern, das alte Material verfällt —
-        // vorläufig, bis Baustein 5 beim Gate-Close exportiert
+        // fertig geworden): neu ankern, das alte Material verfällt.
+        // reanchor statt attach: Storage bleibt derselbe, nur die
+        // Positions-Atomics wandern — ein parallel laufender Export-Leser
+        // sieht die Verschiebung und bricht sauber ab (read() validiert nach)
         auto copyStart = juce::jmax (desired, oldest);
         copyStart      = juce::jmin (copyStart, clockNow);
 
-        ring.attach (segment, pool->getSegmentSamples(), copyStart);
+        ring.reanchor (copyStart);
         contiguousFrom.store (copyStart, std::memory_order_relaxed);
         takeoverCursorLocal = copyStart;
         takeoverEndLocal    = clockNow;
@@ -251,7 +281,14 @@ bool CaptureChannel::read (std::uint64_t position, float* dest, int numSamples) 
         return false;
 
     ring.copyOut (position, dest, numSamples);
-    return true;
+
+    // Nachvalidierung (Export-Halte-Protokoll): ist die ReadableRange
+    // während des Kopierens per Wrap oder Re-Anker über den gelesenen
+    // Bereich gewandert, ist das Ergebnis unbrauchbar. Der Überholschutz
+    // des CaptureWriter hält den Leser ohnehin auf Abstand — das hier ist
+    // die letzte Verteidigungslinie.
+    const auto after = getReadableRange();
+    return position >= after.from && after.to >= range.to;
 }
 
 } // namespace conduit
