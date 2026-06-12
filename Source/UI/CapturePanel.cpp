@@ -7,11 +7,14 @@ namespace
 {
     constexpr int rowHeight = 44;   // Touch-Target (CLAUDE.md 10)
     constexpr int gap = 8;
+    constexpr int meterSteps = 64;  // dB-Quantisierung (Repaint-Schwelle)
+    constexpr float meterFloorDb = -80.0f;
 
     const juce::Colour panelBackground { 0xff2a2e34 };
     const juce::Colour idleColour      { 0xff4a4f57 };
     const juce::Colour recordingColour { 0xffe6453c };
     const juce::Colour heldColour      { 0xffe6a23c };
+    const juce::Colour floorColour     { 0xff4f8fc4 };
 
     juce::Colour colourForState (CaptureChannel::State state)
     {
@@ -24,6 +27,82 @@ namespace
         }
         return idleColour;
     }
+
+    /** Linearer Pegel → quantisierte Position auf der [-80..0]-dB-Skala. */
+    int levelToSteps (float linearLevel)
+    {
+        const auto db = juce::Decibels::gainToDecibels (linearLevel, meterFloorDb);
+        return juce::jlimit (0, meterSteps,
+                             juce::roundToInt (juce::jmap (db, meterFloorDb, 0.0f,
+                                                           0.0f, float (meterSteps))));
+    }
+}
+
+//==============================================================================
+CapturePanel::ChannelRow::ChannelRow (int channelIndexToUse,
+                                      std::function<void (int)> onCaptureToUse)
+    : channelIndex (channelIndexToUse)
+{
+    captureButton.onClick = [this, onCapture = std::move (onCaptureToUse)]
+    { onCapture (channelIndex); };
+    addAndMakeVisible (captureButton);
+}
+
+void CapturePanel::ChannelRow::setDisplayState (const DisplayState& newState)
+{
+    if (display == newState)
+        return;
+
+    display = newState;
+    repaint();
+}
+
+void CapturePanel::ChannelRow::resized()
+{
+    captureButton.setBounds (getLocalBounds().removeFromRight (rowHeight));  // 44×44
+}
+
+void CapturePanel::ChannelRow::paint (juce::Graphics& g)
+{
+    auto bounds = getLocalBounds();
+    bounds.removeFromRight (rowHeight + 4);  // Capture-Button + Lücke
+
+    // Status-LED
+    const auto led = bounds.removeFromLeft (rowHeight / 2).toFloat()
+                         .withSizeKeepingCentre (12.0f, 12.0f);
+    g.setColour (colourForState (display.state));
+    g.fillEllipse (led);
+
+    // Kanal-Name
+    g.setColour (juce::Colours::white.withAlpha (0.7f));
+    g.setFont (juce::FontOptions { 13.0f });
+    g.drawText ("in" + juce::String (channelIndex + 1),
+                bounds.removeFromLeft (34), juce::Justification::centredLeft);
+
+    // Mini-Pegel: RMS-Füllung, Peak-Strich, Noise-Floor-Marker
+    const auto meter = bounds.reduced (2, 14);
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.fillRoundedRectangle (meter.toFloat(), 3.0f);
+
+    const auto xForSteps = [&meter] (int steps)
+    { return meter.getX() + meter.getWidth() * steps / meterSteps; };
+
+    if (display.rmsSteps > 0)
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.55f));
+        g.fillRect (meter.withRight (xForSteps (display.rmsSteps)));
+    }
+
+    if (display.peakSteps > 0)
+    {
+        g.setColour (juce::Colours::white);
+        g.fillRect (xForSteps (display.peakSteps) - 1, meter.getY(), 2, meter.getHeight());
+    }
+
+    // Noise-Floor-Marker: blauer Strich über die volle Zeilen-Pegelhöhe
+    g.setColour (floorColour);
+    g.fillRect (xForSteps (display.floorSteps) - 1, meter.getY() - 3, 2,
+                meter.getHeight() + 6);
 }
 
 //==============================================================================
@@ -78,15 +157,16 @@ CapturePanel::CapturePanel (CaptureSettings& settingsToUse, CaptureService& serv
             request.field == CaptureSettings::PendingResizeRequest::Field::bufferMinutes
                 ? "Ring-Puffer" : "Pre-Roll";
         const auto message = juce::String (fieldName) + " auf "
-                           + juce::String (request.requestedValue)
-                           + juce::String::fromUTF8 (" \xc3\xa4ndern? Die laufende Aufnahme"
-                                                     " wird verworfen (kein Auto-Export).");
+                           + juce::String (request.requestedValue) + "? "
+                           + juce::String::fromUTF8 ("Puffergr\xc3\xb6\xc3\x9f"
+                                                     "e \xc3\xa4ndern l\xc3\xb6scht alle"
+                                                     " aktuellen Aufnahmen. Fortfahren?");
 
         auto* settingsPtr = &settings;  // Settings überleben den Editor (Processor-Besitz)
         juce::AlertWindow::showOkCancelBox (
             juce::MessageBoxIconType::QuestionIcon,
             juce::String::fromUTF8 ("Capture-Puffer \xc3\xa4ndern?"), message,
-            juce::String::fromUTF8 ("\xc3\x84ndern"), "Abbrechen", this,
+            "Fortfahren", "Abbrechen", this,
             juce::ModalCallbackFunction::create ([settingsPtr] (int result)
             {
                 if (result == 1)
@@ -116,6 +196,9 @@ CapturePanel::CapturePanel (CaptureSettings& settingsToUse, CaptureService& serv
     ramWarningLabel.setColour (juce::Label::textColourId, juce::Colours::orange);
     ramWarningLabel.setVisible (false);
 
+    channelViewport.setViewedComponent (&channelContainer, false);
+    channelViewport.setScrollBarsShown (true, false);
+
     addAndMakeVisible (thresholdSlider);
     addAndMakeVisible (holdSlider);
     addAndMakeVisible (preRollSlider);
@@ -126,9 +209,11 @@ CapturePanel::CapturePanel (CaptureSettings& settingsToUse, CaptureService& serv
     addAndMakeVisible (directoryButton);
     addAndMakeVisible (directoryLabel);
     addAndMakeVisible (ramWarningLabel);
+    addAndMakeVisible (channelViewport);
 
     settings.addChangeListener (this);
-    service.addChangeListener (this);   // RAM-Wächter-Warnung
+    service.addChangeListener (this);   // RAM-Warnung + Kanalzahl (prepare)
+    rebuildChannelRows();
     syncControls();
 }
 
@@ -167,9 +252,51 @@ void CapturePanel::chooseExportDirectory()
 
 void CapturePanel::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    // Settings-Broadcast und RAM-Warnung laufen beide hier auf — ein
-    // kompletter Sync ist billig und hält die Controls konsistent
+    // Settings-Broadcast, RAM-Warnung und prepare() (Device-/Kanalzahl-
+    // Wechsel) laufen alle hier auf — ein kompletter Sync ist billig
     syncControls();
+    rebuildChannelRows();
+}
+
+//==============================================================================
+void CapturePanel::rebuildChannelRows()
+{
+    const auto numChannels = service.getRingNumChannels();
+    if (static_cast<int> (channelRows.size()) == numChannels)
+        return;
+
+    channelRows.clear();
+    channelRows.reserve (static_cast<size_t> (juce::jmax (0, numChannels)));
+
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        auto row = std::make_unique<ChannelRow> (ch, [this] (int channelIndex)
+                                                 { captureSingleChannel (channelIndex); });
+        channelContainer.addAndMakeVisible (*row);
+        channelRows.push_back (std::move (row));
+    }
+
+    layoutChannelRows();
+    repaint (channelArea);  // "keine Eingänge"-Hinweis ein-/ausblenden
+}
+
+void CapturePanel::layoutChannelRows()
+{
+    const auto numRows = static_cast<int> (channelRows.size());
+    const auto width = juce::jmax (0, channelViewport.getWidth()
+                                          - channelViewport.getScrollBarThickness());
+    channelContainer.setSize (width, numRows * (rowHeight + 2));
+
+    for (int i = 0; i < numRows; ++i)
+        channelRows[static_cast<size_t> (i)]->setBounds (0, i * (rowHeight + 2),
+                                                         width, rowHeight);
+}
+
+void CapturePanel::captureSingleChannel (int channelIndex)
+{
+    const auto numTracks = service.exportChannel (channelIndex);
+    if (numTracks == 0 && onToast)
+        onToast ("in" + juce::String (channelIndex + 1) + ": keine aktive Aufnahme");
 }
 
 void CapturePanel::syncControls()
@@ -190,39 +317,24 @@ void CapturePanel::syncControls()
 //==============================================================================
 void CapturePanel::refresh()
 {
-    const auto numChannels = service.getRingNumChannels();
-    bool changed = static_cast<int> (channelSnapshots.size()) != numChannels;
-    channelSnapshots.resize (static_cast<size_t> (numChannels));
+    rebuildChannelRows();  // defensiv — prepare()-Broadcast ist der Hauptpfad
 
-    const auto ringCapacity = service.getRingCapacitySamples();
+    const auto& meter = service.getInputMeter();
 
-    for (int ch = 0; ch < numChannels; ++ch)
+    for (size_t i = 0; i < channelRows.size(); ++i)
     {
+        const auto ch = static_cast<int> (i);
         const auto* channel = service.getChannel (ch);
         if (channel == nullptr)
             continue;
 
-        ChannelSnapshot snapshot;
-        snapshot.state = channel->getState();
-
-        if (snapshot.state != CaptureChannel::State::idle && ringCapacity > 0)
-        {
-            const auto range = channel->getReadableRange();
-            const auto fill = static_cast<float> (range.to - range.from)
-                            / static_cast<float> (ringCapacity);
-            snapshot.fillSteps = juce::roundToInt (juce::jlimit (0.0f, 1.0f, fill) * 32.0f);
-        }
-
-        auto& previous = channelSnapshots[static_cast<size_t> (ch)];
-        if (previous.state != snapshot.state || previous.fillSteps != snapshot.fillSteps)
-        {
-            previous = snapshot;
-            changed = true;
-        }
+        ChannelRow::DisplayState state;
+        state.state      = channel->getState();
+        state.rmsSteps   = levelToSteps (meter.getRms (ch));
+        state.peakSteps  = levelToSteps (meter.getPeak (ch));
+        state.floorSteps = levelToSteps (meter.getNoiseFloor (ch));
+        channelRows[i]->setDisplayState (state);  // repaintet nur bei Änderung
     }
-
-    if (changed)
-        repaint (channelArea);
 }
 
 //==============================================================================
@@ -230,40 +342,15 @@ void CapturePanel::paint (juce::Graphics& g)
 {
     g.fillAll (panelBackground);
 
-    // Kanal-Leiste: eine Säule pro Input — Statusfarbe, Höhe = Füllstand
-    auto area = channelArea.reduced (4);
     g.setColour (juce::Colours::black.withAlpha (0.25f));
-    g.fillRoundedRectangle (area.toFloat(), 4.0f);
+    g.fillRoundedRectangle (channelArea.toFloat(), 4.0f);
 
-    const auto numChannels = static_cast<int> (channelSnapshots.size());
-    if (numChannels == 0)
+    if (channelRows.empty())
     {
         g.setColour (juce::Colours::white.withAlpha (0.4f));
         g.setFont (juce::FontOptions { 13.0f });
-        g.drawText (juce::String::fromUTF8 ("keine Eing\xc3\xa4nge"), area,
+        g.drawText (juce::String::fromUTF8 ("keine Eing\xc3\xa4nge"), channelArea,
                     juce::Justification::centred);
-        return;
-    }
-
-    const auto inner = area.reduced (6);
-    const auto columnWidth = juce::jmax (3, juce::jmin (14, inner.getWidth() / numChannels));
-
-    for (int ch = 0; ch < numChannels; ++ch)
-    {
-        const auto& snapshot = channelSnapshots[static_cast<size_t> (ch)];
-        auto column = juce::Rectangle<int> (inner.getX() + ch * columnWidth, inner.getY(),
-                                            columnWidth - 2, inner.getHeight());
-        if (column.getRight() > inner.getRight())
-            break;  // mehr Kanäle als Platz — Rest mit dem Mixer-Meilenstein
-
-        const auto colour = colourForState (snapshot.state);
-        g.setColour (colour.withAlpha (0.25f));
-        g.fillRect (column);
-
-        const auto fillHeight = column.getHeight() * snapshot.fillSteps / 32;
-        g.setColour (colour);
-        g.fillRect (column.removeFromBottom (juce::jmax (
-            snapshot.state == CaptureChannel::State::idle ? 0 : 2, fillHeight)));
     }
 }
 
@@ -271,9 +358,12 @@ void CapturePanel::resized()
 {
     auto bounds = getLocalBounds().reduced (8, 6);
 
-    // Rechts: Kanal-Leiste (~28 %), links zwei Control-Zeilen
-    channelArea = bounds.removeFromRight (bounds.getWidth() * 28 / 100);
+    // Rechts: Kanal-Zeilen (~30 %), links zwei Control-Zeilen
+    channelArea = bounds.removeFromRight (bounds.getWidth() * 30 / 100);
     bounds.removeFromRight (gap);
+
+    channelViewport.setBounds (channelArea.reduced (4));
+    layoutChannelRows();
 
     auto topRow = bounds.removeFromTop (rowHeight);
     bounds.removeFromTop (bounds.getHeight() - rowHeight);  // Rest-Lücke mittig

@@ -90,6 +90,8 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
         resized();
     };
     capturePanel.setVisible (false);
+    capturePanel.onToast = [this] (const juce::String& message)
+    { captureToast.show (message); };
 
     engine.getCaptureService().onExportFinished =
         [this] (const CaptureWriter::Report& report) { handleExportReport (report); };

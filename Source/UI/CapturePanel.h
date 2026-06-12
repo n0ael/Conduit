@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <memory>
 #include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -16,10 +18,13 @@ namespace conduit
     Kanal-Anzeigen mit dem Mixer-Meilenstein in die Channel-Strips wandern.
 
     Read/listen-only gegenüber der Engine (CLAUDE.md 6): die Controls
-    schreiben ausschließlich in CaptureSettings [Message Thread], die
-    Kanal-Leiste rechts ist reine Anzeige und wird vom EngineEditor-Timer
-    über refresh() gefüttert (Status-Atomics des CaptureService, kein
-    eigener Timer, Repaint nur bei Änderung).
+    schreiben ausschließlich in CaptureSettings [Message Thread]. Rechts
+    eine Zeile pro Input-Kanal — Status-LED, Mini-Pegel mit Noise-Floor-
+    Marker (InputMeter-Atomics) und Einzel-Capture-Button (44 px,
+    CaptureService::exportChannel) — gefüttert vom EngineEditor-Timer über
+    refresh() (kein eigener Timer, Repaint nur bei quantisierter Änderung).
+    Die Kanalanzahl folgt dem aktiven Device: prepare() feuert einen
+    ChangeBroadcast, refresh() prüft zusätzlich pro Tick (defensiv).
 
     Resize-Policy-UI (CaptureSettings-Doku): bufferMinutes/preRollSeconds
     laufen über die Settings-Setter; bei aktiver Aufnahme feuert
@@ -42,18 +47,56 @@ public:
     CapturePanel (CaptureSettings& settingsToUse, CaptureService& serviceToUse);
     ~CapturePanel() override;
 
-    /** [Message Thread, Editor-Timer] Kanal-Leiste aus den Status-Atomics
+    /** [Message Thread, Editor-Timer] Kanal-Zeilen aus den Status-Atomics
         aktualisieren — Repaint nur bei sichtbarer Änderung. */
     void refresh();
 
     void paint (juce::Graphics& g) override;
     void resized() override;
 
+    /** Toast-Ausgabe des Editors (Einzel-Capture-Feedback). */
+    std::function<void (const juce::String&)> onToast;
+
 private:
+    //==========================================================================
+    /** Eine Kanal-Zeile: Status-LED, Mini-Pegel (RMS-Füllung, Peak-Strich)
+        mit Noise-Floor-Marker, Einzel-Capture-Button. Reine Anzeige plus
+        Button — gefüttert über setDisplayState() (quantisierte Werte als
+        Repaint-Schwelle). */
+    class ChannelRow : public juce::Component
+    {
+    public:
+        ChannelRow (int channelIndexToUse, std::function<void (int)> onCaptureToUse);
+
+        struct DisplayState
+        {
+            CaptureChannel::State state = CaptureChannel::State::idle;
+            int rmsSteps = 0;    // dB-Position [-80..0] auf 64 Stufen
+            int peakSteps = 0;
+            int floorSteps = 0;
+            bool operator== (const DisplayState&) const = default;
+        };
+
+        void setDisplayState (const DisplayState& newState);
+
+        void paint (juce::Graphics& g) override;
+        void resized() override;
+
+    private:
+        int channelIndex;
+        DisplayState display;
+        juce::TextButton captureButton { "CAP" };
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelRow)
+    };
+
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
     void syncControls();
     void chooseExportDirectory();
     void applyRingSlider (juce::Slider& slider, bool isBufferMinutes);
+    void rebuildChannelRows();
+    void layoutChannelRows();
+    void captureSingleChannel (int channelIndex);
 
     CaptureSettings& settings;
     CaptureService& service;
@@ -71,12 +114,10 @@ private:
     juce::Label directoryLabel;
     juce::Label ramWarningLabel;
 
-    struct ChannelSnapshot
-    {
-        CaptureChannel::State state = CaptureChannel::State::idle;
-        int fillSteps = 0;  // quantisiert, Repaint-Schwelle
-    };
-    std::vector<ChannelSnapshot> channelSnapshots;
+    // Kanal-Zeilen im Viewport (Kanalzahl kann die Panel-Höhe übersteigen)
+    juce::Viewport channelViewport;
+    juce::Component channelContainer;
+    std::vector<std::unique_ptr<ChannelRow>> channelRows;
     juce::Rectangle<int> channelArea;
 
     // Muss den async Callback überleben (JUCE_MODAL_LOOPS_PERMITTED=0)

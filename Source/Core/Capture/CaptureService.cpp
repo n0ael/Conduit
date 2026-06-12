@@ -67,6 +67,10 @@ void CaptureService::prepare (double sampleRate, int samplesPerBlock, int numInp
     drainRetiredSets();
 
     audioSet = fresh;
+
+    // Device-Wechsel kann die Kanalzahl ändern — die UI (CapturePanel) baut
+    // ihre Kanal-Zeilen auf diesen Broadcast hin neu auf (async, MT)
+    sendChangeMessage();
 }
 
 //==============================================================================
@@ -389,6 +393,16 @@ void CaptureService::reallocateBuffers()
 //==============================================================================
 int CaptureService::exportAll()
 {
+    return enqueueExport (-1);
+}
+
+int CaptureService::exportChannel (int channelIndex)
+{
+    return channelIndex >= 0 ? enqueueExport (channelIndex) : 0;
+}
+
+int CaptureService::enqueueExport (int onlyChannel)
+{
     if (currentSet == nullptr || preparedSampleRate <= 0.0)
         return 0;
 
@@ -399,6 +413,9 @@ int CaptureService::exportAll()
 
     for (int ch = 0; ch < set->numChannels; ++ch)
     {
+        if (onlyChannel >= 0 && ch != onlyChannel)
+            continue;
+
         auto* channel = set->channels[static_cast<size_t> (ch)].get();
 
         // Leser anmelden, DANN Zustand prüfen (Dekker-Protokoll): schlägt

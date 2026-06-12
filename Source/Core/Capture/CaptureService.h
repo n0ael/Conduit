@@ -135,6 +135,10 @@ public:
         Spuren (0 = nichts Aktives oder Service nicht prepared). */
     int exportAll();
 
+    /** [Message Thread] Einzel-Capture eines Kanals (CapturePanel-Zeile) —
+        dieselbe Pipeline wie exportAll(), nur auf einen Kanal begrenzt. */
+    int exportChannel (int channelIndex);
+
     /** [Message Thread] Nach Export + User-Bestätigung: die genannten Kanäle
         freigeben, sofern sie (noch) im Zustand held sind — die Quittung
         kommt vom Audio Thread im nächsten Block. */
@@ -243,6 +247,9 @@ private:
     void drainRetiredSets();            // [MT] Quittungen einsammeln + Sweep
     void timerCallback() override;      // RAM-Wächter + 1-Hz-AutoCalibrator
     void handleAsyncUpdate() override;  // Writer-Reports auf den MT heben
+
+    /** [MT] Gemeinsamer Export-Pfad — onlyChannel = -1 exportiert alle. */
+    int enqueueExport (int onlyChannel);
 
     static constexpr int guardIntervalMs = 200;
     static constexpr int guardTicksPerCalibration = 5;     // 5 × 200 ms = 1 Hz
