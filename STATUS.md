@@ -16,7 +16,13 @@
 
 ## Aktueller Meilenstein (Juni 2026 — abgeschlossen)
 
-**Capture-System, Baustein 1 — Sample-Clock + Input-Metering (`Source/Core/Capture/`):**
+**Capture-System, Baustein 2 — CaptureSettings + Resize-Policy:**
+- `CaptureSettings`: App-Zustand via `juce::ApplicationProperties` (NICHT im ValueTree — loadPreset lässt Capture unberührt, gleiche Trennung wie Link-Tempo); RT-Felder als Atomics [MT→Audio], `ChangeBroadcaster` für die UI
+- Felder: bufferMinutes 15 (5–30), preRollSeconds 60 (10–120), thresholdDb −40 (−80…−20), holdMinutes 10 (1–30), autoCalibrate, ramLimitGb 3, exportDirectory, exportBitDepth 24
+- Resize-Policy: Kanal aktiv → Wert nicht übernehmen, `PendingResizeRequest`-Callback an die UI (async Confirm), bestätigt → `invalidateAllBuffers()` (kein Auto-Export) + Reallokation; inaktiv → still. Über `ICaptureBufferHost`-Interface getestet (Mock)
+- `CaptureService::prepare()` allokiert den Capture-Ring nach Settings (bufferMinutes, gedeckelt durch ramLimitGb); Settings-Atomics werden pro Block im Tap gelesen (Wirkung kommt mit dem Gate)
+
+**Davor: Capture-System, Baustein 1 — Sample-Clock + Input-Metering (`Source/Core/Capture/`):**
 - `SampleClock`: globale, lock-free Sample-Position (atomic uint64, release/acquire); tickt am Ende des Input-Taps, Reset bei `prepareToPlay`
 - `InputMeter`: Peak/RMS (~50 ms) + Noise-Floor-Schätzer (Minimum-Tracking, ~30-s-Release) für bis zu 64 Kanäle, fixe Arrays, atomics Audio→UI
 - `CaptureService`: Input-Tap als ERSTE Operation in `processBlock` (roher Hardware-Input, vor Graph/GraphFader); Marker für Gate, PreRoll-Ring, Capture-Trigger
@@ -28,7 +34,7 @@
 
 ## Nächste Kandidaten (offen, Reihenfolge nicht festgelegt)
 
-- Capture-Baustein 2–4: Gate (Signal über Noise-Floor), PreRoll-Ringbuffer, Capture-Trigger/Export
+- Capture-Baustein 3–4: PreRoll-Ring-Schreibpfad (Handoff-Protokoll gegen Reallokation!), Gate (Signal über Noise-Floor), Capture-Trigger/Export; danach Settings-UI (async Resize-Confirm)
 
 - Mixer-Modul (mehrere Inputs)
 - Envelope-Modul (`IClockSlave`)

@@ -37,6 +37,10 @@ EngineProcessor::EngineProcessor()
     // Globale Session-Skala (6.2): Defaults sicherstellen, Properties spiegeln
     ensureSessionScaleDefaults();
     rootState.addListener (this);
+
+    // Resize-Policy der Capture-Settings gegen den Service verdrahten
+    // (Aktivitäts-Check, Invalidierung, Reallokation — CaptureSettings-Doku)
+    captureSettings.setBufferHost (&captureService);
 }
 
 EngineProcessor::~EngineProcessor()
@@ -256,5 +260,6 @@ NodeUiRegistry& EngineProcessor::getNodeUiRegistry() noexcept  { return nodeUiRe
 OscController& EngineProcessor::getOscController() noexcept    { return oscController; }
 LinkClock& EngineProcessor::getLinkClock() noexcept            { return linkClock; }
 const CaptureService& EngineProcessor::getCaptureService() const noexcept { return captureService; }
+CaptureSettings& EngineProcessor::getCaptureSettings() noexcept { return captureSettings; }
 
 } // namespace conduit

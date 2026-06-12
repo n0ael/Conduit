@@ -91,6 +91,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/NodeUiRegistry.cpp
     Source/Core/OscController.cpp
     Source/Core/Capture/CaptureService.cpp
+    Source/Core/Capture/CaptureSettings.cpp
     Source/Core/Capture/InputMeter.cpp
     Source/Modules/ConduitModule.cpp
     Source/Modules/ModuleFactory.cpp
@@ -116,6 +117,7 @@ target_sources(Conduit PRIVATE
     Source/Core/NodeUiRegistry.h
     Source/Core/OscController.h
     Source/Core/Capture/CaptureService.h
+    Source/Core/Capture/CaptureSettings.h
     Source/Core/Capture/InputMeter.h
     Source/Core/Capture/SampleClock.h
     Source/Interfaces/IClockSlave.h
@@ -210,6 +212,7 @@ if(CONDUIT_BUILD_TESTS)
 
     set(CONDUIT_TEST_CPP_SOURCES
         Tests/Core/CaptureMeterTests.cpp
+        Tests/Core/CaptureSettingsTests.cpp
         Tests/Core/ClockTests.cpp
         Tests/Core/GraphFaderTests.cpp
         Tests/Core/NamedIdTests.cpp
@@ -236,6 +239,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/NodeUiRegistry.cpp
         Source/Core/OscController.cpp
         Source/Core/Capture/CaptureService.cpp
+        Source/Core/Capture/CaptureSettings.cpp
         Source/Core/Capture/InputMeter.cpp
         Source/Modules/ConduitModule.cpp
         Source/Modules/ModuleFactory.cpp

@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <memory>
 
 #include "Core/Capture/CaptureService.h"
 
@@ -12,6 +13,34 @@ namespace
 
 constexpr double testSampleRate = 48000.0;
 constexpr int testBlockSize = 480;  // 10 ms — 100 Blöcke pro Sekunde
+
+/** Settings-Persistenz in ein Temp-Verzeichnis statt in die echte
+    Conduit.settings des Users — Verzeichnis wird im Dtor gelöscht. */
+struct TempCaptureSettings
+{
+    TempCaptureSettings()
+        : folder (juce::File::getSpecialLocation (juce::File::tempDirectory)
+                      .getChildFile ("ConduitCaptureTests")
+                      .getChildFile (juce::Uuid().toString()))
+    {
+        folder.createDirectory();
+
+        juce::PropertiesFile::Options options;
+        options.applicationName = "ConduitCaptureTests";
+        options.filenameSuffix  = ".settings";
+        options.folderName      = folder.getFullPathName();  // absoluter Pfad
+        settings = std::make_unique<conduit::CaptureSettings> (options);
+    }
+
+    ~TempCaptureSettings()
+    {
+        settings.reset();
+        folder.deleteRecursively();
+    }
+
+    juce::File folder;
+    std::unique_ptr<conduit::CaptureSettings> settings;
+};
 
 /** Füllt einen Kanal mit einem phasenkontinuierlichen Sinus. */
 void fillSine (juce::AudioBuffer<float>& buffer, int channel,
@@ -141,7 +170,10 @@ TEST_CASE ("InputMeter: Noise-Floor konvergiert auf den Rauschpegel", "[capture]
 //==============================================================================
 TEST_CASE ("CaptureService: Input-Tap taktet die SampleClock und misst", "[capture]")
 {
-    conduit::CaptureService service;
+    juce::ScopedJuceInitialiser_GUI juceRuntime;  // PropertiesFile nutzt Timer
+
+    TempCaptureSettings temp;
+    conduit::CaptureService service (*temp.settings);
     service.prepare (testSampleRate, testBlockSize, 2);
     REQUIRE (service.getSampleClock().now() == 0);
 

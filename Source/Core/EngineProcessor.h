@@ -84,6 +84,7 @@ public:
     [[nodiscard]] OscController& getOscController() noexcept;
     [[nodiscard]] LinkClock& getLinkClock() noexcept;
     [[nodiscard]] const CaptureService& getCaptureService() const noexcept;
+    [[nodiscard]] CaptureSettings& getCaptureSettings() noexcept;
 
 private:
     /** Legt die reservierten I/O-Tree-Nodes (audio_input/audio_output) an,
@@ -117,9 +118,16 @@ private:
     LinkClock linkClock;
     ClockBus clockBus;
 
-    // Capture-Fundament (SampleClock + Input-Metering): processInputTap()
-    // läuft als ERSTE Operation in processBlock auf dem rohen Hardware-Input
-    CaptureService captureService;
+    // Capture-Settings: App-Zustand via ApplicationProperties, KEIN Patch-
+    // Zustand — loadPreset() ersetzt den Root-Tree, Capture bleibt unberührt
+    // (gleiche Trennung wie das Link-Tempo, siehe EngineEditor-Doku)
+    CaptureSettings captureSettings;
+
+    // Capture-Fundament (SampleClock + Input-Metering + Ring-Allokation):
+    // processInputTap() läuft als ERSTE Operation in processBlock auf dem
+    // rohen Hardware-Input. Nach den Settings deklariert (Konstruktor-Ref);
+    // die Host-Verdrahtung für die Resize-Policy passiert im Konstruktor.
+    CaptureService captureService { captureSettings };
 
     // Default-Module werden im Konstruktor registriert
     ModuleFactory moduleFactory;
