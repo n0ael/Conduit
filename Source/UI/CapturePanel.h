@@ -8,6 +8,7 @@
 
 #include "Core/Capture/CaptureService.h"
 #include "Core/Capture/CaptureSettings.h"
+#include "Core/ChannelNames.h"
 
 namespace conduit
 {
@@ -33,6 +34,12 @@ namespace conduit
     (Erweiterung wartet auf inaktive Kanäle) zeigt seine Zeile mit
     idle-LED und stummem Pegel.
 
+    Kanal-Namen: Hardware-Zeilen zeigen das effektive ChannelNames-Label
+    (userLabel → Device-Name → "In N"). Doppelklick oder Long-Press auf den
+    Namen öffnet den Inline-TextEditor des Labels (kein Modal-Loop, 13.2);
+    leere Eingabe setzt auf den Default zurück. Tap-Zeilen sind hier nicht
+    editierbar — ihr Name ist die moduleId (Rename am Node-Titel).
+
     Resize-Policy-UI (CaptureSettings-Doku): bufferMinutes/preRollSeconds
     laufen über die Settings-Setter; bei aktiver Aufnahme feuert
     onPendingResize → async Ok/Cancel-AlertWindow
@@ -51,7 +58,8 @@ class CapturePanel : public juce::Component,
 public:
     static constexpr int preferredHeight = 128;
 
-    CapturePanel (CaptureSettings& settingsToUse, CaptureService& serviceToUse);
+    CapturePanel (CaptureSettings& settingsToUse, CaptureService& serviceToUse,
+                  ChannelNames& channelNamesToUse);
     ~CapturePanel() override;
 
     /** [Message Thread, Editor-Timer] Kanal-Zeilen aus den Status-Atomics
@@ -74,9 +82,11 @@ private:
     {
     public:
         /** captureIndex = Kanal-Index beim Service (Hardware oder
-            virtueller Slot); -1 = Tap ohne Puffer (nur Name + idle-LED). */
+            virtueller Slot); -1 = Tap ohne Puffer (nur Name + idle-LED).
+            onRenameToUse leer → Name nicht editierbar (Tap-Zeilen). */
         ChannelRow (int captureIndexToUse, juce::String nameToUse,
-                    std::function<void (int, juce::String)> onCaptureToUse);
+                    std::function<void (int, juce::String)> onCaptureToUse,
+                    std::function<void (juce::String)> onRenameToUse = {});
 
         struct DisplayState
         {
@@ -93,9 +103,27 @@ private:
         void resized() override;
 
     private:
+        /** Zeilen-Label mit Inline-Editor: Doppelklick (Label-Standard)
+            oder Long-Press (Touch, 10) öffnen den TextEditor. */
+        class NameLabel : public juce::Label,
+                          private juce::Timer
+        {
+        public:
+            using juce::Label::Label;
+
+            void mouseDown (const juce::MouseEvent& event) override;
+            void mouseDrag (const juce::MouseEvent& event) override;
+            void mouseUp (const juce::MouseEvent& event) override;
+
+        private:
+            static constexpr int longPressMs = 500;
+            void timerCallback() override;
+        };
+
         int captureIndex;
         juce::String name;
         DisplayState display;
+        NameLabel nameLabel;
         juce::TextButton captureButton { "CAP" };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelRow)
@@ -122,6 +150,7 @@ private:
 
     CaptureSettings& settings;
     CaptureService& service;
+    ChannelNames& channelNames;
 
     juce::Slider thresholdSlider { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     juce::Slider holdSlider      { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };

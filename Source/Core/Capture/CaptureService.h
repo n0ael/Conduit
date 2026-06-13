@@ -229,6 +229,11 @@ public:
         Writer-Thread gehoben. Der Editor setzt und cleart den Callback. */
     std::function<void (const CaptureWriter::Report&)> onExportFinished;
 
+    /** [Message Thread, beim Enqueue gelesen] Spurname eines HARDWARE-Kanals
+        für Export-Dateinamen — der EngineProcessor liefert das sanitierte
+        ChannelNames-Label. Unverdrahtet oder leeres Ergebnis → "in{N}". */
+    std::function<juce::String (int channel)> hardwareTrackName;
+
     [[nodiscard]] bool isExportBusy() const noexcept { return writer.isBusy(); }
 
     /** Toolbar-Aggregat (CaptureAllButton): Status + Füllstand über alle

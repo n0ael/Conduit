@@ -24,8 +24,13 @@ struct PortInfo
     Die Component ist 24×24px (Hit-Zone), gezeichnet wird ein kleinerer
     Kreis; der Canvas erweitert die Treffer-Toleranz beim Drop zusätzlich
     auf Touch-Maß (CLAUDE.md 10).
+
+    SettableTooltipClient: an den I/O-Endpunkt-Nodes setzt die NodeComponent
+    das ChannelNames-Label als Tooltip (Maus-Hover; Touch sieht stattdessen
+    die in die Kachel gemalten Labels).
 */
-class PortComponent final : public juce::Component
+class PortComponent final : public juce::Component,
+                            public juce::SettableTooltipClient
 {
 public:
     explicit PortComponent (PortInfo portInfo);

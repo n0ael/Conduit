@@ -42,14 +42,60 @@ namespace
 }
 
 //==============================================================================
+void CapturePanel::ChannelRow::NameLabel::mouseDown (const juce::MouseEvent& event)
+{
+    juce::Label::mouseDown (event);
+
+    if (isEditable())
+        startTimer (longPressMs);
+}
+
+void CapturePanel::ChannelRow::NameLabel::mouseDrag (const juce::MouseEvent& event)
+{
+    juce::Label::mouseDrag (event);
+
+    // Drag (Scroll-Geste im Viewport) ist kein Long-Press
+    if (event.getDistanceFromDragStart() > 8)
+        stopTimer();
+}
+
+void CapturePanel::ChannelRow::NameLabel::mouseUp (const juce::MouseEvent& event)
+{
+    stopTimer();
+    juce::Label::mouseUp (event);
+}
+
+void CapturePanel::ChannelRow::NameLabel::timerCallback()
+{
+    stopTimer();
+    showEditor();
+}
+
+//==============================================================================
 CapturePanel::ChannelRow::ChannelRow (int captureIndexToUse, juce::String nameToUse,
-                                      std::function<void (int, juce::String)> onCaptureToUse)
+                                      std::function<void (int, juce::String)> onCaptureToUse,
+                                      std::function<void (juce::String)> onRenameToUse)
     : captureIndex (captureIndexToUse), name (std::move (nameToUse))
 {
     captureButton.onClick = [this, onCapture = std::move (onCaptureToUse)]
     { onCapture (captureIndex, name); };
     captureButton.setEnabled (captureIndex >= 0);  // Tap ohne Puffer: nichts zu exportieren
     addAndMakeVisible (captureButton);
+
+    nameLabel.setText (name, juce::dontSendNotification);
+    nameLabel.setFont (juce::FontOptions { 13.0f });
+    nameLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.7f));
+    nameLabel.setBorderSize ({ 0, 0, 0, 0 });
+    nameLabel.setMinimumHorizontalScale (0.7f);
+
+    if (onRenameToUse)
+    {
+        nameLabel.setEditable (false, true, false);  // Doppelklick; Long-Press via NameLabel
+        nameLabel.onTextChange = [this, onRename = std::move (onRenameToUse)]
+        { onRename (nameLabel.getText()); };  // leer → ChannelNames setzt auf Default zurück
+    }
+
+    addAndMakeVisible (nameLabel);
 }
 
 void CapturePanel::ChannelRow::setDisplayState (const DisplayState& newState)
@@ -64,6 +110,12 @@ void CapturePanel::ChannelRow::setDisplayState (const DisplayState& newState)
 void CapturePanel::ChannelRow::resized()
 {
     captureButton.setBounds (getLocalBounds().removeFromRight (rowHeight));  // 44×44
+
+    // Geometrie deckungsgleich mit paint(): LED links, dann der Name
+    auto bounds = getLocalBounds();
+    bounds.removeFromRight (rowHeight + 4);
+    bounds.removeFromLeft (rowHeight / 2);
+    nameLabel.setBounds (bounds.removeFromLeft (juce::jmin (96, bounds.getWidth() / 2)));
 }
 
 void CapturePanel::ChannelRow::paint (juce::Graphics& g)
@@ -77,11 +129,9 @@ void CapturePanel::ChannelRow::paint (juce::Graphics& g)
     g.setColour (colourForState (display.state));
     g.fillEllipse (led);
 
-    // Kanal-Name (Hardware "inN" oder Tap-Spurname — drawText clippt)
-    g.setColour (juce::Colours::white.withAlpha (0.7f));
-    g.setFont (juce::FontOptions { 13.0f });
-    g.drawText (name, bounds.removeFromLeft (juce::jmin (96, bounds.getWidth() / 2)),
-                juce::Justification::centredLeft);
+    // Kanal-Name zeichnet das nameLabel (Inline-Editor) — hier nur den
+    // Platz aussparen, Geometrie deckungsgleich mit resized()
+    bounds.removeFromLeft (juce::jmin (96, bounds.getWidth() / 2));
 
     // Mini-Pegel: RMS-Füllung, Peak-Strich, Noise-Floor-Marker
     const auto meter = bounds.reduced (2, 14);
@@ -110,8 +160,9 @@ void CapturePanel::ChannelRow::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-CapturePanel::CapturePanel (CaptureSettings& settingsToUse, CaptureService& serviceToUse)
-    : settings (settingsToUse), service (serviceToUse)
+CapturePanel::CapturePanel (CaptureSettings& settingsToUse, CaptureService& serviceToUse,
+                            ChannelNames& channelNamesToUse)
+    : settings (settingsToUse), service (serviceToUse), channelNames (channelNamesToUse)
 {
     // -- Schwelle / Hold: direkte Settings-Setter ------------------------------
     thresholdSlider.setRange (CaptureSettings::minThresholdDb,
@@ -223,6 +274,7 @@ CapturePanel::CapturePanel (CaptureSettings& settingsToUse, CaptureService& serv
 
     settings.addChangeListener (this);
     service.addChangeListener (this);   // RAM-Warnung + Kanalzahl (prepare)
+    channelNames.addChangeListener (this);  // Label-Änderungen (auch externe)
     rebuildChannelRows();
     syncControls();
 }
@@ -232,6 +284,7 @@ CapturePanel::~CapturePanel()
     settings.onPendingResize = nullptr;
     settings.removeChangeListener (this);
     service.removeChangeListener (this);
+    channelNames.removeChangeListener (this);
 }
 
 //==============================================================================
@@ -273,9 +326,12 @@ std::vector<CapturePanel::RowSpec> CapturePanel::makeRowSpecs() const
 {
     std::vector<RowSpec> specs;
 
+    // Hardware-Zeilen: effektives ChannelNames-Label (userLabel → Device-
+    // Name → "In N") — dieselbe Quelle wie Export-Dateinamen und Port-UI
     const auto numChannels = service.getRingNumChannels();
     for (int ch = 0; ch < numChannels; ++ch)
-        specs.push_back ({ ch, "in" + juce::String (ch + 1), false });
+        specs.push_back ({ ch, channelNames.getLabel (ChannelNames::Direction::input, ch),
+                           false });
 
     // Abschnitt "Taps": genutzte virtuelle Slots (registriert ODER mit
     // gehaltenem Material) — Reihenfolge = Slot-Reihenfolge, stabil
@@ -298,9 +354,20 @@ void CapturePanel::rebuildChannelRows()
 
     for (const auto& spec : currentRowSpecs)
     {
+        // Nur Hardware-Zeilen sind umbenennbar (captureIndex == Kanal-Index);
+        // Tap-Namen sind moduleIds — Rename am Node-Titel
+        auto onRename = spec.isTap
+                      ? std::function<void (juce::String)> {}
+                      : [this, channel = spec.captureIndex] (juce::String newLabel)
+                        {
+                            channelNames.setUserLabel (ChannelNames::Direction::input,
+                                                       channel, newLabel);
+                        };
+
         auto row = std::make_unique<ChannelRow> (spec.captureIndex, spec.name,
                                                  [this] (int captureIndex, juce::String rowName)
-                                                 { captureSingleChannel (captureIndex, rowName); });
+                                                 { captureSingleChannel (captureIndex, rowName); },
+                                                 std::move (onRename));
         channelContainer.addAndMakeVisible (*row);
         channelRows.push_back (std::move (row));
     }

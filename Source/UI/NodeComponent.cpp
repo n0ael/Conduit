@@ -10,10 +10,12 @@ namespace conduit
 
 NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
                               GraphManager& graphManagerToUse,
-                              NodeUiRegistry& uiRegistryToUse)
+                              NodeUiRegistry& uiRegistryToUse,
+                              ChannelNames* channelNamesToUse)
     : nodeTree (std::move (nodeTreeToBind)),
       graphManager (graphManagerToUse),
       uiRegistry (uiRegistryToUse),
+      channelNames (channelNamesToUse),
       nodeUuid (nodeTree.getProperty (id::nodeId).toString())
 {
     uiRegistry.acquire (nodeUuid);
@@ -62,6 +64,14 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
 
     makePorts (true,  (int) nodeTree.getProperty (id::numInputChannels,  0), inputPorts);
     makePorts (false, (int) nodeTree.getProperty (id::numOutputChannels, 0), outputPorts);
+
+    // Kanal-Labels der I/O-Endpunkte (ChannelNames als eine Quelle):
+    // Tooltips jetzt, gemalte Labels in paint(); Änderungen ziehen nach
+    if (channelNames != nullptr && portLabelDirection().has_value())
+    {
+        channelNames->addChangeListener (this);
+        refreshPortTooltips();
+    }
 
     // Sequencer-Kacheln haben eine eigene Kontrollleiste — kein generischer Slider
     if (const auto parameter = firstParameter();
@@ -117,6 +127,9 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
 
 NodeComponent::~NodeComponent()
 {
+    if (channelNames != nullptr)
+        channelNames->removeChangeListener (this);
+
     nodeTree.removeListener (this);
     uiRegistry.release (nodeUuid);  // gibt eine wartende Phase 2 frei (5.3)
 }
@@ -132,6 +145,9 @@ void NodeComponent::beginTeardown()
     // letzten Render-Zyklus.
     tearingDown = true;
     nodeTree.removeListener (this);
+
+    if (channelNames != nullptr)
+        channelNames->removeChangeListener (this);
     setInterceptsMouseClicks (false, false);
     deleteButton.setEnabled (false);
     parameterSlider.setEnabled (false);
@@ -219,6 +235,42 @@ juce::ValueTree NodeComponent::firstParameter() const
 }
 
 //==============================================================================
+std::optional<ChannelNames::Direction> NodeComponent::portLabelDirection() const
+{
+    if (channelNames == nullptr)
+        return std::nullopt;
+
+    // audio_input speist den Graph: seine OUTPUT-Ports sind Hardware-Inputs
+    const auto factoryKey = GraphManager::factoryKeyOf (nodeTree);
+
+    if (factoryKey == audioInputModuleId)
+        return ChannelNames::Direction::input;
+
+    if (factoryKey == audioOutputModuleId)
+        return ChannelNames::Direction::output;
+
+    return std::nullopt;
+}
+
+void NodeComponent::refreshPortTooltips()
+{
+    const auto direction = portLabelDirection();
+    if (! direction.has_value())
+        return;
+
+    auto& ports = *direction == ChannelNames::Direction::input ? outputPorts : inputPorts;
+
+    for (auto& port : ports)
+        port->setTooltip (channelNames->getLabel (*direction, port->getInfo().channel));
+}
+
+void NodeComponent::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    refreshPortTooltips();
+    repaint();  // gemalte Port-Labels nachziehen
+}
+
+//==============================================================================
 int NodeComponent::getNumInputPorts() const noexcept  { return static_cast<int> (inputPorts.size()); }
 int NodeComponent::getNumOutputPorts() const noexcept { return static_cast<int> (outputPorts.size()); }
 
@@ -281,6 +333,30 @@ void NodeComponent::paint (juce::Graphics& g)
         g.setFont (juce::Font (juce::FontOptions (12.0f)));
         g.drawText (error, getLocalBounds().reduced (8).removeFromBottom (16),
                     juce::Justification::centredLeft);
+    }
+
+    // Kanal-Labels neben den Ports der I/O-Endpunkte — Touch hat keinen
+    // Hover, deshalb gemalt statt nur als Tooltip (ChannelNames-Quelle)
+    if (const auto direction = portLabelDirection(); direction.has_value())
+    {
+        const auto isInputEndpoint = *direction == ChannelNames::Direction::input;
+        const auto numPorts = isInputEndpoint ? getNumOutputPorts() : getNumInputPorts();
+
+        g.setColour (juce::Colours::white.withAlpha (0.55f));
+        g.setFont (juce::Font (juce::FontOptions (11.0f)));
+
+        for (int channel = 0; channel < numPorts; ++channel)
+        {
+            // audio_input: Ports rechts → Label links davon, rechtsbündig
+            const auto centre = getPortCentre (! isInputEndpoint, channel);
+            const auto area = isInputEndpoint
+                            ? juce::Rectangle<int> (centre.x - 110, centre.y - 8, 90, 16)
+                            : juce::Rectangle<int> (centre.x + 20,  centre.y - 8, 90, 16);
+
+            g.drawText (channelNames->getLabel (*direction, channel), area,
+                        isInputEndpoint ? juce::Justification::centredRight
+                                        : juce::Justification::centredLeft);
+        }
     }
 }
 

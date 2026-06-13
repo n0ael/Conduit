@@ -1,0 +1,128 @@
+#pragma once
+
+#include <vector>
+
+#include <juce_data_structures/juce_data_structures.h>
+
+namespace conduit
+{
+
+//==============================================================================
+/**
+    Benutzerdefinierte Namen für Hardware-Kanäle — App-Zustand, KEIN
+    Patch-Zustand (gleiche Trennung wie CaptureSettings: loadPreset()
+    ersetzt den Root-Tree, die Kanal-Namen bleiben unberührt, kein Undo).
+
+    Mapping (deviceKey, direction, channelIndex) → { userLabel, imagePath }.
+    imagePath ist ein leerer Platzhalter für ein späteres Kanal-Bild —
+    persistiert, aber noch ohne UI.
+
+    Device-Matching wie CalibrationProfile (CLAUDE.md 8.1):
+      1. exakter Name-Match (deviceKey == aktiver Device-Name)
+      2. Prefix-Match (Suffix wie " (2)" ignoriert — beidseitig: gespeicherte
+         und aktive Namen werden auf den Prefix reduziert)
+      3. kein Match → nur Defaults (gemeldeter Kanalname, sonst "In N"/"Out N")
+
+    Persistenz via juce::ApplicationProperties in einer EIGENEN Datei
+    (Conduit/ChannelNames.settings) — CaptureSettings hält eine separate
+    PropertiesFile-Instanz auf Conduit.settings; eine geteilte Datei würde
+    sich beim Speichern gegenseitig mit veralteten Werten überschreiben.
+
+    Threading: ALLE Methoden laufen auf dem Message Thread (Setter mit
+    File-Zugriff, Getter werden nur von UI und Export-Enqueue [MT] gelesen).
+    UI-Benachrichtigung über juce::ChangeBroadcaster (async).
+*/
+class ChannelNames : public juce::ChangeBroadcaster
+{
+public:
+    enum class Direction { input, output };
+
+    /** Labels werden beim Setzen hart gekürzt (Inline-Editor-Eingaben). */
+    static constexpr int maxLabelLength = 48;
+
+    /** Eigene Datei neben Conduit.settings (Klassendoku). */
+    [[nodiscard]] static juce::PropertiesFile::Options defaultOptions();
+
+    /** Tests injizieren eigene Options (Temp-Verzeichnis). */
+    explicit ChannelNames (const juce::PropertiesFile::Options& options = defaultOptions());
+    ~ChannelNames() override;
+
+    //==========================================================================
+    /** Aktiven Geräte-Kontext setzen (initAudio bzw. Device-Wechsel).
+        reportedNames = vom Device gemeldete Kanalnamen (Default-Quelle). */
+    void setActiveDevice (const juce::String& deviceName,
+                          const juce::StringArray& reportedInputNames,
+                          const juce::StringArray& reportedOutputNames);
+
+    [[nodiscard]] juce::String getActiveDeviceName() const { return activeDeviceName; }
+
+    //==========================================================================
+    /** Effektives Label: userLabel → gemeldeter Kanalname → "In N"/"Out N". */
+    [[nodiscard]] juce::String getLabel (Direction direction, int channelIndex) const;
+
+    /** User-Override für das aktive Device. Leer (nach Trim) löscht den
+        Eintrag — zurück zum Default. No-op ohne aktives Device. */
+    void setUserLabel (Direction direction, int channelIndex, const juce::String& label);
+
+    /** Leer, wenn kein Override existiert. */
+    [[nodiscard]] juce::String getUserLabel (Direction direction, int channelIndex) const;
+
+    /** Platzhalter fürs spätere Kanal-Bild — nur Persistenz, keine UI. */
+    void setImagePath (Direction direction, int channelIndex, const juce::String& path);
+    [[nodiscard]] juce::String getImagePath (Direction direction, int channelIndex) const;
+
+    //==========================================================================
+    // Pure Helfer — testbar ohne Datei und ohne Device
+
+    /** "ES-3 (2)" → "ES-3"; Namen ohne " (N)"-Suffix bleiben unverändert. */
+    [[nodiscard]] static juce::String stripDeviceSuffix (const juce::String& deviceName);
+
+    /** Fallback ohne Eintrag und ohne gemeldeten Namen: "In N" / "Out N". */
+    [[nodiscard]] static juce::String defaultLabel (Direction direction, int channelIndex);
+
+    /** Dateinamen-tauglich: verbotene Zeichen (\\/:*?"<>| und Steuerzeichen)
+        durch '_' ersetzen, trimmen, auf maxLabelLength kürzen; leeres
+        Ergebnis → fallback. */
+    [[nodiscard]] static juce::String sanitizeFileLabel (const juce::String& label,
+                                                         const juce::String& fallback);
+
+    //==========================================================================
+    /** [Message Thread] Ausstehende Änderungen sofort auf Platte schreiben. */
+    void flush();
+
+private:
+    struct Entry
+    {
+        Direction direction = Direction::input;
+        int channelIndex = 0;
+        juce::String userLabel;
+        juce::String imagePath;
+    };
+
+    struct DeviceEntry
+    {
+        juce::String deviceKey;  // exakter Device-Name bei Anlage (primärer Key)
+        juce::String prefix;     // deviceKey ohne " (N)"-Suffix (Fallback-Key)
+        std::vector<Entry> entries;
+    };
+
+    [[nodiscard]] const DeviceEntry* findMatch (const juce::String& deviceName) const;
+    [[nodiscard]] DeviceEntry* findMatch (const juce::String& deviceName);
+    [[nodiscard]] DeviceEntry& findOrCreateActiveDevice();
+    [[nodiscard]] const Entry* findEntry (Direction direction, int channelIndex) const;
+    void pruneAndStore (DeviceEntry& device);
+
+    void loadFromFile();
+    void writeToFile();
+
+    juce::ApplicationProperties applicationProperties;
+    std::vector<DeviceEntry> devices;
+
+    juce::String activeDeviceName;
+    juce::StringArray activeInputNames;
+    juce::StringArray activeOutputNames;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelNames)
+};
+
+} // namespace conduit

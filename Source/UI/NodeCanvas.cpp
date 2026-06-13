@@ -9,10 +9,12 @@ namespace conduit
 
 NodeCanvas::NodeCanvas (juce::ValueTree rootTree,
                         GraphManager& graphManagerToUse,
-                        NodeUiRegistry& uiRegistryToUse)
+                        NodeUiRegistry& uiRegistryToUse,
+                        ChannelNames* channelNamesToUse)
     : rootState (std::move (rootTree)),
       graphManager (graphManagerToUse),
-      uiRegistry (uiRegistryToUse)
+      uiRegistry (uiRegistryToUse),
+      channelNames (channelNamesToUse)
 {
     rootState.addListener (this);
     rebuildAll();  // Tree kann schon Nodes tragen (Session-Restore)
@@ -62,7 +64,8 @@ void NodeCanvas::addComponentFor (juce::ValueTree nodeTree)
     if (nodeTree.getProperty (id::nodeState).toString() == toString (NodeState::deleting))
         return;
 
-    auto component = std::make_unique<NodeComponent> (nodeTree, graphManager, uiRegistry);
+    auto component = std::make_unique<NodeComponent> (nodeTree, graphManager, uiRegistry,
+                                                      channelNames);
 
     component->onTeardownFinished = [this] (NodeComponent& finished)
     {

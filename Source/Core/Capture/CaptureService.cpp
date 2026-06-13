@@ -660,10 +660,17 @@ int CaptureService::enqueueExport (int onlyChannel)
         task.startPosition = range.from;
         task.endPosition   = range.to;
 
-        // Hardware: "inN" (Strip-Namen mit dem Mixer); virtuelle Kanäle
-        // tragen den registrierten Namen (== moduleId des Tap-Moduls)
+        // Hardware: ChannelNames-Label (sanitiert, via hardwareTrackName) mit
+        // Fallback "inN"; virtuelle Kanäle tragen den registrierten Namen
+        // (== moduleId des Tap-Moduls)
         if (ch < set->numChannels)
-            task.trackName = "in" + juce::String (ch + 1);
+        {
+            if (hardwareTrackName)
+                task.trackName = hardwareTrackName (ch);
+
+            if (task.trackName.isEmpty())
+                task.trackName = "in" + juce::String (ch + 1);
+        }
         else
         {
             const auto& slotName = virtualSlots[static_cast<size_t> (ch - set->numChannels)].name;

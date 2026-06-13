@@ -83,6 +83,7 @@ juce_add_gui_app(Conduit
 
 set(CONDUIT_CPP_SOURCES
     Source/Core/Main.cpp
+    Source/Core/ChannelNames.cpp
     Source/Core/EngineProcessor.cpp
     Source/Core/EngineEditor.cpp
     Source/Core/GraphFader.cpp
@@ -119,6 +120,7 @@ set(CONDUIT_CPP_SOURCES
 
 target_sources(Conduit PRIVATE
     ${CONDUIT_CPP_SOURCES}
+    Source/Core/ChannelNames.h
     Source/Core/EngineProcessor.h
     Source/Core/EngineEditor.h
     Source/Core/GraphFader.h
@@ -248,6 +250,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/CaptureStressTests.cpp
         Tests/Core/CaptureTapTests.cpp
         Tests/Core/CaptureWriterTests.cpp
+        Tests/Core/ChannelNamesTests.cpp
         Tests/Core/ClockTests.cpp
         Tests/Core/GraphFaderTests.cpp
         Tests/Core/NamedIdTests.cpp
@@ -267,6 +270,7 @@ if(CONDUIT_BUILD_TESTS)
 
     target_sources(ConduitTests PRIVATE
         ${CONDUIT_TEST_CPP_SOURCES}
+        Source/Core/ChannelNames.cpp
         Source/Core/EngineEditor.cpp
         Source/Core/EngineProcessor.cpp
         Source/Core/GraphFader.cpp

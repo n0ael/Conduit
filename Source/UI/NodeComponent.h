@@ -2,10 +2,12 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "Core/ChannelNames.h"
 #include "Core/GraphManager.h"
 #include "Core/NodeUiRegistry.h"
 #include "UI/LinkAudioStatusBadge.h"
@@ -32,14 +34,22 @@ namespace conduit
 
     Touch-first (CLAUDE.md 10): Delete-Button 44×44px, Slider-Höhe 44px,
     1-Finger-Drag verschiebt den Node (x/y im Tree, ohne Undo-Spam).
+
+    Kanal-Labels (nur I/O-Endpunkte audio_input/audio_output): die Ports
+    zeigen das effektive ChannelNames-Label — gemalt neben dem Port
+    (Touch-sichtbar) und als Tooltip (Maus-Hover). Das audio_input-Node
+    trägt OUTPUT-Ports → Input-Labels, audio_output umgekehrt.
 */
 class NodeComponent final : public juce::Component,
-                            private juce::ValueTree::Listener
+                            private juce::ValueTree::Listener,
+                            private juce::ChangeListener
 {
 public:
+    /** channelNamesToUse darf nullptr sein (Tests) — dann keine Port-Labels. */
     NodeComponent (juce::ValueTree nodeTreeToBind,
                    GraphManager& graphManagerToUse,
-                   NodeUiRegistry& uiRegistryToUse);
+                   NodeUiRegistry& uiRegistryToUse,
+                   ChannelNames* channelNamesToUse = nullptr);
     ~NodeComponent() override;
 
     static constexpr int defaultWidth  = 168;
@@ -81,6 +91,14 @@ private:
     // juce::ValueTree::Listener [Message Thread]
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override;
 
+    // juce::ChangeListener [Message Thread] — ChannelNames-Labels
+    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+
+    /** Richtung der Kanal-Labels dieses Endpunkts; nullopt = kein Endpunkt
+        oder keine ChannelNames-Quelle. */
+    [[nodiscard]] std::optional<ChannelNames::Direction> portLabelDirection() const;
+    void refreshPortTooltips();
+
     void beginTeardown();
     void applyTreePosition();
     [[nodiscard]] juce::ValueTree firstParameter() const;
@@ -89,6 +107,7 @@ private:
     juce::ValueTree nodeTree;   // NUR der Subtree (5.3)
     GraphManager& graphManager;
     NodeUiRegistry& uiRegistry;
+    ChannelNames* channelNames;  // nullptr außerhalb der App (Tests)
     const juce::String nodeUuid;
 
     juce::Label titleLabel;  // named_id — Doppelklick benennt um (renameNode)

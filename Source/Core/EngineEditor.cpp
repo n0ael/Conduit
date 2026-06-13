@@ -19,8 +19,10 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor)
       undoManager (engineProcessor.getUndoManager()),
       graphManager (engineProcessor.getGraphManager()),
       linkClock (engineProcessor.getLinkClock()),
-      capturePanel (engineProcessor.getCaptureSettings(), engineProcessor.getCaptureService()),
-      canvas (rootState, engineProcessor.getGraphManager(), engineProcessor.getNodeUiRegistry())
+      capturePanel (engineProcessor.getCaptureSettings(), engineProcessor.getCaptureService(),
+                    engineProcessor.getChannelNames()),
+      canvas (rootState, engineProcessor.getGraphManager(), engineProcessor.getNodeUiRegistry(),
+              &engineProcessor.getChannelNames())
 {
     const auto addModule = [this] (const char* moduleId)
     {

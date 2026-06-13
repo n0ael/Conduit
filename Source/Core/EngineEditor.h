@@ -91,6 +91,9 @@ private:
 
     NodeCanvas canvas;
 
+    // Port-Tooltips der I/O-Endpunkte (ChannelNames-Labels, Maus-Hover)
+    juce::TooltipWindow tooltipWindow { this };
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EngineEditor)
 };
 

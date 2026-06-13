@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "Capture/CaptureService.h"
+#include "ChannelNames.h"
 #include "GraphFader.h"
 #include "GraphManager.h"
 #include "LinkClock.h"
@@ -86,6 +87,7 @@ public:
     [[nodiscard]] const CaptureService& getCaptureService() const noexcept;
     [[nodiscard]] CaptureService& getCaptureService() noexcept;  // UI: ChangeListener (RAM-Warnung)
     [[nodiscard]] CaptureSettings& getCaptureSettings() noexcept;
+    [[nodiscard]] ChannelNames& getChannelNames() noexcept;
 
 private:
     /** Legt die reservierten I/O-Tree-Nodes (audio_input/audio_output) an,
@@ -122,6 +124,11 @@ private:
     // loadPreset() ersetzt den Root-Tree, Capture bleibt unberührt
     // (gleiche Trennung wie das Link-Tempo, siehe EngineEditor-Doku).
     CaptureSettings captureSettings;
+
+    // Kanal-Namen der Hardware-I/O — App-Zustand wie die CaptureSettings
+    // (eigene Settings-Datei, überlebt Preset-Load, kein Undo). Main.cpp
+    // setzt den aktiven Device-Kontext nach initAudio().
+    ChannelNames channelNames;
 
     // Capture-Fundament (SampleClock + Input-Metering + Ring-Allokation):
     // processInputTap() läuft als ERSTE Operation in processBlock auf dem

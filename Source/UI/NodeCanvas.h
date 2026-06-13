@@ -38,9 +38,12 @@ class NodeCanvas final : public juce::Component,
                          private juce::ValueTree::Listener
 {
 public:
+    /** channelNamesToUse darf nullptr sein (Tests) — die NodeComponents
+        der I/O-Endpunkte zeigen dann keine Port-Labels. */
     NodeCanvas (juce::ValueTree rootTree,
                 GraphManager& graphManagerToUse,
-                NodeUiRegistry& uiRegistryToUse);
+                NodeUiRegistry& uiRegistryToUse,
+                ChannelNames* channelNamesToUse = nullptr);
     ~NodeCanvas() override;
 
     [[nodiscard]] int getNumNodeComponents() const noexcept;
@@ -81,6 +84,7 @@ private:
     juce::ValueTree rootState;  // ref-counted Handle
     GraphManager& graphManager;
     NodeUiRegistry& uiRegistry;
+    ChannelNames* channelNames;  // nullptr in Tests
 
     std::vector<std::unique_ptr<NodeComponent>> nodeComponents;
 

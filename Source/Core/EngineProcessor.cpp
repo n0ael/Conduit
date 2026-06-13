@@ -50,6 +50,15 @@ EngineProcessor::EngineProcessor()
     // Resize-Policy der Capture-Settings gegen den Service verdrahten
     // (Aktivitäts-Check, Invalidierung, Reallokation — CaptureSettings-Doku)
     captureSettings.setBufferHost (&captureService);
+
+    // Export-Dateinamen nutzen die ChannelNames-Labels (eine Quelle für
+    // CapturePanel, Dateinamen und Port-Beschriftung) — sanitiert; leeres
+    // Ergebnis fällt im Service auf "in{N}" zurück
+    captureService.hardwareTrackName = [this] (int channel)
+    {
+        return ChannelNames::sanitizeFileLabel (
+            channelNames.getLabel (ChannelNames::Direction::input, channel), {});
+    };
 }
 
 EngineProcessor::~EngineProcessor()
@@ -277,5 +286,6 @@ LinkClock& EngineProcessor::getLinkClock() noexcept            { return linkCloc
 const CaptureService& EngineProcessor::getCaptureService() const noexcept { return captureService; }
 CaptureService& EngineProcessor::getCaptureService() noexcept   { return captureService; }
 CaptureSettings& EngineProcessor::getCaptureSettings() noexcept { return captureSettings; }
+ChannelNames& EngineProcessor::getChannelNames() noexcept       { return channelNames; }
 
 } // namespace conduit

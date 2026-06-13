@@ -90,6 +90,12 @@ private:
         // Abweichung in ValueTree-Property audioSetupWarning (CLAUDE.md 9.1).
         if (auto* device = deviceManager.getCurrentAudioDevice())
         {
+            // Kanal-Namen-Kontext: Device-Name als Key, gemeldete
+            // Kanalnamen als Default-Labels (ChannelNames-Doku)
+            engine->getChannelNames().setActiveDevice (device->getName(),
+                                                       device->getInputChannelNames(),
+                                                       device->getOutputChannelNames());
+
             const auto actualRate   = device->getCurrentSampleRate();
             const auto actualBuffer = device->getCurrentBufferSizeSamples();
 
