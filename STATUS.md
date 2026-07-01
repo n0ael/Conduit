@@ -16,14 +16,19 @@
 
 ## Aktueller Meilenstein (Juli 2026 — in Arbeit)
 
-**Ableton-Style Pegelanzeigen für audio_in/audio_out (CLAUDE.md 10):**
+**Ableton-Style Pegelanzeigen für audio_in/audio_out (CLAUDE.md 10) — Meilenstein abgeschlossen:**
+
+*Schritt 3b — Capture-Einstellungen als eigener Tab:*
+- **`CaptureSettingsComponent`** (`Source/UI/`): Formular mit Schwelle, Hold, Pre-Roll, Ring-Puffer, **RAM-Limit (neu)**, Bit-Tiefe, Auto-Schwelle, „nach Export freigeben", Export-Ordner. Ring/Pre-Roll folgen der Resize-Policy (async Bestätigung bei aktiver Aufnahme), RAM-Warnung über den Service-Broadcast. Aus dem `CapturePanel` herausgelöst
+- **`CapturePanel`** verschlankt: nur noch die Kanal-Zeilen (Capture-**Aktionen**: LED/Pegel/Einzel-CAP), volle Panel-Breite; die Einstellungs-Controls sind entfernt. Ctor jetzt `(CaptureService&, ChannelNames&)`. Aktionen bleiben oben erreichbar (Toolbar: CAP-Toggle für Einzelspuren, „Capture" für alles)
+- **`SettingsWindow`**: dritter Tab **„Capture"** zwischen Audio-Gerät und Metering. `EngineEditor` reicht `CaptureSettings`/`CaptureService` durch
+- **Verifikation:** 153 Testfälle / 10237 Assertions grün (Debug + ASan; Capture-Logik unverändert, weiter über `CaptureSettingsTests` abgedeckt). Smoke: Capture-Tab mit allen Werten (RAM-Limit 3 GB, Ordner-Pfad), Aktionen weiter in der Toolbar
 
 *Schritt 3a — Einstellungen-Menü + konfigurierbares Clip-Reset:*
 - **`MeterSettings`** (`Source/Core/`): App-Zustand (eigene `Meter.settings`, überlebt Preset-Load, kein Undo) — Clip-Reset-Modus `manual`/`automatic`. `getClipHoldSeconds()` = 0 (manuell) bzw. `autoClearSeconds` (2,5 s). ChangeBroadcaster
 - **`LevelMeter`**: `setClipHoldSeconds` + per-Kanal Auto-Clear im `process()` (Latch verlischt nach der Haltezeit; 0 = nur manuell). `EngineProcessor` besitzt `MeterSettings`, lauscht als ChangeListener und speist beide Meter (`applyMeterSettings`)
 - **`SettingsWindow`** (`Source/UI/`): non-modales `DialogWindow` mit `TabbedComponent` — **Audio-Gerät** (bestehende `AudioSettingsComponent`, nur mit DeviceManager) + **Metering** (Clip-Reset-Auswahl, bindet `MeterSettings`). Dark-Look. Toolbar: „Audio"-Button → **„Einstellungen"**, öffnet das Fenster
 - **Verifikation:** 153 Testfälle / 10237 Assertions grün (Debug + ASan). Neue Tests: `MeterSettings` (Default/Mapping/Roundtrip/ChangeBroadcast), `LevelMeter` Auto-Clear (Hold 0 = Latch bleibt, Hold 0,5 s verlischt, erneutes Clippen resettet den Timer). Smoke: „Einstellungen"-Button → Fenster mit beiden Tabs (Umlaute korrekt via `fromUTF8`)
-- **Offen:** Schritt 3b (Capture-Einstellungen als eigener Tab im Einstellungen-Fenster)
 
 *Schritt 2 — Meter-UI (horizontale Balken, verbreiterte I/O-Kacheln):*
 - **`LevelMeterBar`** (`Source/UI/`, Muster `ScopeDisplay`): horizontaler Balken pro Kanal, 30-fps-Timer, liest Peak/Peak-Hold/RMS/Clip lock-free vom `LevelMeter`-Provider. Zeichnet RMS-Füllung (pegelabhängig grün/gelb/rot), Peak-Marker-Linie, Peak-Hold-Tick und Clip-Feld (rot, Latch). Nur das Clip-Feld ist klickbar (`resetClip`, Default in diesem Schritt) — sonst fällt der Klick an die Kachel durch (Node-Drag). `normFromLinear`: dBFS-Mapping −60…0 dB

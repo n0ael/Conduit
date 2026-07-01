@@ -7,6 +7,9 @@
 namespace conduit
 {
 
+class CaptureSettings;
+class CaptureService;
+
 //==============================================================================
 /**
     Gebündeltes Einstellungen-Fenster (CLAUDE.md 10) — ein Einstiegspunkt für
@@ -14,16 +17,19 @@ namespace conduit
       - „Audio-Gerät" (juce::AudioDeviceSelectorComponent via
         AudioSettingsComponent) — nur wenn ein AudioDeviceManager vorliegt
         (Standalone-Pfad).
+      - „Capture" (CaptureSettingsComponent — Threshold/Hold/Pre-Roll/Ring/
+        RAM-Limit/Bit-Tiefe/Export-Ordner). Die Capture-AKTIONen bleiben in
+        der Toolbar/CapturePanel.
       - „Metering" (Clip-Reset-Modus, bindet MeterSettings).
 
-    Capture-Einstellungen folgen als eigener Tab (Schritt 3b). Wird non-modal
-    in einem juce::DialogWindow gezeigt (EngineEditor, launchAsync). Dark-Look
-    via LookAndFeel_V4 (Midnight), analog AudioSettingsComponent.
+    Wird non-modal in einem juce::DialogWindow gezeigt (EngineEditor,
+    launchAsync). Dark-Look via LookAndFeel_V4 (Midnight).
 */
 class SettingsWindow final : public juce::Component
 {
 public:
-    SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSettings& meterSettings);
+    SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSettings& meterSettings,
+                    CaptureSettings& captureSettings, CaptureService& captureService);
     ~SettingsWindow() override;
 
     void paint (juce::Graphics& g) override;

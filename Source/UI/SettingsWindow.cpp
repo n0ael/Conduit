@@ -1,6 +1,7 @@
 #include "SettingsWindow.h"
 
 #include "UI/AudioSettingsComponent.h"
+#include "UI/CaptureSettingsComponent.h"
 
 namespace conduit
 {
@@ -65,7 +66,8 @@ namespace
 }
 
 //==============================================================================
-SettingsWindow::SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSettings& meterSettings)
+SettingsWindow::SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSettings& meterSettings,
+                                CaptureSettings& captureSettings, CaptureService& captureService)
 {
     setLookAndFeel (&darkLook);
 
@@ -74,10 +76,12 @@ SettingsWindow::SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSe
         tabs.addTab (juce::String::fromUTF8 ("Audio-Ger\xc3\xa4t"), tabBackground,
                      new AudioSettingsComponent (*deviceManager), true);
 
+    tabs.addTab ("Capture", tabBackground,
+                 new CaptureSettingsComponent (captureSettings, captureService), true);
     tabs.addTab ("Metering", tabBackground, new MeterSettingsTab (meterSettings), true);
 
     addAndMakeVisible (tabs);
-    setSize (520, 480);
+    setSize (520, 520);
 }
 
 SettingsWindow::~SettingsWindow()

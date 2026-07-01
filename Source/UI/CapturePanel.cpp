@@ -9,7 +9,6 @@ namespace
 {
     constexpr int rowHeight = 44;   // Touch-Target (CLAUDE.md 10)
     constexpr int tapsHeaderHeight = 18;
-    constexpr int gap = 8;
     constexpr int meterSteps = 64;  // dB-Quantisierung (Repaint-Schwelle)
     constexpr float meterFloorDb = -80.0f;
 
@@ -160,97 +159,9 @@ void CapturePanel::ChannelRow::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-CapturePanel::CapturePanel (CaptureSettings& settingsToUse, CaptureService& serviceToUse,
-                            ChannelNames& channelNamesToUse)
-    : settings (settingsToUse), service (serviceToUse), channelNames (channelNamesToUse)
+CapturePanel::CapturePanel (CaptureService& serviceToUse, ChannelNames& channelNamesToUse)
+    : service (serviceToUse), channelNames (channelNamesToUse)
 {
-    // -- Schwelle / Hold: direkte Settings-Setter ------------------------------
-    thresholdSlider.setRange (CaptureSettings::minThresholdDb,
-                              CaptureSettings::maxThresholdDb, 1.0);
-    thresholdSlider.setTextValueSuffix (" dB");
-    thresholdSlider.onValueChange = [this]
-    { settings.setThresholdDb (static_cast<float> (thresholdSlider.getValue())); };
-
-    holdSlider.setRange (CaptureSettings::minHoldMinutes,
-                         CaptureSettings::maxHoldMinutes, 1.0);
-    holdSlider.setTextValueSuffix (" min Hold");
-    holdSlider.onValueChange = [this]
-    { settings.setHoldMinutes (juce::roundToInt (holdSlider.getValue())); };
-
-    autoCalibrateToggle.onClick = [this]
-    { settings.setAutoCalibrate (autoCalibrateToggle.getToggleState()); };
-
-    // -- Ring-Dimensionierung: Resize-Policy (Settings-Doku) -------------------
-    // Übernahme erst am Drag-Ende bzw. bei Textbox-Eingabe — sonst würde
-    // jeder Drag-Tick eine Reallokation (oder den Bestätigungs-Dialog) treten
-    preRollSlider.setRange (CaptureSettings::minPreRollSeconds,
-                            CaptureSettings::maxPreRollSeconds, 5.0);
-    preRollSlider.setTextValueSuffix (" s Pre-Roll");
-    preRollSlider.onDragEnd = [this] { applyRingSlider (preRollSlider, false); };
-    preRollSlider.onValueChange = [this]
-    {
-        if (! preRollSlider.isMouseButtonDown())  // Textbox/Keyboard
-            applyRingSlider (preRollSlider, false);
-    };
-
-    bufferSlider.setRange (CaptureSettings::minBufferMinutes,
-                           CaptureSettings::maxBufferMinutes, 5.0);
-    bufferSlider.setTextValueSuffix (" min Ring");
-    bufferSlider.onDragEnd = [this] { applyRingSlider (bufferSlider, true); };
-    bufferSlider.onValueChange = [this]
-    {
-        if (! bufferSlider.isMouseButtonDown())
-            applyRingSlider (bufferSlider, true);
-    };
-
-    // Bei aktiver Aufnahme bestätigt die UI async (13.2: keine Modal-Loops)
-    settings.onPendingResize = [this] (const CaptureSettings::PendingResizeRequest& request)
-    {
-        syncControls();  // Slider zurück auf den aktiven Wert, solange offen
-
-        const auto* fieldName =
-            request.field == CaptureSettings::PendingResizeRequest::Field::bufferMinutes
-                ? "Ring-Puffer" : "Pre-Roll";
-        const auto message = juce::String (fieldName) + " auf "
-                           + juce::String (request.requestedValue) + "? "
-                           + juce::String::fromUTF8 ("Puffergr\xc3\xb6\xc3\x9f"
-                                                     "e \xc3\xa4ndern l\xc3\xb6scht alle"
-                                                     " aktuellen Aufnahmen. Fortfahren?");
-
-        auto* settingsPtr = &settings;  // Settings überleben den Editor (Processor-Besitz)
-        juce::AlertWindow::showOkCancelBox (
-            juce::MessageBoxIconType::QuestionIcon,
-            juce::String::fromUTF8 ("Capture-Puffer \xc3\xa4ndern?"), message,
-            "Fortfahren", "Abbrechen", this,
-            juce::ModalCallbackFunction::create ([settingsPtr] (int result)
-            {
-                if (result == 1)
-                    settingsPtr->confirmPendingResize();
-                else
-                    settingsPtr->cancelPendingResize();
-            }));
-    };
-
-    // -- Export-Ziel -----------------------------------------------------------
-    for (const auto bits : { 16, 24, 32 })
-        bitDepthCombo.addItem (juce::String (bits) + " Bit", bits);
-    bitDepthCombo.onChange = [this]
-    { settings.setExportBitDepth (bitDepthCombo.getSelectedId()); };
-
-    directoryButton.onClick = [this] { chooseExportDirectory(); };
-
-    directoryLabel.setColour (juce::Label::textColourId,
-                              juce::Colours::white.withAlpha (0.6f));
-    directoryLabel.setJustificationType (juce::Justification::centredLeft);
-    directoryLabel.setMinimumHorizontalScale (0.7f);
-
-    releaseAfterExportToggle.onClick = [this]
-    { settings.setReleaseAfterExport (releaseAfterExportToggle.getToggleState()); };
-
-    ramWarningLabel.setText ("RAM-Limit!", juce::dontSendNotification);
-    ramWarningLabel.setColour (juce::Label::textColourId, juce::Colours::orange);
-    ramWarningLabel.setVisible (false);
-
     channelViewport.setViewedComponent (&channelContainer, false);
     channelViewport.setScrollBarsShown (true, false);
 
@@ -260,64 +171,24 @@ CapturePanel::CapturePanel (CaptureSettings& settingsToUse, CaptureService& serv
     tapsHeaderLabel.setJustificationType (juce::Justification::bottomLeft);
     channelContainer.addChildComponent (tapsHeaderLabel);  // sichtbar nur mit Taps
 
-    addAndMakeVisible (thresholdSlider);
-    addAndMakeVisible (holdSlider);
-    addAndMakeVisible (preRollSlider);
-    addAndMakeVisible (bufferSlider);
-    addAndMakeVisible (autoCalibrateToggle);
-    addAndMakeVisible (releaseAfterExportToggle);
-    addAndMakeVisible (bitDepthCombo);
-    addAndMakeVisible (directoryButton);
-    addAndMakeVisible (directoryLabel);
-    addAndMakeVisible (ramWarningLabel);
     addAndMakeVisible (channelViewport);
 
-    settings.addChangeListener (this);
-    service.addChangeListener (this);   // RAM-Warnung + Kanalzahl (prepare)
+    service.addChangeListener (this);       // Kanalzahl (prepare) + Tap-Register/Rename
     channelNames.addChangeListener (this);  // Label-Änderungen (auch externe)
     rebuildChannelRows();
-    syncControls();
 }
 
 CapturePanel::~CapturePanel()
 {
-    settings.onPendingResize = nullptr;
-    settings.removeChangeListener (this);
     service.removeChangeListener (this);
     channelNames.removeChangeListener (this);
 }
 
 //==============================================================================
-void CapturePanel::applyRingSlider (juce::Slider& slider, bool isBufferMinutes)
-{
-    const auto value = juce::roundToInt (slider.getValue());
-    const auto outcome = isBufferMinutes ? settings.setBufferMinutes (value)
-                                         : settings.setPreRollSeconds (value);
-
-    // pendingConfirmation: onPendingResize hat den Dialog gestartet und
-    // syncControls() den Slider zurückgesetzt — hier nichts weiter zu tun
-    juce::ignoreUnused (outcome);
-}
-
-void CapturePanel::chooseExportDirectory()
-{
-    directoryChooser = std::make_unique<juce::FileChooser> (
-        juce::String::fromUTF8 ("Export-Ordner w\xc3\xa4hlen"), settings.getExportDirectory());
-
-    directoryChooser->launchAsync (
-        juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-        [this] (const juce::FileChooser& chooser)
-        {
-            if (chooser.getResult() != juce::File())
-                settings.setExportDirectory (chooser.getResult());
-        });
-}
-
 void CapturePanel::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    // Settings-Broadcast, RAM-Warnung und prepare() (Device-/Kanalzahl-
-    // Wechsel) laufen alle hier auf — ein kompletter Sync ist billig
-    syncControls();
+    // Service- (RAM/Kanalzahl/Taps) und ChannelNames-Broadcasts laufen hier
+    // auf — die Zeilenliste neu abgleichen (Repaint nur bei echter Änderung)
     rebuildChannelRows();
 }
 
@@ -411,21 +282,6 @@ void CapturePanel::captureSingleChannel (int captureIndex, const juce::String& r
         onToast (rowName + ": keine aktive Aufnahme");
 }
 
-void CapturePanel::syncControls()
-{
-    thresholdSlider.setValue (settings.getThresholdDb(), juce::dontSendNotification);
-    holdSlider.setValue (settings.getHoldMinutes(), juce::dontSendNotification);
-    preRollSlider.setValue (settings.getPreRollSeconds(), juce::dontSendNotification);
-    bufferSlider.setValue (settings.getBufferMinutes(), juce::dontSendNotification);
-    autoCalibrateToggle.setToggleState (settings.getAutoCalibrate(), juce::dontSendNotification);
-    releaseAfterExportToggle.setToggleState (settings.getReleaseAfterExport(),
-                                             juce::dontSendNotification);
-    bitDepthCombo.setSelectedId (settings.getExportBitDepth(), juce::dontSendNotification);
-    directoryLabel.setText (settings.getExportDirectory().getFullPathName(),
-                            juce::dontSendNotification);
-    ramWarningLabel.setVisible (service.isRamWarningActive());
-}
-
 //==============================================================================
 void CapturePanel::refresh()
 {
@@ -468,37 +324,11 @@ void CapturePanel::paint (juce::Graphics& g)
 
 void CapturePanel::resized()
 {
-    auto bounds = getLocalBounds().reduced (8, 6);
-
-    // Rechts: Kanal-Zeilen (~30 %), links zwei Control-Zeilen
-    channelArea = bounds.removeFromRight (bounds.getWidth() * 30 / 100);
-    bounds.removeFromRight (gap);
-
+    // Reines Aktions-Panel: die volle Fläche gehört den Kanal-Zeilen
+    // (Einstellungen liegen jetzt im Einstellungen-Fenster, Capture-Tab)
+    channelArea = getLocalBounds().reduced (8, 6);
     channelViewport.setBounds (channelArea.reduced (4));
     layoutChannelRows();
-
-    auto topRow = bounds.removeFromTop (rowHeight);
-    bounds.removeFromTop (bounds.getHeight() - rowHeight);  // Rest-Lücke mittig
-    auto bottomRow = bounds;
-
-    const auto place = [] (juce::Rectangle<int>& row, juce::Component& component,
-                           int width, int gapAfter = gap)
-    {
-        component.setBounds (row.removeFromLeft (width));
-        row.removeFromLeft (gapAfter);
-    };
-
-    place (topRow, thresholdSlider, 190);
-    place (topRow, autoCalibrateToggle, 130);
-    place (topRow, holdSlider, 160);
-    place (topRow, preRollSlider, 180);
-    place (topRow, bufferSlider, 170);
-    ramWarningLabel.setBounds (topRow);
-
-    place (bottomRow, bitDepthCombo, 100);
-    place (bottomRow, directoryButton, 100);
-    place (bottomRow, releaseAfterExportToggle, 280);
-    directoryLabel.setBounds (bottomRow);
 }
 
 } // namespace conduit

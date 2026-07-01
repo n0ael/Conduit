@@ -23,8 +23,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
       graphManager (engineProcessor.getGraphManager()),
       linkClock (engineProcessor.getLinkClock()),
       deviceManager (deviceManagerToUse),
-      capturePanel (engineProcessor.getCaptureSettings(), engineProcessor.getCaptureService(),
-                    engineProcessor.getChannelNames()),
+      capturePanel (engineProcessor.getCaptureService(), engineProcessor.getChannelNames()),
       canvas (rootState, engineProcessor.getGraphManager(), engineProcessor.getNodeUiRegistry(),
               &engineProcessor.getChannelNames(),
               &engineProcessor.getInputLevels(), &engineProcessor.getOutputLevels())
@@ -73,7 +72,9 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
     settingsButton.onClick = [this]
     {
         juce::DialogWindow::LaunchOptions options;
-        options.content.setOwned (new SettingsWindow (deviceManager, engine.getMeterSettings()));
+        options.content.setOwned (new SettingsWindow (deviceManager, engine.getMeterSettings(),
+                                                      engine.getCaptureSettings(),
+                                                      engine.getCaptureService()));
         options.dialogTitle                   = "Einstellungen";
         options.dialogBackgroundColour        = juce::Colour (0xff24272c);
         options.escapeKeyTriggersCloseButton  = true;

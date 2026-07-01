@@ -7,7 +7,6 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Core/Capture/CaptureService.h"
-#include "Core/Capture/CaptureSettings.h"
 #include "Core/ChannelNames.h"
 
 namespace conduit
@@ -58,8 +57,7 @@ class CapturePanel : public juce::Component,
 public:
     static constexpr int preferredHeight = 128;
 
-    CapturePanel (CaptureSettings& settingsToUse, CaptureService& serviceToUse,
-                  ChannelNames& channelNamesToUse);
+    CapturePanel (CaptureService& serviceToUse, ChannelNames& channelNamesToUse);
     ~CapturePanel() override;
 
     /** [Message Thread, Editor-Timer] Kanal-Zeilen aus den Status-Atomics
@@ -140,30 +138,13 @@ private:
     };
 
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
-    void syncControls();
-    void chooseExportDirectory();
-    void applyRingSlider (juce::Slider& slider, bool isBufferMinutes);
     [[nodiscard]] std::vector<RowSpec> makeRowSpecs() const;
     void rebuildChannelRows();
     void layoutChannelRows();
     void captureSingleChannel (int captureIndex, const juce::String& rowName);
 
-    CaptureSettings& settings;
     CaptureService& service;
     ChannelNames& channelNames;
-
-    juce::Slider thresholdSlider { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
-    juce::Slider holdSlider      { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
-    juce::Slider preRollSlider   { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
-    juce::Slider bufferSlider    { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
-    // Umlaute als escaped UTF-8 — MSVC liest BOM-lose Quellen als CP1252
-    juce::ToggleButton autoCalibrateToggle      { "Auto-Schwelle" };
-    juce::ToggleButton releaseAfterExportToggle {
-        juce::String::fromUTF8 ("Nach Export freigeben (mit R\xc3\xbc" "ckfrage)") };
-    juce::ComboBox bitDepthCombo;
-    juce::TextButton directoryButton { "Ordner..." };
-    juce::Label directoryLabel;
-    juce::Label ramWarningLabel;
 
     // Kanal-Zeilen im Viewport (Kanalzahl kann die Panel-Höhe übersteigen)
     juce::Viewport channelViewport;
@@ -172,9 +153,6 @@ private:
     std::vector<RowSpec> currentRowSpecs;     // parallel zu channelRows
     juce::Label tapsHeaderLabel { {}, "Taps" };
     juce::Rectangle<int> channelArea;
-
-    // Muss den async Callback überleben (JUCE_MODAL_LOOPS_PERMITTED=0)
-    std::unique_ptr<juce::FileChooser> directoryChooser;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CapturePanel)
 };

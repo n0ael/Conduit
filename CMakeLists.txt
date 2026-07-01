@@ -112,6 +112,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/AudioSettingsComponent.cpp
     Source/UI/CaptureAllButton.cpp
     Source/UI/CapturePanel.cpp
+    Source/UI/CaptureSettingsComponent.cpp
     Source/UI/CaptureToast.cpp
     Source/UI/LevelMeterBar.cpp
     Source/UI/LinkAudioSendPanel.cpp
@@ -321,6 +322,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/AudioSettingsComponent.cpp
         Source/UI/CaptureAllButton.cpp
         Source/UI/CapturePanel.cpp
+        Source/UI/CaptureSettingsComponent.cpp
         Source/UI/CaptureToast.cpp
         Source/UI/LevelMeterBar.cpp
         Source/UI/LinkAudioSendPanel.cpp
