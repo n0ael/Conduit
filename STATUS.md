@@ -16,14 +16,21 @@
 
 ## Aktueller Meilenstein (Juli 2026 — in Arbeit)
 
-**Eingebettete Link-Audio-Send-Taps + Stereo-Pairing am Audio-Eingang (CLAUDE.md 7.2) — Schritt 1 von 4:**
+**Eingebettete Link-Audio-Send-Taps + Stereo-Pairing am Audio-Eingang (CLAUDE.md 7.2) — Schritt 2 von 4:**
+
+*Schritt 2 — Stereo-Pairing: Modell + Port-UI + Doppel-Kabel:*
+- **`ChannelNames`**: `Entry.pairedWithNext` (App-Zustand am **physischen** Geräte-Kanal, wie userLabel — kein Undo, überlebt Preset-Load, Device-Matching). Port-API `isPortPairStart`/`setPortPairedWithNext` (Masken-Mapping am Rand via `toDeviceChannel`; bei Kanal-Lücke durch Teil-Auswahl wird das Paar nicht angezeigt, bleibt aber gespeichert). Konfliktregel: ein Kanal in höchstens einem Paar (Setter löst Anker k−1/k+1). XML-Attribut `paired`, Prune behält Flag-only-Einträge
+- **Port-UI** (`NodeComponent`): pure `buildPortRows` (Paare → span-2-Zeilen), Paar = EIN `PortComponent` mittig zwischen den Kanal-Zeilen (Doppelpunkt-Marker); **Meter und Labels bleiben eine Zeile pro Kanal** (`channelRowY` getrennt vom Kabel-Anker). Koppel-Toggles (∥) in eigener 20px-Spalte zwischen Meter und Port (audio_in-Kachel → 320px); ChannelNames-Broadcast baut Ports live um. `getPortCentre` liefert für Paar-Kanäle denselben Port ∓3px versetzt → **die Doppel-Linie fällt im unveränderten Kabel-Rendering gratis ab**
+- **`GraphManager`**: `addConnectionPair`/`removeConnectionPair` — beide Kabel in EINER Undo-Transaktion (5.5); zweites Kabel nur wenn destChannel+1 existiert und frei ist (Mono-Fallback dokumentiert). `addConnection` in `canConnect`+`appendConnectionChild` refaktoriert
+- **`NodeCanvas`**: Drag vom span-2-Port → `addConnectionPair`; Kabel-Klick erkennt Paar-Zugehörigkeit (`pairAnchorForPort`) und trennt beide Linien in einer Transaktion
+- **Verifikation:** 160 Testfälle / 10370 Assertions grün (Debug + ASan). Neue Tests: ChannelNames-Pairing (Anker/Konflikt/Teil-Masken-Verankerung/Persistenz inkl. Flag-only-Roundtrip), `buildPortRows` (Paare, letzter Kanal ohne Partner), Komponenten-Test (3 Ports/4 Meter/320px, ∓3px-Anker, Entkoppeln), Canvas-Drag → 2 Connections + EIN Undo entfernt beide, Mono-Fallback, `removeConnectionPair`. Smoke: Toggle koppelt „Analog In L/R" zu einem Port, EIN Drag → Doppel-Linie auf Analog Out L/R, EIN Klick trennt beide (Screenshots pairing_smoke_*.png)
 
 *Schritt 1 — `LinkSendTaps` extrahieren (verhaltensneutral):*
 - **`LinkSendTaps`** (`Source/Core/`): wiederverwendbare Send-Mechanik aus dem `LinkAudioSendModule` extrahiert — pro Tap ein Link-Kanal (sink + rtSink-Atomic + Status + Dither-Seed + Interleave-Buffer), TPDF-Konvertierung (`convertToInt16Tpdf`, Modul behält delegierende static → Dither-Tests wörtlich grün), Epoch-Retire-Handshake (AsyncUpdater-Self-Re-Dispatch, 100-ms-Deadline), `enableAudio`-Refcount-Balance (erster aktiver Tap aktiviert, letzter deaktiviert, Destruktor balanciert ohne Phase 1)
 - **Design fürs Kern-Feature:** Tap-Punkt ist Sache des Aufrufers (`commit()` wo gewünscht → pre/post ohne Sink-Wechsel); Sink-Kapazität immer `block × 2` SAMPLES → **`setWidth()` schaltet mono↔stereo am LEBENDEN Sink um** (kein Neuanlegen — der Ableton-Stream reißt nicht ab; `BufferHandle::commit` nimmt `numChannels` pro Commit). Tap-Objekte leben als Pool bis zur Destruktion (stabile Adressen, `retireTap` gibt nur den Sink in die Retire-Liste, Reuse beim Re-Enable)
 - **`LinkAudioSendModule`** verschlankt: InputSlot hält `Tap*` statt sink/rtSink/dither/status; `processBlock` = `noteBlockBegin()` + Gain-Scratch + `tap->commit/noteIdle`; Phase 1 = `taps.retireAll()`; AsyncUpdater/Retire-Mechanik aus dem Modul entfernt. Scratch-Guard explizit (schützte vorher implizit über den Interleave-Buffer)
 - **Verifikation:** 156 Testfälle / 10285 Assertions grün (Debug + ASan) — alle 153 bestehenden unverändert, 3 neue `LinkSendTapsTests` (Lifecycle/Refcount/Pool-Reuse, **Breiten-Umschaltung am lebenden Sink** inkl. Kapazität `block × 2`, prepare wächst-nur + ohne Clock kein Tap). Smoke: LinkSend-Node über Dialog angelegt — Zeile mit LED/S-Badge/Attenuator/Auto-Namen wie vor dem Umbau
-- **Offen:** Schritt 2 — Stereo-Pairing am audio_in (ChannelNames `pairedWithNext`, EIN Port pro Paar, Doppel-Kabel via `addConnectionPair`); Schritt 3 — `InputLinkSend`-Backend im EngineProcessor (Tap zwischen `captureClockState` und `graph.processBlock`, diff-basiertes `applySends`); Schritt 4 — Send-UI an den Kanal-Zeilen + Live-12-Smoke
+- **Offen:** Schritt 3 — `InputLinkSend`-Backend im EngineProcessor (Tap zwischen `captureClockState` und `graph.processBlock`, diff-basiertes `applySends`); Schritt 4 — Send-UI an den Kanal-Zeilen + Live-12-Smoke
 
 **Davor: Ableton-Style Pegelanzeigen für audio_in/audio_out (CLAUDE.md 10) — Meilenstein abgeschlossen:**
 

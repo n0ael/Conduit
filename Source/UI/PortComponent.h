@@ -7,12 +7,17 @@ namespace conduit
 
 //==============================================================================
 /** Identität eines Ports — reicht zusammen mit dem Tree, um ein Kabel
-    (Connection, Schema 6.2) zu beschreiben. */
+    (Connection, Schema 6.2) zu beschreiben.
+
+    span == 2: Stereo-Paar-Port (Kanäle channel, channel+1) — ein Drag erzeugt
+    zwei Connections (GraphManager::addConnectionPair), die als Doppel-Linie
+    am selben Port ankommen. Das Pairing selbst lebt in ChannelNames. */
 struct PortInfo
 {
     juce::String nodeUuid;
     bool isInput = false;
     int channel = 0;
+    int span = 1;
 };
 
 //==============================================================================

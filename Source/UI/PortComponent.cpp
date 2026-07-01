@@ -16,11 +16,21 @@ void PortComponent::paint (juce::Graphics& g)
     const auto centre = getLocalBounds().toFloat().getCentre();
     constexpr float radius = 7.0f;
 
+    const auto ring = info.isInput ? juce::Colour (0xff7bc8f6) : juce::Colour (0xfff6a97b);
+
     g.setColour (juce::Colour (0xff15171a));
     g.fillEllipse (centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f);
 
-    g.setColour (info.isInput ? juce::Colour (0xff7bc8f6) : juce::Colour (0xfff6a97b));
+    g.setColour (ring);
     g.drawEllipse (centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f, 2.0f);
+
+    // Stereo-Paar-Port: innerer Doppelpunkt markiert die zwei Kabel-Anker
+    // (∓3px — dieselben Offsets nutzt getPortCentre für die Doppel-Linie)
+    if (info.span == 2)
+    {
+        g.fillEllipse (centre.x - 1.5f, centre.y - 3.0f - 1.5f, 3.0f, 3.0f);
+        g.fillEllipse (centre.x - 1.5f, centre.y + 3.0f - 1.5f, 3.0f, 3.0f);
+    }
 }
 
 void PortComponent::mouseDown (const juce::MouseEvent& event)

@@ -116,6 +116,21 @@ public:
     bool removeConnection (const juce::String& sourceUuid, int sourceChannel,
                            const juce::String& destUuid, int destChannel);
 
+    /** Stereo-Paar-Kabel in EINER Undo-Transaktion: (sourceChannel →
+        destChannel) plus (sourceChannel+1 → destChannel+1). Das zweite Kabel
+        entsteht nur, wenn destChannel+1 am Ziel existiert (numInputChannels)
+        und die Verbindung noch frei ist — sonst bleibt nur das erste
+        (Mono-Fallback, dokumentierter Randfall). false, wenn schon das
+        erste Kabel ungültig wäre. */
+    bool addConnectionPair (const juce::String& sourceUuid, int sourceChannel,
+                            const juce::String& destUuid, int destChannel);
+
+    /** Trennt beide Kabel eines Stereo-Paars in EINER Undo-Transaktion
+        (das zweite nur, falls vorhanden). false, wenn keines existiert. */
+    bool removeConnectionPair (const juce::String& sourceUuid, int sourceChannelA,
+                               const juce::String& destUuid, int destChannelA,
+                               int sourceChannelB, int destChannelB);
+
     //==========================================================================
     /** Mappt eine reservierte moduleId (audio_input/audio_output) auf einen
         extern verwalteten Graph-Node des EngineProcessor. Tree-Nodes mit
@@ -227,6 +242,16 @@ private:
 
     [[nodiscard]] juce::ValueTree findConnectionTree (const juce::String& sourceUuid, int sourceChannel,
                                                       const juce::String& destUuid, int destChannel) const;
+
+    /** Gemeinsame Kabel-Validierung von addConnection/addConnectionPair
+        (Endpunkte existieren, keine Selbstverbindung, kein Duplikat). */
+    [[nodiscard]] bool canConnect (const juce::String& sourceUuid, int sourceChannel,
+                                   const juce::String& destUuid, int destChannel) const;
+
+    /** Hängt das Connection-Child ein — OHNE eigene Transaktion (der Aufrufer
+        klammert; addConnectionPair bündelt zwei Kabel in einer). */
+    void appendConnectionChild (const juce::String& sourceUuid, int sourceChannel,
+                                const juce::String& destUuid, int destChannel);
 
     /** Auto-Naming-Snapshot: setzt für den Eingang, der destChannel enthält,
         autoName aus der Quelle — nur wenn userName UND autoName leer sind

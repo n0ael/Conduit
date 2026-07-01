@@ -20,6 +20,7 @@ namespace
     const juce::Identifier xmlIndex     { "index" };
     const juce::Identifier xmlLabel     { "label" };
     const juce::Identifier xmlImagePath { "imagePath" };
+    const juce::Identifier xmlPaired    { "paired" };
 
     [[nodiscard]] const char* toString (ChannelNames::Direction direction)
     {
@@ -82,10 +83,10 @@ void ChannelNames::loadFromFile()
             entry.channelIndex = channelXml->getIntAttribute (xmlIndex.toString(), -1);
             entry.userLabel    = channelXml->getStringAttribute (xmlLabel.toString())
                                      .substring (0, maxLabelLength);
-            entry.imagePath    = channelXml->getStringAttribute (xmlImagePath.toString());
+            entry.imagePath      = channelXml->getStringAttribute (xmlImagePath.toString());
+            entry.pairedWithNext = channelXml->getBoolAttribute (xmlPaired.toString(), false);
 
-            if (entry.channelIndex >= 0
-                && (entry.userLabel.isNotEmpty() || entry.imagePath.isNotEmpty()))
+            if (entry.channelIndex >= 0 && ! entry.isEmpty())
                 device.entries.push_back (std::move (entry));
         }
 
@@ -111,6 +112,9 @@ void ChannelNames::writeToFile()
             channelXml->setAttribute (xmlIndex.toString(), entry.channelIndex);
             channelXml->setAttribute (xmlLabel.toString(), entry.userLabel);
             channelXml->setAttribute (xmlImagePath.toString(), entry.imagePath);
+
+            if (entry.pairedWithNext)
+                channelXml->setAttribute (xmlPaired.toString(), 1);
         }
     }
 
@@ -237,12 +241,71 @@ void ChannelNames::setImagePath (Direction direction, int channelIndex, const ju
     pruneAndStore (device);
 }
 
+//==============================================================================
+bool ChannelNames::isPortPairStart (Direction direction, int portIndex) const
+{
+    const auto anchor = toDeviceChannel (direction, portIndex);
+
+    const auto* entry = findEntry (direction, anchor);
+    if (entry == nullptr || ! entry->pairedWithNext)
+        return false;
+
+    // Paar nur anzeigen, wenn der NÄCHSTE Port physisch auf anchor+1 liegt —
+    // bei Teil-Auswahl können Port-Nachbarn auseinanderliegen (das Pairing
+    // bleibt gespeichert und greift wieder, sobald beide Kanäle aktiv sind).
+    return toDeviceChannel (direction, portIndex + 1) == anchor + 1;
+}
+
+void ChannelNames::setPortPairedWithNext (Direction direction, int portIndex, bool paired)
+{
+    if (activeDeviceName.isEmpty() || portIndex < 0)
+        return;  // ohne Device-Kontext gibt es keinen Key zum Speichern
+
+    const auto anchor = toDeviceChannel (direction, portIndex);
+
+    auto& device = findOrCreateActiveDevice();
+    auto& entry  = findOrCreateEntry (device, direction, anchor);
+
+    if (entry.pairedWithNext == paired)
+    {
+        // Auch ein No-op-Set darf keine leere Entry-Leiche hinterlassen
+        pruneAndStore (device);
+        return;
+    }
+
+    entry.pairedWithNext = paired;
+
+    // Konfliktregel: ein Kanal gehört zu höchstens einem Paar — ein neues
+    // Paar (anchor, anchor+1) löst Anker auf anchor−1 (überlappt anchor)
+    // und anchor+1 (überlappt anchor+1).
+    if (paired)
+        for (auto& other : device.entries)
+            if (other.direction == direction && &other != &entry
+                && (other.channelIndex == anchor - 1 || other.channelIndex == anchor + 1))
+                other.pairedWithNext = false;
+
+    pruneAndStore (device);
+}
+
+ChannelNames::Entry& ChannelNames::findOrCreateEntry (DeviceEntry& device, Direction direction,
+                                                      int deviceChannel)
+{
+    const auto it = std::find_if (device.entries.begin(), device.entries.end(),
+                                  [&] (const Entry& entry)
+                                  { return entry.direction == direction
+                                        && entry.channelIndex == deviceChannel; });
+    if (it != device.entries.end())
+        return *it;
+
+    device.entries.push_back ({ direction, deviceChannel, {}, {}, false });
+    return device.entries.back();
+}
+
 void ChannelNames::pruneAndStore (DeviceEntry& device)
 {
-    // Leere Einträge (Label gelöscht, kein Bild) und leere Devices räumen —
-    // die Datei trägt nur echte Overrides
-    std::erase_if (device.entries, [] (const Entry& entry)
-                   { return entry.userLabel.isEmpty() && entry.imagePath.isEmpty(); });
+    // Leere Einträge (Label gelöscht, kein Bild, kein Pairing) und leere
+    // Devices räumen — die Datei trägt nur echte Overrides
+    std::erase_if (device.entries, [] (const Entry& entry) { return entry.isEmpty(); });
 
     std::erase_if (devices, [] (const DeviceEntry& deviceEntry)
                    { return deviceEntry.entries.empty(); });

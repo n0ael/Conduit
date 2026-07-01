@@ -201,27 +201,64 @@ bool GraphManager::requestNodeDelete (const juce::String& nodeUuid)
 }
 
 //==============================================================================
-bool GraphManager::addConnection (const juce::String& sourceUuid, int sourceChannel,
-                                  const juce::String& destUuid, int destChannel)
+bool GraphManager::canConnect (const juce::String& sourceUuid, int sourceChannel,
+                               const juce::String& destUuid, int destChannel) const
 {
-    JUCE_ASSERT_MESSAGE_THREAD
-
     const auto nodesTree = rootState.getChildWithName (id::nodes);
 
-    if (sourceUuid == destUuid  // direkte Selbstverbindung wäre ein Graph-Zyklus
-        || ! nodesTree.getChildWithProperty (id::nodeId, sourceUuid).isValid()
-        || ! nodesTree.getChildWithProperty (id::nodeId, destUuid).isValid()
-        || findConnectionTree (sourceUuid, sourceChannel, destUuid, destChannel).isValid())
-        return false;
+    return sourceUuid != destUuid  // direkte Selbstverbindung wäre ein Graph-Zyklus
+        && nodesTree.getChildWithProperty (id::nodeId, sourceUuid).isValid()
+        && nodesTree.getChildWithProperty (id::nodeId, destUuid).isValid()
+        && ! findConnectionTree (sourceUuid, sourceChannel, destUuid, destChannel).isValid();
+}
 
+void GraphManager::appendConnectionChild (const juce::String& sourceUuid, int sourceChannel,
+                                          const juce::String& destUuid, int destChannel)
+{
     juce::ValueTree connection (id::connection);
     connection.setProperty (id::sourceNodeId,  sourceUuid,    nullptr);
     connection.setProperty (id::sourceChannel, sourceChannel, nullptr);
     connection.setProperty (id::destNodeId,    destUuid,      nullptr);
     connection.setProperty (id::destChannel,   destChannel,   nullptr);
 
-    undoManager.beginNewTransaction ("Kabel verbinden");
     rootState.getChildWithName (id::connections).appendChild (connection, &undoManager);
+}
+
+bool GraphManager::addConnection (const juce::String& sourceUuid, int sourceChannel,
+                                  const juce::String& destUuid, int destChannel)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! canConnect (sourceUuid, sourceChannel, destUuid, destChannel))
+        return false;
+
+    undoManager.beginNewTransaction ("Kabel verbinden");
+    appendConnectionChild (sourceUuid, sourceChannel, destUuid, destChannel);
+    return true;
+}
+
+bool GraphManager::addConnectionPair (const juce::String& sourceUuid, int sourceChannel,
+                                      const juce::String& destUuid, int destChannel)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (! canConnect (sourceUuid, sourceChannel, destUuid, destChannel))
+        return false;
+
+    undoManager.beginNewTransaction ("Kabel verbinden");
+    appendConnectionChild (sourceUuid, sourceChannel, destUuid, destChannel);
+
+    // Zweites Kabel (Partner-Kanäle) nur, wenn das Ziel den Kanal trägt und
+    // die Verbindung frei ist — sonst Mono-Fallback (Header-Doku). Ein Undo
+    // entfernt beide Kabel (eine Transaktion, Batch-Coalescing 5.5).
+    const auto destTree = rootState.getChildWithName (id::nodes)
+                              .getChildWithProperty (id::nodeId, destUuid);
+    const auto destChannels = (int) destTree.getProperty (id::numInputChannels, 0);
+
+    if (destChannel + 1 < destChannels
+        && canConnect (sourceUuid, sourceChannel + 1, destUuid, destChannel + 1))
+        appendConnectionChild (sourceUuid, sourceChannel + 1, destUuid, destChannel + 1);
+
     return true;
 }
 
@@ -237,6 +274,31 @@ bool GraphManager::removeConnection (const juce::String& sourceUuid, int sourceC
 
     undoManager.beginNewTransaction ("Kabel trennen");
     rootState.getChildWithName (id::connections).removeChild (connection, &undoManager);
+    return true;
+}
+
+bool GraphManager::removeConnectionPair (const juce::String& sourceUuid, int sourceChannelA,
+                                         const juce::String& destUuid, int destChannelA,
+                                         int sourceChannelB, int destChannelB)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    const auto first  = findConnectionTree (sourceUuid, sourceChannelA, destUuid, destChannelA);
+    const auto second = findConnectionTree (sourceUuid, sourceChannelB, destUuid, destChannelB);
+
+    if (! first.isValid() && ! second.isValid())
+        return false;
+
+    // Beide Kabel des Paars in EINER Transaktion — ein Undo stellt beide
+    // wieder her (Batch-Coalescing 5.5)
+    undoManager.beginNewTransaction ("Kabel trennen");
+    auto connectionsTree = rootState.getChildWithName (id::connections);
+
+    if (first.isValid())
+        connectionsTree.removeChild (first, &undoManager);
+    if (second.isValid())
+        connectionsTree.removeChild (second, &undoManager);
+
     return true;
 }
 

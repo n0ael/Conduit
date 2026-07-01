@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "Core/Capture/LevelMeter.h"
@@ -5,6 +7,7 @@
 #include "Core/GraphManager.h"
 #include "Core/NodeUiRegistry.h"
 #include "Modules/AttenuatorModule.h"
+#include "Modules/LinkAudioSendModule.h"
 #include "Modules/ModuleFactory.h"
 #include "UI/NodeCanvas.h"
 
@@ -315,5 +318,257 @@ TEST_CASE ("GraphManager: Parameter-Sync Tree → Atomic (UI/Preset/Undo-Pfad)",
         REQUIRE (module != nullptr);
         REQUIRE (juce::exactlyEqual (module->getParameterTarget ("gain")->load (std::memory_order_relaxed),
                                      0.3f));
+    }
+}
+
+//==============================================================================
+// Stereo-Pairing (Schritt 2): Modell → Port-Zeilen → Doppel-Kabel
+
+namespace
+{
+
+/** ChannelNames mit Temp-Persistenz (Muster ChannelNamesTests). */
+struct TempChannelNames
+{
+    TempChannelNames()
+        : folder (juce::File::getSpecialLocation (juce::File::tempDirectory)
+                      .getChildFile ("ConduitNodeCanvasPairingTests")
+                      .getChildFile (juce::Uuid().toString()))
+    {
+        folder.createDirectory();
+
+        juce::PropertiesFile::Options options;
+        options.applicationName = "ConduitNodeCanvasPairingTests";
+        options.filenameSuffix  = ".settings";
+        options.folderName      = folder.getFullPathName();
+        names = std::make_unique<conduit::ChannelNames> (options);
+    }
+
+    ~TempChannelNames()
+    {
+        names.reset();
+        folder.deleteRecursively();
+    }
+
+    juce::File folder;
+    std::unique_ptr<conduit::ChannelNames> names;
+};
+
+/** UiTestRig-Variante mit ChannelNames am Canvas (Pairing-UI aktiv). */
+struct PairingRig
+{
+    PairingRig()
+    {
+        conduit::registerDefaultModules (factory);
+        inputLevels.prepare (48000.0, 64);
+        outputLevels.prepare (48000.0, 64);
+    }
+
+    /** audio_in-Endpunkt mit numChannels Hardware-Eingängen anlegen. */
+    juce::ValueTree addAudioInNode (int numChannels)
+    {
+        const auto graphNode = graph.addNode (std::make_unique<conduit::AttenuatorModule>())->nodeID;
+        manager.registerExternalEndpoint (conduit::audioInputModuleId, graphNode);
+
+        juce::ValueTree node (conduit::id::node);
+        node.setProperty (conduit::id::nodeId,            juce::Uuid().toString(),                        nullptr);
+        node.setProperty (conduit::id::factoryId,         conduit::audioInputModuleId,                    nullptr);
+        node.setProperty (conduit::id::moduleId,          "audio_in",                                     nullptr);
+        node.setProperty (conduit::id::nodeState,         conduit::toString (conduit::NodeState::active), nullptr);
+        node.setProperty (conduit::id::numInputChannels,  0,                                              nullptr);
+        node.setProperty (conduit::id::numOutputChannels, numChannels,                                    nullptr);
+        node.appendChild (juce::ValueTree (conduit::id::parameters), nullptr);
+        root.getChildWithName (conduit::id::nodes).appendChild (node, nullptr);
+        return node;
+    }
+
+    [[nodiscard]] juce::ValueTree connections() { return root.getChildWithName (conduit::id::connections); }
+
+    /** Existiert das Kabel (source ch → dest ch) im Connections-Tree? */
+    [[nodiscard]] bool hasConnection (const juce::String& sourceUuid, int sourceChannel,
+                                      const juce::String& destUuid, int destChannel)
+    {
+        const auto tree = connections();
+        for (int i = 0; i < tree.getNumChildren(); ++i)
+        {
+            const auto c = tree.getChild (i);
+            if (c.getProperty (conduit::id::sourceNodeId).toString() == sourceUuid
+                && (int) c.getProperty (conduit::id::sourceChannel) == sourceChannel
+                && c.getProperty (conduit::id::destNodeId).toString() == destUuid
+                && (int) c.getProperty (conduit::id::destChannel) == destChannel)
+                return true;
+        }
+        return false;
+    }
+
+    static juce::String uuidOf (const juce::ValueTree& node)
+    {
+        return node.getProperty (conduit::id::nodeId).toString();
+    }
+
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempChannelNames temp;
+    juce::ValueTree root = makeRootTree();
+    juce::AudioProcessorGraph graph;
+    conduit::GraphFader fader;
+    conduit::ModuleFactory factory;
+    juce::UndoManager undoManager;
+    conduit::NodeUiRegistry uiRegistry;
+    conduit::GraphManager manager { root, graph, fader, factory, undoManager, uiRegistry };
+    conduit::LevelMeter inputLevels;
+    conduit::LevelMeter outputLevels;
+    conduit::NodeCanvas canvas { root, manager, uiRegistry, temp.names.get(), &inputLevels, &outputLevels };
+};
+
+} // namespace
+
+//==============================================================================
+TEST_CASE ("NodeComponent::buildPortRows: Paare verschmelzen zu span-2-Zeilen", "[ui][pairing]")
+{
+    using Rows = std::vector<conduit::NodeComponent::PortRow>;
+
+    const auto pairAt = [] (std::initializer_list<int> anchors)
+    {
+        return [anchorList = std::vector<int> (anchors)] (int channel)
+        { return std::find (anchorList.begin(), anchorList.end(), channel) != anchorList.end(); };
+    };
+
+    const auto check = [] (const Rows& rows, std::initializer_list<std::pair<int, int>> expected)
+    {
+        REQUIRE (rows.size() == expected.size());
+        auto it = expected.begin();
+        for (const auto& row : rows)
+        {
+            REQUIRE (row.channel == it->first);
+            REQUIRE (row.span == it->second);
+            ++it;
+        }
+    };
+
+    // Ohne Pairing: eine Zeile pro Kanal
+    check (conduit::NodeComponent::buildPortRows (3, nullptr), { { 0, 1 }, { 1, 1 }, { 2, 1 } });
+
+    // Paar (0,1) bei 4 Kanälen: 3 Zeilen
+    check (conduit::NodeComponent::buildPortRows (4, pairAt ({ 0 })),
+           { { 0, 2 }, { 2, 1 }, { 3, 1 } });
+
+    // Paar mitten drin (1,2)
+    check (conduit::NodeComponent::buildPortRows (4, pairAt ({ 1 })),
+           { { 0, 1 }, { 1, 2 }, { 3, 1 } });
+
+    // Anker am LETZTEN Kanal ohne Partner: bleibt mono (ungerade Kanalzahl)
+    check (conduit::NodeComponent::buildPortRows (3, pairAt ({ 2 })),
+           { { 0, 1 }, { 1, 1 }, { 2, 1 } });
+
+    // Zwei Paare
+    check (conduit::NodeComponent::buildPortRows (4, pairAt ({ 0, 2 })),
+           { { 0, 2 }, { 2, 2 } });
+}
+
+//==============================================================================
+TEST_CASE ("NodeComponent: Stereo-Paar verschmilzt Ports, Meter bleiben pro Kanal", "[ui][pairing]")
+{
+    PairingRig rig;
+    rig.temp.names->setActiveDevice ("TestDev", { "A", "B", "C", "D" }, {});
+    rig.temp.names->setPortPairedWithNext (conduit::ChannelNames::Direction::input, 0, true);
+    rig.temp.names->dispatchPendingMessages();
+
+    const auto node = rig.addAudioInNode (4);
+    auto* component = rig.canvas.findNodeComponent (PairingRig::uuidOf (node));
+    REQUIRE (component != nullptr);
+
+    // Paar (0,1): 3 Ports, aber weiterhin 4 Meter (eine Zeile pro Kanal)
+    REQUIRE (component->getNumOutputPorts() == 3);
+    REQUIRE (component->getNumMeterBars() == 4);
+    REQUIRE (component->getWidth() == 320);  // endpointWidth + Koppel-Spalte
+
+    // Kabel-Anker des Paars: derselbe Port, ∓3px versetzt (Doppel-Linie)
+    const auto anchor0 = component->getPortCentre (false, 0);
+    const auto anchor1 = component->getPortCentre (false, 1);
+    REQUIRE (anchor0.x == anchor1.x);
+    REQUIRE (anchor1.y - anchor0.y == 6);
+
+    // Paar-Zuordnung für den Kabel-Klick-Pfad
+    REQUIRE (component->pairAnchorForPort (false, 0) == 0);
+    REQUIRE (component->pairAnchorForPort (false, 1) == 0);
+    REQUIRE_FALSE (component->pairAnchorForPort (false, 2).has_value());
+
+    // Entkoppeln (ChangeBroadcast) baut die Ports zurück auf mono
+    rig.temp.names->setPortPairedWithNext (conduit::ChannelNames::Direction::input, 0, false);
+    rig.temp.names->dispatchPendingMessages();
+    REQUIRE (component->getNumOutputPorts() == 4);
+    REQUIRE (component->getNumMeterBars() == 4);
+    REQUIRE_FALSE (component->pairAnchorForPort (false, 0).has_value());
+}
+
+//==============================================================================
+TEST_CASE ("NodeCanvas: Drag vom Stereo-Port erzeugt beide Kabel, EIN Undo entfernt beide", "[ui][pairing]")
+{
+    PairingRig rig;
+    rig.temp.names->setActiveDevice ("TestDev", { "A", "B", "C", "D" }, {});
+    rig.temp.names->setPortPairedWithNext (conduit::ChannelNames::Direction::input, 0, true);
+    rig.temp.names->dispatchPendingMessages();
+
+    const auto audioIn = rig.addAudioInNode (4);
+    const auto atten   = rig.manager.addModuleNode (attenuatorId, { 400, 100 });  // stereo (2 in)
+    REQUIRE (atten.isValid());
+
+    auto* inComponent    = rig.canvas.findNodeComponent (PairingRig::uuidOf (audioIn));
+    auto* attenComponent = rig.canvas.findNodeComponent (PairingRig::uuidOf (atten));
+    REQUIRE (inComponent != nullptr);
+    REQUIRE (attenComponent != nullptr);
+
+    SECTION ("Stereo-Ziel: zwei Connections in einer Undo-Transaktion")
+    {
+        // Drag vom Paar-Port (span 2) auf den ersten Attenuator-Eingang
+        const auto* pairPort = inComponent->findPortNear (
+            inComponent->getPortCentre (false, 0), 10);
+        REQUIRE (pairPort != nullptr);
+        REQUIRE (pairPort->getInfo().span == 2);
+
+        rig.canvas.beginCableDrag (pairPort->getInfo(), { 0, 0 });
+        rig.canvas.endCableDrag (attenComponent->getPosition()
+                                 + attenComponent->getPortCentre (true, 0));
+
+        REQUIRE (rig.connections().getNumChildren() == 2);
+        REQUIRE (rig.hasConnection (PairingRig::uuidOf (audioIn), 0,
+                                    PairingRig::uuidOf (atten), 0));
+        REQUIRE (rig.hasConnection (PairingRig::uuidOf (audioIn), 1,
+                                    PairingRig::uuidOf (atten), 1));
+
+        // EIN Undo entfernt beide Kabel (eine Transaktion, 5.5)
+        REQUIRE (rig.undoManager.undo());
+        REQUIRE (rig.connections().getNumChildren() == 0);
+    }
+
+    SECTION ("Mono-Ziel (m+1 existiert nicht): nur das erste Kabel")
+    {
+        const auto monoSend = rig.manager.addModuleNode (
+            conduit::LinkAudioSendModule::staticModuleId, { 400, 300 },
+            [] (juce::ValueTree& tree)
+            {
+                using Mode = conduit::LinkAudioSendModule::InputMode;
+                conduit::LinkAudioSendModule::applyInputConfig (tree, { Mode::mono });
+            });
+        REQUIRE ((int) monoSend.getProperty (conduit::id::numInputChannels) == 1);
+
+        REQUIRE (rig.manager.addConnectionPair (PairingRig::uuidOf (audioIn), 0,
+                                                PairingRig::uuidOf (monoSend), 0));
+        REQUIRE (rig.connections().getNumChildren() == 1);  // Mono-Fallback
+    }
+
+    SECTION ("removeConnectionPair trennt beide Kabel in einer Transaktion")
+    {
+        REQUIRE (rig.manager.addConnectionPair (PairingRig::uuidOf (audioIn), 0,
+                                                PairingRig::uuidOf (atten), 0));
+        REQUIRE (rig.connections().getNumChildren() == 2);
+
+        REQUIRE (rig.manager.removeConnectionPair (PairingRig::uuidOf (audioIn), 0,
+                                                   PairingRig::uuidOf (atten), 0, 1, 1));
+        REQUIRE (rig.connections().getNumChildren() == 0);
+
+        // EIN Undo stellt beide wieder her
+        REQUIRE (rig.undoManager.undo());
+        REQUIRE (rig.connections().getNumChildren() == 2);
     }
 }

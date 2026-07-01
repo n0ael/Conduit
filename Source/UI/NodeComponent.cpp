@@ -15,6 +15,11 @@ namespace
     constexpr int endpointMeterHeight = 14;
     constexpr int endpointPortInset   = 24;   // Port ↔ Meter-Kante
     constexpr int endpointWidth       = 300;  // verbreiterte Kachel (Label + Meter + Port)
+    constexpr int endpointPairColumn  = 20;   // Koppel-Toggle-Spalte (nur audio_in)
+
+    // Vertikaler Versatz der beiden Kabel-Anker eines Stereo-Paar-Ports —
+    // die zwei Connections starten dicht beieinander (Doppel-Linien-Optik)
+    constexpr int pairCableOffset = 3;
 }
 
 NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
@@ -176,6 +181,9 @@ void NodeComponent::beginTeardown()
     if (sendPanel != nullptr)
         sendPanel->stopUpdates();
 
+    for (auto& toggle : pairToggles)
+        toggle->setEnabled (false);
+
     for (auto& bar : meterBars)
         bar->stopUpdates();
 
@@ -264,34 +272,100 @@ juce::ValueTree NodeComponent::firstParameter() const
     return nodeTree.getChildWithName (id::parameters).getChild (0);
 }
 
+std::vector<NodeComponent::PortRow> NodeComponent::buildPortRows (
+    int numChannels, const std::function<bool (int)>& isPairStart)
+{
+    std::vector<PortRow> rows;
+
+    for (int channel = 0; channel < numChannels; ++channel)
+    {
+        const bool paired = channel + 1 < numChannels
+                            && isPairStart != nullptr && isPairStart (channel);
+        rows.push_back ({ channel, paired ? 2 : 1 });
+
+        if (paired)
+            ++channel;  // Partner-Kanal gehört zur selben Zeile
+    }
+
+    return rows;
+}
+
+bool NodeComponent::hasPairingUi() const noexcept
+{
+    // Pairing-Scope: der Audio-EINGANG (audio_in trägt Output-Ports = Hardware-
+    // Inputs); die Paar-Definition lebt in ChannelNames (App-Zustand)
+    return isExternalEndpoint && endpointIsInput && channelNames != nullptr;
+}
+
 void NodeComponent::rebuildPorts()
 {
     inputPorts.clear();
     outputPorts.clear();
+    pairToggles.clear();
 
-    const auto makePorts = [this] (bool isInput, int count,
+    inputChannelCount  = (int) nodeTree.getProperty (id::numInputChannels,  0);
+    outputChannelCount = (int) nodeTree.getProperty (id::numOutputChannels, 0);
+
+    // Stereo-Paare verschmelzen nur am audio_in-Endpunkt zu span-2-Zeilen
+    const auto pairStart = hasPairingUi()
+        ? std::function<bool (int)> ([this] (int channel)
+              { return channelNames->isPortPairStart (ChannelNames::Direction::input, channel); })
+        : std::function<bool (int)>();
+
+    inputRows  = buildPortRows (inputChannelCount, nullptr);
+    outputRows = buildPortRows (outputChannelCount, pairStart);
+
+    const auto makePorts = [this] (bool isInput, const std::vector<PortRow>& rows,
                                    std::vector<std::unique_ptr<PortComponent>>& ports)
     {
-        for (int channel = 0; channel < count; ++channel)
+        for (const auto& row : rows)
         {
-            auto port = std::make_unique<PortComponent> (PortInfo { nodeUuid, isInput, channel });
+            auto port = std::make_unique<PortComponent> (
+                PortInfo { nodeUuid, isInput, row.channel, row.span });
             addAndMakeVisible (*port);
             ports.push_back (std::move (port));
         }
     };
 
-    makePorts (true,  (int) nodeTree.getProperty (id::numInputChannels,  0), inputPorts);
-    makePorts (false, (int) nodeTree.getProperty (id::numOutputChannels, 0), outputPorts);
+    makePorts (true,  inputRows,  inputPorts);
+    makePorts (false, outputRows, outputPorts);
+
+    // Koppel-Toggles zwischen benachbarten Kanal-Zeilen (audio_in): Klick
+    // koppelt/löst (ChannelNames räumt Konflikte), der ChangeBroadcast baut
+    // die Ports neu
+    if (hasPairingUi())
+        for (int channel = 0; channel + 1 < outputChannelCount; ++channel)
+        {
+            auto toggle = std::make_unique<juce::TextButton> (
+                juce::String::fromUTF8 ("\xe2\x88\xa5"));  // ∥ — zwei Linien
+            toggle->setTooltip (juce::String::fromUTF8 ("Stereo-Paar koppeln/l\xc3\xb6sen"));
+            toggle->setClickingTogglesState (false);
+            toggle->setToggleState (channelNames->isPortPairStart (ChannelNames::Direction::input,
+                                                                   channel),
+                                    juce::dontSendNotification);
+            toggle->onClick = [this, channel]
+            {
+                const auto paired = channelNames->isPortPairStart (
+                    ChannelNames::Direction::input, channel);
+                channelNames->setPortPairedWithNext (ChannelNames::Direction::input,
+                                                     channel, ! paired);
+            };
+            addAndMakeVisible (*toggle);
+            pairToggles.push_back (std::move (toggle));
+        }
 
     refreshPortTooltips();  // Kanal-Labels der I/O-Endpunkte nachziehen
 }
 
 void NodeComponent::updateEndpointSize()
 {
-    // Ein Port braucht rund eine Touch-Reihe; die Höhe folgt dem größeren der
-    // beiden Port-Bänke. Mit Metern breitere Kachel (Label + Balken + Port).
-    const auto maxPorts = juce::jmax (getNumInputPorts(), getNumOutputPorts(), 1);
-    setSize (hasMeters() ? endpointWidth : defaultWidth, touchTarget + maxPorts * 30);
+    // Ein KANAL braucht rund eine Touch-Reihe (Meter/Labels bleiben eine
+    // Zeile pro Kanal, auch wenn Paare zu einem Port verschmelzen). Mit
+    // Metern breitere Kachel; audio_in zusätzlich die Koppel-Spalte.
+    const auto maxChannels = juce::jmax (inputChannelCount, outputChannelCount, 1);
+    const auto width = hasMeters() ? endpointWidth + (hasPairingUi() ? endpointPairColumn : 0)
+                                   : defaultWidth;
+    setSize (width, touchTarget + maxChannels * 30);
 }
 
 void NodeComponent::rebuildMeters()
@@ -309,7 +383,8 @@ void NodeComponent::rebuildMeters()
     if (provider == nullptr)
         return;
 
-    const int count = endpointIsInput ? getNumOutputPorts() : getNumInputPorts();
+    // Eine Bar pro KANAL — auch wenn ein Stereo-Paar die Ports verschmilzt
+    const int count = endpointIsInput ? outputChannelCount : inputChannelCount;
     for (int channel = 0; channel < count; ++channel)
     {
         auto bar = std::make_unique<LevelMeterBar> (provider, channel);
@@ -325,11 +400,14 @@ bool NodeComponent::hasMeters() const noexcept
 
 juce::Rectangle<int> NodeComponent::meterBoundsFor (bool isInputEndpoint, int channel) const
 {
-    // Port-Bank des Endpunkts: audio_in trägt Ausgangs-Ports, audio_out Eingangs
-    const auto rowY = getPortCentre (! isInputEndpoint, channel).y;
+    // Kanal-Bank des Endpunkts: audio_in trägt Ausgangs-Ports, audio_out
+    // Eingangs. Feste Zeile pro KANAL (Pairing verschiebt nur die Ports).
+    const auto rowY = channelRowY (! isInputEndpoint, channel);
     const int  y    = rowY - endpointMeterHeight / 2;
-    const int  x    = isInputEndpoint ? getWidth() - endpointPortInset - endpointMeterWidth
-                                      : endpointPortInset;
+    const int  pairColumn = hasPairingUi() ? endpointPairColumn : 0;
+    const int  x    = isInputEndpoint
+                    ? getWidth() - endpointPortInset - pairColumn - endpointMeterWidth
+                    : endpointPortInset;
     return { x, y, endpointMeterWidth, endpointMeterHeight };
 }
 
@@ -360,13 +438,27 @@ void NodeComponent::refreshPortTooltips()
     auto& ports = *direction == ChannelNames::Direction::input ? outputPorts : inputPorts;
 
     for (auto& port : ports)
-        port->setTooltip (channelNames->getLabel (*direction, port->getInfo().channel));
+    {
+        const auto& info = port->getInfo();
+        auto tooltip = channelNames->getLabel (*direction, info.channel);
+
+        if (info.span == 2)  // Stereo-Paar: beide Kanal-Labels
+            tooltip << " / " << channelNames->getLabel (*direction, info.channel + 1);
+
+        port->setTooltip (tooltip);
+    }
 }
 
 void NodeComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    refreshPortTooltips();
-    repaint();  // gemalte Port-Labels nachziehen
+    // ChannelNames-Änderung: Labels ODER Stereo-Pairing — Ports neu bauen
+    // (Paare verschmelzen/lösen sich), Kabel-Anker verschieben sich
+    rebuildPorts();
+    resized();
+    repaint();
+
+    if (auto* parent = getParentComponent())
+        parent->repaint();  // Kabel-Pfade folgen den Port-Ankern
 }
 
 //==============================================================================
@@ -374,13 +466,40 @@ int NodeComponent::getNumInputPorts() const noexcept  { return static_cast<int> 
 int NodeComponent::getNumOutputPorts() const noexcept { return static_cast<int> (outputPorts.size()); }
 int NodeComponent::getNumMeterBars() const noexcept   { return static_cast<int> (meterBars.size()); }
 
-juce::Point<int> NodeComponent::getPortCentre (bool isInput, int channel) const
+int NodeComponent::channelRowY (bool isInputBank, int channel) const
 {
-    const auto count = isInput ? getNumInputPorts() : getNumOutputPorts();
+    const auto count = juce::jmax (1, isInputBank ? inputChannelCount : outputChannelCount);
     const auto availableHeight = getHeight() - touchTarget;  // unterhalb des Headers
 
-    return { isInput ? 12 : getWidth() - 12,
-             touchTarget + availableHeight * (channel + 1) / (count + 1) };
+    return touchTarget + availableHeight * (channel + 1) / (count + 1);
+}
+
+juce::Point<int> NodeComponent::getPortCentre (bool isInput, int channel) const
+{
+    const int x = isInput ? 12 : getWidth() - 12;
+
+    // Stereo-Paar: beide Kanäle ankern am selben Port (Mitte zwischen den
+    // Kanal-Zeilen), ∓3px versetzt — zwei Connections liegen als Doppel-Linie
+    const auto& rows = isInput ? inputRows : outputRows;
+    for (const auto& row : rows)
+        if (row.span == 2 && (channel == row.channel || channel == row.channel + 1))
+        {
+            const auto mid = (channelRowY (isInput, row.channel)
+                              + channelRowY (isInput, row.channel + 1)) / 2;
+            return { x, mid + (channel == row.channel ? -pairCableOffset : pairCableOffset) };
+        }
+
+    return { x, channelRowY (isInput, channel) };
+}
+
+std::optional<int> NodeComponent::pairAnchorForPort (bool isInput, int channel) const
+{
+    const auto& rows = isInput ? inputRows : outputRows;
+    for (const auto& row : rows)
+        if (row.span == 2 && (channel == row.channel || channel == row.channel + 1))
+            return row.channel;
+
+    return std::nullopt;
 }
 
 const PortComponent* NodeComponent::findPortNear (juce::Point<int> localPoint,
@@ -440,14 +559,19 @@ void NodeComponent::paint (juce::Graphics& g)
     if (const auto direction = portLabelDirection(); direction.has_value())
     {
         const auto isInputEndpoint = *direction == ChannelNames::Direction::input;
-        const auto numPorts = isInputEndpoint ? getNumOutputPorts() : getNumInputPorts();
+
+        // Eine Label-Zeile pro KANAL (nicht pro Port — Paare teilen den Port,
+        // behalten aber beide Kanal-Zeilen samt Meter)
+        const auto numPorts = isInputEndpoint ? outputChannelCount : inputChannelCount;
 
         g.setColour (juce::Colours::white.withAlpha (0.55f));
         g.setFont (juce::Font (juce::FontOptions (11.0f)));
 
         for (int channel = 0; channel < numPorts; ++channel)
         {
-            const auto centre = getPortCentre (! isInputEndpoint, channel);
+            // Feste Zeile pro Kanal — auch gepaarte Kanäle behalten ihr Label
+            const auto rowY  = channelRowY (! isInputEndpoint, channel);
+            const auto portX = isInputEndpoint ? getWidth() - 12 : 12;
 
             // Mit Metern liegt das Label jenseits des Balkens; sonst direkt am Port
             juce::Rectangle<int> area;
@@ -455,15 +579,15 @@ void NodeComponent::paint (juce::Graphics& g)
             {
                 const auto meter = meterBoundsFor (isInputEndpoint, channel);
                 area = isInputEndpoint
-                     ? juce::Rectangle<int> (8, centre.y - 8, meter.getX() - 12, 16)          // links vom Meter
-                     : juce::Rectangle<int> (meter.getRight() + 8, centre.y - 8,
+                     ? juce::Rectangle<int> (8, rowY - 8, meter.getX() - 12, 16)              // links vom Meter
+                     : juce::Rectangle<int> (meter.getRight() + 8, rowY - 8,
                                              getWidth() - meter.getRight() - 14, 16);          // rechts vom Meter
             }
             else
             {
                 area = isInputEndpoint
-                     ? juce::Rectangle<int> (centre.x - 110, centre.y - 8, 90, 16)
-                     : juce::Rectangle<int> (centre.x + 20,  centre.y - 8, 90, 16);
+                     ? juce::Rectangle<int> (portX - 110, rowY - 8, 90, 16)
+                     : juce::Rectangle<int> (portX + 20,  rowY - 8, 90, 16);
             }
 
             g.drawText (channelNames->getLabel (*direction, channel), area,
@@ -502,13 +626,30 @@ void NodeComponent::resized()
     {
         for (auto& port : ports)
         {
-            const auto centre = getPortCentre (port->getInfo().isInput, port->getInfo().channel);
-            port->setCentrePosition (centre.x, centre.y);
+            const auto& info = port->getInfo();
+
+            // Paar-Port: mittig zwischen seinen beiden Kanal-Zeilen — die
+            // ∓3px-Kabel-Anker (getPortCentre) liegen in der Hit-Zone
+            const auto y = info.span == 2
+                ? (channelRowY (info.isInput, info.channel)
+                   + channelRowY (info.isInput, info.channel + 1)) / 2
+                : channelRowY (info.isInput, info.channel);
+
+            port->setCentrePosition (info.isInput ? 12 : getWidth() - 12, y);
         }
     };
 
     placePorts (inputPorts);
     placePorts (outputPorts);
+
+    // Koppel-Toggles: in der Spalte zwischen Meter und Port, mittig zwischen
+    // den beiden Kanal-Zeilen, die sie koppeln (Toggle i = Kanäle i, i+1)
+    for (int i = 0; i < (int) pairToggles.size(); ++i)
+    {
+        const auto y = (channelRowY (false, i) + channelRowY (false, i + 1)) / 2;
+        pairToggles[(std::size_t) i]->setBounds (getWidth() - endpointPortInset - endpointPairColumn,
+                                                 y - 10, endpointPairColumn, 20);
+    }
 
     for (int channel = 0; channel < (int) meterBars.size(); ++channel)
         meterBars[(std::size_t) channel]->setBounds (meterBoundsFor (endpointIsInput, channel));

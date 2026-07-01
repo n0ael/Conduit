@@ -173,8 +173,14 @@ void NodeCanvas::endCableDrag (juce::Point<int> position)
         const auto& source = from.isInput ? port->getInfo() : from;
         const auto& dest   = from.isInput ? from            : port->getInfo();
 
-        graphManager.addConnection (source.nodeUuid, source.channel,
-                                    dest.nodeUuid, dest.channel);
+        // Stereo-Paar-Port als Quelle: EIN Drag erzeugt beide Kabel in einer
+        // Undo-Transaktion (Doppel-Linie am selben Port)
+        if (source.span == 2)
+            graphManager.addConnectionPair (source.nodeUuid, source.channel,
+                                            dest.nodeUuid, dest.channel);
+        else
+            graphManager.addConnection (source.nodeUuid, source.channel,
+                                        dest.nodeUuid, dest.channel);
         return;
     }
 }
@@ -280,11 +286,30 @@ void NodeCanvas::mouseDown (const juce::MouseEvent& event)
 {
     // Klick auf ein Kabel trennt es (undo-fähig) — Klicks auf Kacheln/Ports
     // kommen hier nie an (Child-Components fangen sie ab)
-    if (const auto connection = findConnectionAt (event.getPosition()); connection.isValid())
-        graphManager.removeConnection (connection.getProperty (id::sourceNodeId).toString(),
-                                       (int) connection.getProperty (id::sourceChannel),
-                                       connection.getProperty (id::destNodeId).toString(),
-                                       (int) connection.getProperty (id::destChannel));
+    const auto connection = findConnectionAt (event.getPosition());
+    if (! connection.isValid())
+        return;
+
+    const auto sourceUuid    = connection.getProperty (id::sourceNodeId).toString();
+    const auto sourceChannel = (int) connection.getProperty (id::sourceChannel);
+    const auto destUuid      = connection.getProperty (id::destNodeId).toString();
+    const auto destChannel   = (int) connection.getProperty (id::destChannel);
+
+    // Kabel eines Stereo-Paars: der Klick trennt BEIDE Linien (eine
+    // Transaktion) — das Paar hängt an einem gemeinsamen Port
+    if (const auto* sourceComponent = findNodeComponent (sourceUuid))
+        if (const auto anchor = sourceComponent->pairAnchorForPort (false, sourceChannel))
+        {
+            const auto partnerSource = sourceChannel == *anchor ? *anchor + 1 : *anchor;
+            const auto partnerDest   = destChannel + (partnerSource - sourceChannel);
+
+            graphManager.removeConnectionPair (sourceUuid, sourceChannel,
+                                               destUuid, destChannel,
+                                               partnerSource, partnerDest);
+            return;
+        }
+
+    graphManager.removeConnection (sourceUuid, sourceChannel, destUuid, destChannel);
 }
 
 void NodeCanvas::mouseDoubleClick (const juce::MouseEvent& event)

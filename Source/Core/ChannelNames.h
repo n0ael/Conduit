@@ -13,9 +13,17 @@ namespace conduit
     Patch-Zustand (gleiche Trennung wie CaptureSettings: loadPreset()
     ersetzt den Root-Tree, die Kanal-Namen bleiben unberührt, kein Undo).
 
-    Mapping (deviceKey, direction, channelIndex) → { userLabel, imagePath }.
-    imagePath ist ein leerer Platzhalter für ein späteres Kanal-Bild —
-    persistiert, aber noch ohne UI.
+    Mapping (deviceKey, direction, channelIndex) → { userLabel, imagePath,
+    pairedWithNext }. imagePath ist ein leerer Platzhalter für ein späteres
+    Kanal-Bild — persistiert, aber noch ohne UI.
+
+    Stereo-Pairing (pairedWithNext): Kanal k ist mit k+1 zu einem Stereo-Paar
+    gekoppelt — eine Hardware-Verkabelungs-Eigenschaft wie userLabel, deshalb
+    App-Zustand am PHYSISCHEN Geräte-Kanal verankert (kein Undo, überlebt
+    Preset-Load, folgt dem Device-Matching). Das Connection-Datenmodell bleibt
+    unberührt: ein Stereo-Kabel sind zwei Mono-Connections, das Pairing steuert
+    nur Port-UI, Kabel-Erzeugung und (später) den Link-Send. Ein Kanal gehört
+    zu höchstens einem Paar — der Setter räumt Konflikte (k−1, k+1).
 
     Device-Matching wie CalibrationProfile (CLAUDE.md 8.1):
       1. exakter Name-Match (deviceKey == aktiver Device-Name)
@@ -84,6 +92,23 @@ public:
     [[nodiscard]] juce::String getImagePath (Direction direction, int channelIndex) const;
 
     //==========================================================================
+    // Stereo-Pairing (Port-Sicht — Indizes sind komprimierte Port-Indizes,
+    // das Mapping auf physische Geräte-Kanäle passiert am Rand wie getLabel)
+
+    /** true, wenn der Port ein Stereo-Paar ANKERT: sein physischer Kanal k
+        trägt pairedWithNext UND der nächste Port liegt physisch auf k+1
+        (bei Teil-Auswahl können Port-Nachbarn physisch auseinanderliegen —
+        dann wird das Paar nicht angezeigt, bleibt aber gespeichert).
+        Ob Port portIndex+1 überhaupt existiert, prüft der Aufrufer. */
+    [[nodiscard]] bool isPortPairStart (Direction direction, int portIndex) const;
+
+    /** Koppelt den physischen Kanal des Ports mit seinem physischen Nachbarn
+        (bzw. löst das Paar). Räumt Konflikte: ein Kanal gehört zu höchstens
+        einem Paar (Anker auf k−1 und k+1 werden gelöst). No-op ohne aktives
+        Device. */
+    void setPortPairedWithNext (Direction direction, int portIndex, bool paired);
+
+    //==========================================================================
     // Pure Helfer — testbar ohne Datei und ohne Device
 
     /** "ES-3 (2)" → "ES-3"; Namen ohne " (N)"-Suffix bleiben unverändert. */
@@ -109,6 +134,13 @@ private:
         int channelIndex = 0;
         juce::String userLabel;
         juce::String imagePath;
+        bool pairedWithNext = false;  // Stereo-Paar (channelIndex, channelIndex+1)
+
+        /** Trägt der Eintrag noch etwas Persistierenswertes? (Prune-Regel) */
+        [[nodiscard]] bool isEmpty() const noexcept
+        {
+            return userLabel.isEmpty() && imagePath.isEmpty() && ! pairedWithNext;
+        }
     };
 
     struct DeviceEntry
@@ -122,6 +154,8 @@ private:
     [[nodiscard]] DeviceEntry* findMatch (const juce::String& deviceName);
     [[nodiscard]] DeviceEntry& findOrCreateActiveDevice();
     [[nodiscard]] const Entry* findEntry (Direction direction, int channelIndex) const;
+    [[nodiscard]] Entry& findOrCreateEntry (DeviceEntry& device, Direction direction,
+                                            int deviceChannel);
     void pruneAndStore (DeviceEntry& device);
 
     /** Port/Prozessor-Kanal-Index → echter Geräte-Kanal-Index über die aktive

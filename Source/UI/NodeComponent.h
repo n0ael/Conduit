@@ -73,9 +73,28 @@ public:
     void completeTeardownNow();
 
     //==========================================================================
-    /** Port-Mittelpunkt relativ zu dieser Component — für die Kabel-Pfade
-        des Canvas. Inputs links, Outputs rechts. */
+    /** Eine Port-Zeile: channel = erster Kanal, span = 1 (mono) / 2 (Stereo-
+        Paar, EIN Port für channel und channel+1). */
+    struct PortRow
+    {
+        int channel = 0;
+        int span = 1;
+    };
+
+    /** Pure: Kanäle → Port-Zeilen. isPairStart(ch) meldet, ob (ch, ch+1) ein
+        Paar ankert — gepaarte Kanäle verschmelzen zu einer Zeile mit span 2.
+        Ein Paar am letzten Kanal (ohne Partner) bleibt eine Mono-Zeile. */
+    [[nodiscard]] static std::vector<PortRow> buildPortRows (
+        int numChannels, const std::function<bool (int)>& isPairStart);
+
+    /** Kabel-Ankerpunkt relativ zu dieser Component — für die Kabel-Pfade
+        des Canvas. Inputs links, Outputs rechts. Kanäle eines Stereo-Paars
+        liefern denselben Port mit ∓3px Versatz (Doppel-Linien-Optik). */
     [[nodiscard]] juce::Point<int> getPortCentre (bool isInput, int channel) const;
+
+    /** Anker-Kanal des Stereo-Paars, zu dem channel gehört; nullopt wenn
+        der Kanal nicht gepaart ist. Für den Doppel-Kabel-Pfad des Canvas. */
+    [[nodiscard]] std::optional<int> pairAnchorForPort (bool isInput, int channel) const;
 
     /** Nächster Port im Umkreis von maxDistance (Touch-Toleranz beim Drop),
         nullptr wenn keiner. localPoint relativ zu dieser Component. */
@@ -110,9 +129,18 @@ private:
     [[nodiscard]] juce::ValueTree firstParameter() const;
 
     /** (Neu-)Baut die Port-Components aus numInputChannels/numOutputChannels
-        (Schema 6.2) und zieht die Kanal-Labels nach. Aufgerufen im Konstruktor
-        und wenn ein I/O-Endpunkt seine Hardware-Kanalzahl ändert (Schritt B). */
+        (Schema 6.2) und zieht die Kanal-Labels nach. Am audio_in-Endpunkt
+        verschmelzen ChannelNames-Stereo-Paare zu einem Port (span 2), plus
+        Koppel-Toggles zwischen den Kanal-Zeilen. Aufgerufen im Konstruktor,
+        bei Kanalzahl-Änderung (Schritt B) und bei ChannelNames-Änderungen. */
     void rebuildPorts();
+
+    /** true, wenn dieser Endpunkt Pairing-UI trägt (audio_in + ChannelNames). */
+    [[nodiscard]] bool hasPairingUi() const noexcept;
+
+    /** Zeilen-Mitte eines KANALS (feste 30px-Rasterung nach Kanalzahl) —
+        Meter und Labels bleiben eine Zeile pro Kanal, auch bei Pairing. */
+    [[nodiscard]] int channelRowY (bool isInputBank, int channel) const;
 
     /** Kachelhöhe der I/O-Endpunkte folgt der Portzahl (Hardware-Kanäle).
         Andere Module haben feste Busse und setzen ihre Größe selbst. */
@@ -144,6 +172,16 @@ private:
 
     std::vector<std::unique_ptr<PortComponent>> inputPorts;
     std::vector<std::unique_ptr<PortComponent>> outputPorts;
+
+    // Port-Zeilen der beiden Bänke (Pairing verschmilzt Kanäle zu span-2-
+    // Zeilen); Kanalzahlen für die feste Zeilen-Rasterung der Meter/Labels
+    std::vector<PortRow> inputRows, outputRows;
+    int inputChannelCount = 0, outputChannelCount = 0;
+
+    // Koppel-Toggles zwischen benachbarten Kanal-Zeilen (nur audio_in).
+    // Hit-Zone 24px wie die Ports — bewusst unter dem 44px-Touch-Ziel (10),
+    // gleiche Ausnahme wie die Port-Hit-Zonen.
+    std::vector<std::unique_ptr<juce::TextButton>> pairToggles;
 
     // Pegelanzeigen der I/O-Endpunkte — eine pro Kanal der aktiven Bank
     std::vector<std::unique_ptr<LevelMeterBar>> meterBars;

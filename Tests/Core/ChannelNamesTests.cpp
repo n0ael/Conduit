@@ -294,3 +294,93 @@ TEST_CASE ("ChannelNames: Persistenz-Roundtrip", "[channelnames]")
     REQUIRE (again.getUserLabel (Direction::input, 0).isEmpty());
     REQUIRE (again.getUserLabel (Direction::output, 2) == "CV Pitch");
 }
+
+//==============================================================================
+TEST_CASE ("ChannelNames: Stereo-Pairing — Anker, Konfliktregel, Persistenz", "[channelnames][pairing]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettingsFolder temp;
+
+    SECTION ("Koppeln/Lösen am Port, Anker am physischen Kanal")
+    {
+        ChannelNames names (temp.options());
+        names.setActiveDevice ("ES-3", { "A", "B", "C", "D" }, {});
+
+        REQUIRE_FALSE (names.isPortPairStart (Direction::input, 0));
+
+        names.setPortPairedWithNext (Direction::input, 0, true);
+        REQUIRE (names.isPortPairStart (Direction::input, 0));
+        REQUIRE_FALSE (names.isPortPairStart (Direction::input, 1));  // Partner, kein Anker
+
+        names.setPortPairedWithNext (Direction::input, 0, false);
+        REQUIRE_FALSE (names.isPortPairStart (Direction::input, 0));
+    }
+
+    SECTION ("Konfliktregel: ein Kanal gehört zu höchstens einem Paar")
+    {
+        ChannelNames names (temp.options());
+        names.setActiveDevice ("ES-3", { "A", "B", "C", "D" }, {});
+
+        names.setPortPairedWithNext (Direction::input, 0, true);   // (0,1)
+        names.setPortPairedWithNext (Direction::input, 1, true);   // (1,2) → löst (0,1)
+        REQUIRE_FALSE (names.isPortPairStart (Direction::input, 0));
+        REQUIRE (names.isPortPairStart (Direction::input, 1));
+
+        names.setPortPairedWithNext (Direction::input, 2, true);   // (2,3) → löst (1,2)
+        REQUIRE_FALSE (names.isPortPairStart (Direction::input, 1));
+        REQUIRE (names.isPortPairStart (Direction::input, 2));
+
+        // Richtungen sind getrennt — Output-Paar kollidiert nicht mit Input
+        names.setActiveDevice ("ES-3", { "A", "B", "C", "D" }, { "L", "R" });
+        names.setPortPairedWithNext (Direction::output, 0, true);
+        REQUIRE (names.isPortPairStart (Direction::output, 0));
+        REQUIRE (names.isPortPairStart (Direction::input, 2));
+    }
+
+    SECTION ("Teil-Auswahl: Paar verankert physisch, verschwindet bei Kanal-Lücke")
+    {
+        ChannelNames names (temp.options());
+
+        // Alle vier Kanäle aktiv: Paar auf physisch (1,2) über Port 1 setzen
+        juce::BigInteger all;
+        all.setRange (0, 4, true);
+        names.setActiveDevice ("ES-3", { "A", "B", "C", "D" }, {}, all);
+        names.setPortPairedWithNext (Direction::input, 1, true);   // physisch (1,2)
+        REQUIRE (names.isPortPairStart (Direction::input, 1));
+
+        // Kanal 2 deaktiviert: Port 1 (physisch 1) und Port 2 (physisch 3)
+        // sind keine physischen Nachbarn mehr → Paar wird nicht angezeigt …
+        juce::BigInteger gap;
+        gap.setBit (0);
+        gap.setBit (1);
+        gap.setBit (3);
+        names.setActiveDevice ("ES-3", { "A", "B", "C", "D" }, {}, gap);
+        REQUIRE_FALSE (names.isPortPairStart (Direction::input, 1));
+
+        // … bleibt aber gespeichert und greift wieder mit allen Kanälen
+        names.setActiveDevice ("ES-3", { "A", "B", "C", "D" }, {}, all);
+        REQUIRE (names.isPortPairStart (Direction::input, 1));
+    }
+
+    SECTION ("Persistenz: Pairing überlebt den Roundtrip auch ohne Label")
+    {
+        {
+            ChannelNames names (temp.options());
+            names.setActiveDevice ("ES-3", {}, {});
+            names.setPortPairedWithNext (Direction::input, 2, true);  // Flag-only-Entry
+            names.flush();
+        }
+
+        ChannelNames reloaded (temp.options());
+        reloaded.setActiveDevice ("ES-3", {}, {});
+        REQUIRE (reloaded.isPortPairStart (Direction::input, 2));
+
+        // Lösen räumt den Flag-only-Entry wieder aus der Datei
+        reloaded.setPortPairedWithNext (Direction::input, 2, false);
+        reloaded.flush();
+
+        ChannelNames again (temp.options());
+        again.setActiveDevice ("ES-3", {}, {});
+        REQUIRE_FALSE (again.isPortPairStart (Direction::input, 2));
+    }
+}
