@@ -8,6 +8,7 @@
 #include "GraphFader.h"
 #include "GraphManager.h"
 #include "LinkClock.h"
+#include "MeterSettings.h"
 #include "NodeUiRegistry.h"
 #include "OscController.h"
 #include "Interfaces/IClockSource.h"
@@ -34,7 +35,8 @@ namespace conduit
     [Message → Audio], processBlock() schreibt sie pro Block in den ClockBus.
 */
 class EngineProcessor final : public juce::AudioProcessor,
-                              private juce::ValueTree::Listener
+                              private juce::ValueTree::Listener,
+                              private juce::ChangeListener
 {
 public:
     EngineProcessor();
@@ -113,6 +115,11 @@ public:
     [[nodiscard]] LevelMeter& getInputLevels() noexcept;
     [[nodiscard]] LevelMeter& getOutputLevels() noexcept;
 
+    /** Einstellungen der Pegelanzeigen (Clip-Reset-Modus) — App-Zustand,
+        von der Settings-UI editiert; der EngineProcessor speist daraus die
+        LevelMeter (Auto-Clear). */
+    [[nodiscard]] MeterSettings& getMeterSettings() noexcept;
+
 private:
     /** Legt die reservierten I/O-Tree-Nodes (audio_input/audio_output) an,
         falls sie fehlen — frischer Patch oder Preset ohne I/O. Idempotent. */
@@ -132,6 +139,10 @@ private:
 
     // juce::ValueTree::Listener [Message Thread] — nur die Skalen-Properties
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override;
+
+    // juce::ChangeListener [Message Thread] — MeterSettings → LevelMeter
+    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+    void applyMeterSettings();
 
     juce::ValueTree rootState;
     juce::UndoManager undoManager;
@@ -172,6 +183,9 @@ private:
     // getrennt vom capture-InputMeter; processBlock speist beide.
     LevelMeter inputLevels;
     LevelMeter outputLevels;
+
+    // Clip-Reset-Modus der Pegelanzeigen (App-Zustand); speist die LevelMeter
+    MeterSettings meterSettings;
 
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorGraph::Node::Ptr audioInputNode;

@@ -51,6 +51,10 @@ EngineProcessor::EngineProcessor()
     ensureSessionScaleDefaults();
     rootState.addListener (this);
 
+    // Clip-Reset-Modus in die LevelMeter spiegeln (Start + bei Änderung)
+    meterSettings.addChangeListener (this);
+    applyMeterSettings();
+
     // Resize-Policy der Capture-Settings gegen den Service verdrahten
     // (Aktivitäts-Check, Invalidierung, Reallokation — CaptureSettings-Doku)
     captureSettings.setBufferHost (&captureService);
@@ -67,7 +71,22 @@ EngineProcessor::EngineProcessor()
 
 EngineProcessor::~EngineProcessor()
 {
+    meterSettings.removeChangeListener (this);
     rootState.removeListener (this);
+}
+
+//==============================================================================
+void EngineProcessor::changeListenerCallback (juce::ChangeBroadcaster* source)
+{
+    if (source == &meterSettings)
+        applyMeterSettings();
+}
+
+void EngineProcessor::applyMeterSettings()
+{
+    const auto hold = meterSettings.getClipHoldSeconds();
+    inputLevels.setClipHoldSeconds (hold);
+    outputLevels.setClipHoldSeconds (hold);
 }
 
 //==============================================================================
@@ -377,5 +396,6 @@ CaptureSettings& EngineProcessor::getCaptureSettings() noexcept { return capture
 ChannelNames& EngineProcessor::getChannelNames() noexcept       { return channelNames; }
 LevelMeter& EngineProcessor::getInputLevels() noexcept  { return inputLevels; }
 LevelMeter& EngineProcessor::getOutputLevels() noexcept { return outputLevels; }
+MeterSettings& EngineProcessor::getMeterSettings() noexcept { return meterSettings; }
 
 } // namespace conduit

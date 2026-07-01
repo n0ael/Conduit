@@ -19,6 +19,7 @@ void LevelMeter::prepare (double newSampleRate, int numChannels)
         peakState[ch]       = 0.0f;
         peakHoldState[ch]   = 0.0f;
         holdRemaining[ch]   = 0.0;
+        clipAgeSeconds[ch]  = 0.0;
         primed[ch]          = false;
 
         peakLevel[ch].store     (0.0f,  std::memory_order_relaxed);
@@ -93,9 +94,23 @@ void LevelMeter::meterOneChannel (int channel, const float* data, int numSamples
             peakHoldState[idx] *= holdDecay;
     }
 
-    // Clip-Latch: bleibt gesetzt bis resetClip()
+    // Clip-Latch: bei 0 dBFS setzen; sonst optional nach clipHoldSeconds
+    // automatisch verlöschen (0 = nur manueller Reset)
     if (blockPeak >= clipThreshold)
+    {
         clipped[idx].store (true, std::memory_order_relaxed);
+        clipAgeSeconds[idx] = 0.0;
+    }
+    else if (clipped[idx].load (std::memory_order_relaxed))
+    {
+        const auto hold = clipHoldSeconds.load (std::memory_order_relaxed);
+        if (hold > 0.0f)
+        {
+            clipAgeSeconds[idx] += blockSeconds;
+            if (clipAgeSeconds[idx] >= static_cast<double> (hold))
+                clipped[idx].store (false, std::memory_order_relaxed);
+        }
+    }
 
     peakLevel[idx].store     (peak,               std::memory_order_relaxed);
     peakHoldLevel[idx].store (peakHoldState[idx], std::memory_order_relaxed);
@@ -134,6 +149,11 @@ void LevelMeter::resetClip (int channel) noexcept
 {
     if (juce::isPositiveAndBelow (channel, activeChannels))
         clipped[static_cast<std::size_t> (channel)].store (false, std::memory_order_relaxed);
+}
+
+void LevelMeter::setClipHoldSeconds (float seconds) noexcept
+{
+    clipHoldSeconds.store (juce::jmax (0.0f, seconds), std::memory_order_relaxed);
 }
 
 } // namespace conduit

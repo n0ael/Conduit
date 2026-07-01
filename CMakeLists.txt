@@ -90,6 +90,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/GraphFader.cpp
     Source/Core/GraphManager.cpp
     Source/Core/LinkClock.cpp
+    Source/Core/MeterSettings.cpp
     Source/Core/NodeUiRegistry.cpp
     Source/Core/OscController.cpp
     Source/Core/SourceNameResolver.cpp
@@ -121,6 +122,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/PortComponent.cpp
     Source/UI/ScopeDisplay.cpp
     Source/UI/SequencerControlPanel.cpp
+    Source/UI/SettingsWindow.cpp
     Source/UI/StepGridDisplay.cpp
     Source/Util/RtAllocationGuard.cpp
 )
@@ -272,6 +274,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/GraphManagerTests.cpp
         Tests/Core/LevelMeterTests.cpp
         Tests/Core/LinkAudioSendTests.cpp
+        Tests/Core/MeterSettingsTests.cpp
         Tests/Core/OscControllerTests.cpp
         Tests/Core/PatchingTests.cpp
         Tests/Core/PresetTests.cpp
@@ -296,6 +299,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/GraphFader.cpp
         Source/Core/GraphManager.cpp
         Source/Core/LinkClock.cpp
+        Source/Core/MeterSettings.cpp
         Source/Core/NodeUiRegistry.cpp
         Source/Core/OscController.cpp
         Source/Core/SourceNameResolver.cpp
@@ -327,6 +331,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/PortComponent.cpp
         Source/UI/ScopeDisplay.cpp
         Source/UI/SequencerControlPanel.cpp
+        Source/UI/SettingsWindow.cpp
         Source/UI/StepGridDisplay.cpp
         Source/Util/RtAllocationGuard.cpp
     )

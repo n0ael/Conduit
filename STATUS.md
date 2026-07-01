@@ -18,11 +18,17 @@
 
 **Ableton-Style Pegelanzeigen für audio_in/audio_out (CLAUDE.md 10):**
 
+*Schritt 3a — Einstellungen-Menü + konfigurierbares Clip-Reset:*
+- **`MeterSettings`** (`Source/Core/`): App-Zustand (eigene `Meter.settings`, überlebt Preset-Load, kein Undo) — Clip-Reset-Modus `manual`/`automatic`. `getClipHoldSeconds()` = 0 (manuell) bzw. `autoClearSeconds` (2,5 s). ChangeBroadcaster
+- **`LevelMeter`**: `setClipHoldSeconds` + per-Kanal Auto-Clear im `process()` (Latch verlischt nach der Haltezeit; 0 = nur manuell). `EngineProcessor` besitzt `MeterSettings`, lauscht als ChangeListener und speist beide Meter (`applyMeterSettings`)
+- **`SettingsWindow`** (`Source/UI/`): non-modales `DialogWindow` mit `TabbedComponent` — **Audio-Gerät** (bestehende `AudioSettingsComponent`, nur mit DeviceManager) + **Metering** (Clip-Reset-Auswahl, bindet `MeterSettings`). Dark-Look. Toolbar: „Audio"-Button → **„Einstellungen"**, öffnet das Fenster
+- **Verifikation:** 153 Testfälle / 10237 Assertions grün (Debug + ASan). Neue Tests: `MeterSettings` (Default/Mapping/Roundtrip/ChangeBroadcast), `LevelMeter` Auto-Clear (Hold 0 = Latch bleibt, Hold 0,5 s verlischt, erneutes Clippen resettet den Timer). Smoke: „Einstellungen"-Button → Fenster mit beiden Tabs (Umlaute korrekt via `fromUTF8`)
+- **Offen:** Schritt 3b (Capture-Einstellungen als eigener Tab im Einstellungen-Fenster)
+
 *Schritt 2 — Meter-UI (horizontale Balken, verbreiterte I/O-Kacheln):*
 - **`LevelMeterBar`** (`Source/UI/`, Muster `ScopeDisplay`): horizontaler Balken pro Kanal, 30-fps-Timer, liest Peak/Peak-Hold/RMS/Clip lock-free vom `LevelMeter`-Provider. Zeichnet RMS-Füllung (pegelabhängig grün/gelb/rot), Peak-Marker-Linie, Peak-Hold-Tick und Clip-Feld (rot, Latch). Nur das Clip-Feld ist klickbar (`resetClip`, Default in diesem Schritt) — sonst fällt der Klick an die Kachel durch (Node-Drag). `normFromLinear`: dBFS-Mapping −60…0 dB
 - **`NodeComponent`**: baut für I/O-Endpunkte eine Bar pro Kanal (`rebuildMeters`), verbreiterte Kachel (300 px), Layout pro Reihe `audio_in` = [Label · Balken · ○Port], `audio_out` = [○Port · Balken · Label]. Meter folgen der Kanalzahl (Schritt-B-Kopplung), Teardown stoppt sie (5.3). Provider `const/non-const LevelMeter*` von `EngineProcessor` → `NodeCanvas` → `NodeComponent` durchgereicht
 - **Verifikation:** 148 Testfälle / 10225 Assertions grün (Debug + ASan). Neue Tests: eine Bar pro Kanal + verbreiterte Kachel, Meter folgen der Kanalzahl, normale Module ohne Meter, `normFromLinear`-dB-Mapping (0/−6/−60 dB, Clip-Klemmung, Monotonie). Smoke: verbreiterte Kacheln mit Balken pro Kanal (Label · Balken · Port)
-- **Offen:** Schritt 3 (Einstellungen-Menü mit konfigurierbarem Clip-Reset, bündelt Audio-/Capture-Einstellungen)
 
 *Schritt 1 — Meter-DSP-Backend (verhaltensneutral):*
 - **`LevelMeter`** (`Source/Core/Capture/`): lock-free Sicht-Metering pro Kanal (getrennt vom capture-`InputMeter`) — RMS (~150 ms One-Pole), Peak (sofortiger Attack, ~1,5 s Release), Peak-Hold (~1,5 s halten, dann Abfall), Clip-Latch bei ≥ 0 dBFS mit `resetClip`. Feste Arrays bis `MAX_CAPTURE_CHANNELS`, atomics, allocation-free. Muster: `InputMeter`

@@ -7,8 +7,8 @@
 #include "Modules/LinkAudioSendModule.h"
 #include "Modules/ScopeModule.h"
 #include "Modules/StepSequencerModule.h"
-#include "UI/AudioSettingsComponent.h"
 #include "UI/LinkSendCreateDialog.h"
+#include "UI/SettingsWindow.h"
 #include "Util/ScaleQuantizer.h"
 
 namespace conduit
@@ -67,17 +67,14 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
     saveButton.onClick = [this] { launchPresetChooser (true); };
     loadButton.onClick = [this] { launchPresetChooser (false); };
 
-    // Audio-Einstellungen: non-modales DialogWindow mit dem Geräte-Selector
-    // (JUCE_MODAL_LOOPS_PERMITTED=0 → launchAsync). Nur im Standalone-Pfad,
-    // wo der DeviceManager existiert.
-    audioSettingsButton.onClick = [this]
+    // Einstellungen: non-modales DialogWindow mit Tabs (Audio-Gerät nur im
+    // Standalone-Pfad mit DeviceManager, Metering immer). launchAsync wegen
+    // JUCE_MODAL_LOOPS_PERMITTED=0.
+    settingsButton.onClick = [this]
     {
-        if (deviceManager == nullptr)
-            return;
-
         juce::DialogWindow::LaunchOptions options;
-        options.content.setOwned (new AudioSettingsComponent (*deviceManager));
-        options.dialogTitle                   = "Audio-Einstellungen";
+        options.content.setOwned (new SettingsWindow (deviceManager, engine.getMeterSettings()));
+        options.dialogTitle                   = "Einstellungen";
         options.dialogBackgroundColour        = juce::Colour (0xff24272c);
         options.escapeKeyTriggersCloseButton  = true;
         options.useNativeTitleBar             = true;
@@ -167,8 +164,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
     addAndMakeVisible (redoButton);
     addAndMakeVisible (saveButton);
     addAndMakeVisible (loadButton);
-    addChildComponent (audioSettingsButton);   // nur im Standalone-Pfad sichtbar
-    audioSettingsButton.setVisible (deviceManager != nullptr);
+    addAndMakeVisible (settingsButton);
     addAndMakeVisible (tempoSlider);
     addAndMakeVisible (rootCombo);
     addAndMakeVisible (scaleCombo);
@@ -356,8 +352,7 @@ void EngineEditor::resized()
     place (redoButton,      65, 16);
     place (saveButton,      65);
     place (loadButton,      65, 16);
-    if (audioSettingsButton.isVisible())
-        place (audioSettingsButton, 75, 16);
+    place (settingsButton, 95, 16);
     place (tempoSlider,    130);
     place (captureAllButton, 60);            // neben dem Link-Transport
     place (capturePanelToggle, 85, 16);

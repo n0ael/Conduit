@@ -79,7 +79,7 @@ private:
     juce::TextButton redoButton   { "Redo" };
     juce::TextButton saveButton   { "Save" };
     juce::TextButton loadButton   { "Load" };
-    juce::TextButton audioSettingsButton { "Audio" };
+    juce::TextButton settingsButton { "Einstellungen" };
     juce::Slider tempoSlider      { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     juce::ComboBox rootCombo;     // globale Session-Skala (Root-Tree-Properties)
     juce::ComboBox scaleCombo;

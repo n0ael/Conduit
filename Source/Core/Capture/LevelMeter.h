@@ -49,6 +49,11 @@ public:
     /** [beliebiger Thread] Clip-Latch eines Kanals löschen (UI-Klick / Auto). */
     void resetClip (int channel) noexcept;
 
+    /** [Message Thread] Auto-Clear des Clip-Latch: 0 = nie (nur manueller
+        Reset), > 0 = Latch verlischt nach so vielen Sekunden von selbst.
+        Vom EngineProcessor aus den MeterSettings gespeist. */
+    void setClipHoldSeconds (float seconds) noexcept;
+
     [[nodiscard]] int getNumActiveChannels() const noexcept { return activeChannels; }
 
     //==========================================================================
@@ -76,7 +81,11 @@ private:
     std::array<float, MAX_CAPTURE_CHANNELS> peakState {};
     std::array<float, MAX_CAPTURE_CHANNELS> peakHoldState {};
     std::array<double, MAX_CAPTURE_CHANNELS> holdRemaining {};  // Sekunden bis Abfall
+    std::array<double, MAX_CAPTURE_CHANNELS> clipAgeSeconds {}; // seit Latch (Auto-Clear)
     std::array<bool, MAX_CAPTURE_CHANNELS> primed {};           // RMS-Warm-Start pro Kanal
+
+    // Auto-Clear-Dauer des Clip-Latch [Message → Audio]; 0 = nur manuell
+    std::atomic<float> clipHoldSeconds { 0.0f };
 
     // Publizierte Werte [Audio → UI] — unabhängige Einzelwerte, relaxed genügt
     std::array<std::atomic<float>, MAX_CAPTURE_CHANNELS> peakLevel {};

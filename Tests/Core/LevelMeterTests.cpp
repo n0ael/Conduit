@@ -124,6 +124,43 @@ TEST_CASE ("LevelMeter: Clip-Latch und Reset", "[levelmeter][io]")
 }
 
 //==============================================================================
+TEST_CASE ("LevelMeter: Clip Auto-Clear via setClipHoldSeconds", "[levelmeter][io]")
+{
+    LevelMeter meter;
+    meter.prepare (testSampleRate, 1);
+
+    SECTION ("Hold 0 (Default) → Latch bleibt")
+    {
+        feedConstant (meter, 1, 1.0f, 1);
+        feedConstant (meter, 1, 0.0f, 200);  // 2 s Stille
+        REQUIRE (meter.isClipped (0));
+    }
+
+    SECTION ("Hold 0,5 s → Latch verlischt nach Ablauf")
+    {
+        meter.setClipHoldSeconds (0.5f);
+        feedConstant (meter, 1, 1.0f, 1);
+        REQUIRE (meter.isClipped (0));
+
+        feedConstant (meter, 1, 0.0f, 40);   // 0,4 s < 0,5 → noch gesetzt
+        REQUIRE (meter.isClipped (0));
+
+        feedConstant (meter, 1, 0.0f, 20);   // gesamt 0,6 s > 0,5 → gelöscht
+        REQUIRE_FALSE (meter.isClipped (0));
+    }
+
+    SECTION ("erneutes Clippen setzt den Auto-Clear-Timer zurück")
+    {
+        meter.setClipHoldSeconds (0.5f);
+        feedConstant (meter, 1, 1.0f, 1);
+        feedConstant (meter, 1, 0.0f, 40);   // 0,4 s
+        feedConstant (meter, 1, 1.0f, 1);    // erneuter Clip → Timer reset
+        feedConstant (meter, 1, 0.0f, 40);   // wieder nur 0,4 s → noch gesetzt
+        REQUIRE (meter.isClipped (0));
+    }
+}
+
+//==============================================================================
 TEST_CASE ("LevelMeter: Out-of-range-Kanäle liefern Nullwerte", "[levelmeter][io]")
 {
     LevelMeter meter;
