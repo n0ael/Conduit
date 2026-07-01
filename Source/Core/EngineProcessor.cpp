@@ -190,6 +190,17 @@ void EngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
     graphFader.process (buffer);  // Master-Fade hinter dem Graph (5.2)
 }
 
+bool EngineProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+{
+    // Beide Busse tragen genau eine (Haupt-)Bus-Gruppe; wir nehmen jede
+    // Kanalzahl an. Der AudioProcessorPlayer probiert die echte Device-I/O-
+    // Zahl vor dem Stereo-Default (findMostSuitableLayout), sodass ein
+    // Multichannel-Interface bis in graph.setPlayConfigDetails() durchreicht.
+    // Eingänge dürfen 0 sein (Ausgabe-only-Interface, 9.1); Ausgänge sind
+    // Conduits Primärzweck, daher mindestens einer.
+    return layouts.getMainOutputChannels() >= 1;
+}
+
 //==============================================================================
 juce::AudioProcessorEditor* EngineProcessor::createEditor() { return new EngineEditor (*this); }
 bool EngineProcessor::hasEditor() const                     { return true; }

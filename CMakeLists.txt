@@ -264,6 +264,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/CaptureWriterTests.cpp
         Tests/Core/ChannelNamesTests.cpp
         Tests/Core/ClockTests.cpp
+        Tests/Core/EngineIOChannelTests.cpp
         Tests/Core/GraphFaderTests.cpp
         Tests/Core/NamedIdTests.cpp
         Tests/Core/GraphManagerTests.cpp

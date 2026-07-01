@@ -45,6 +45,13 @@ public:
     void releaseResources() override;
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
 
+    /** Standalone-Multichannel (CLAUDE.md 9): akzeptiert jede diskrete
+        I/O-Kanalzahl, damit der AudioProcessorPlayer die echte Device-Zahl
+        durchreicht (findMostSuitableLayout probiert sie zuerst) und der Graph
+        via graph.setPlayConfigDetails() adaptiert. 0 Eingänge (reines
+        Ausgabe-Interface, 9.1) ist zulässig. */
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
+
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override;
 

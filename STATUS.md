@@ -16,7 +16,13 @@
 
 ## Aktueller Meilenstein (Juli 2026 — in Arbeit)
 
-**Audio-Settings-Fenster — Grundstein für ASIO/CoreAudio/Linux (CLAUDE.md 9 / 13.2):**
+**Echte Hardware-Kanalzahl für Audio-I/O (CLAUDE.md 9), Schritt A — Bus-Fundament (verhaltensneutral):**
+- **`EngineProcessor::isBusesLayoutSupported`**: expliziter Override, der jede diskrete I/O-Kanalzahl akzeptiert (Ausgänge ≥ 1, Eingänge auch 0 → Ausgabe-only-Interface, 9.1). Damit probiert der `AudioProcessorPlayer` in `findMostSuitableLayout` die **echte Device-Kanalzahl zuerst** und reicht sie via `graph.setPlayConfigDetails()` bis in den Graph durch — statt sich still auf den JUCE-Default (Basis liefert `true`) zu verlassen. Der Vertrag ist jetzt festgeschrieben und unit-getestet
+- **Erkenntnis:** Der Graph adaptiert die Kanalzahl auf Audio-Ebene bereits automatisch; der eigentliche Bruch liegt nur noch in der ValueTree-/UI-Ebene (Schritt B/C)
+- **Verifikation:** 136 Testfälle / 10132 Assertions grün (Debug + ASan). Neue Tests (`EngineIOChannelTests`): akzeptiert 8/8, 2/8, 6/6, 0/2; lehnt 2/0 (kein Ausgang) ab; `setPlayConfigDetails(8,8)`/`(0,2)` propagiert die Kanalzahl in den Prozessor. Verhaltensneutral für das Stereo-Dev-Gerät → keine UI-Änderung sichtbar
+- **Offen:** Schritt B (`audio_in/out`-Tree-Nodes an aktive Device-Kanalzahl koppeln → Port-UI), Schritt C (Connection-Pruning beim Schrumpfen der Kanalzahl); beide geräte-getrieben, **nicht** undo-fähig
+
+**Davor: Audio-Settings-Fenster — Grundstein für ASIO/CoreAudio/Linux (CLAUDE.md 9 / 13.2):**
 - **`AudioDeviceController`** (`Source/Core/`): App-Layer-Bündelung von `AudioDeviceManager` + `AudioProcessorPlayer`. Kapselt das bisher in `Main.cpp::initAudio()` inline liegende Geräte-Handling. Lauscht als `ChangeListener` und wendet bei JEDEM Gerätewechsel dieselbe Glue-Logik an: ChannelNames-Kontext setzen + `audioSetupWarning` setzen/löschen. Persistenz via eigener `PropertiesFile` (`Conduit/AudioDevice.settings`, App-Zustand wie ChannelNames — überlebt Preset-Load, kein Undo). Force auf 48k/32 nur beim Erststart ohne gespeicherten Zustand; bewusste Nutzerwahl bleibt erhalten. Reiner Helfer `computeWarning(rate, buffer)` unit-testbar
 - **`AudioSettingsComponent`** (`Source/UI/`): Wrapper um die native `juce::AudioDeviceSelectorComponent` (Treiber-Typ, Device, Samplerate, Buffer, Kanalauswahl — automatisch systemabhängig, unter Windows WASAPI/ASIO je nach SDK). Dark-Look via `LookAndFeel_V4` (Midnight-Scheme). Backend/Frontend entkoppelt → spätere eigene Combos risikoarm. Non-modal im `DialogWindow` (`launchAsync`, 13.2)
 - **EngineEditor:** neuer Toolbar-Button „Audio" (nur im Standalone-Pfad; `createEditor()` ohne DeviceManager blendet ihn aus). `audioSetupWarning` folgt jetzt live dem Controller (Timer, setzt/löscht); die Warnung wird rechts geankert und nur reserviert, wenn sie Text trägt → Normal-Layout unverändert
