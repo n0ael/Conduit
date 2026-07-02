@@ -2,6 +2,7 @@
 
 #include "UI/AudioSettingsComponent.h"
 #include "UI/CaptureSettingsComponent.h"
+#include "UI/OscSettingsComponent.h"
 
 namespace conduit
 {
@@ -67,7 +68,8 @@ namespace
 
 //==============================================================================
 SettingsWindow::SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSettings& meterSettings,
-                                CaptureSettings& captureSettings, CaptureService& captureService)
+                                CaptureSettings& captureSettings, CaptureService& captureService,
+                                OscSendSettings& oscSendSettings, OscController& oscController)
 {
     setLookAndFeel (&darkLook);
 
@@ -79,6 +81,8 @@ SettingsWindow::SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSe
     tabs.addTab ("Capture", tabBackground,
                  new CaptureSettingsComponent (captureSettings, captureService), true);
     tabs.addTab ("Metering", tabBackground, new MeterSettingsTab (meterSettings), true);
+    tabs.addTab ("OSC", tabBackground,
+                 new OscSettingsComponent (oscSendSettings, oscController), true);
 
     addAndMakeVisible (tabs);
     setSize (520, 520);

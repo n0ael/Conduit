@@ -108,6 +108,11 @@ public:
                         const juce::String& parameterId,
                         float value)> onRemoteValueApplied;
 
+    /** [Message Thread] Feuert nach einem empfangenen /conduit/sync (7.3) —
+        der EngineProcessor verdrahtet darüber den Voll-Dump des
+        OscSendService. Optional (Tests laufen ohne). */
+    std::function<void()> onSyncRequested;
+
     //==========================================================================
     /** Netzwerk-Thread. Public, damit Tests Messages ohne Socket einspeisen
         können (juce::OSCMessage ist frei konstruierbar). */
@@ -171,6 +176,7 @@ private:
     std::vector<TreeUpdate> pendingTreeUpdates;
 
     std::atomic<bool> stateDirty { false };
+    std::atomic<bool> syncRequested { false };  // Netzwerk → Message Thread
 
     bool registryDirty = true;  // nur Message Thread
     int connectedPort = -1;     // nur Message Thread

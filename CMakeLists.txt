@@ -125,6 +125,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/LinkSendCreateDialog.cpp
     Source/UI/NodeCanvas.cpp
     Source/UI/NodeComponent.cpp
+    Source/UI/OscSettingsComponent.cpp
     Source/UI/PortComponent.cpp
     Source/UI/ScopeDisplay.cpp
     Source/UI/SequencerControlPanel.cpp
@@ -189,6 +190,7 @@ target_sources(Conduit PRIVATE
     Source/UI/LinkSendCreateDialog.h
     Source/UI/NodeCanvas.h
     Source/UI/NodeComponent.h
+    Source/UI/OscSettingsComponent.h
     Source/UI/PortComponent.h
     Source/UI/ScopeDisplay.h
     Source/UI/SequencerControlPanel.h
@@ -300,6 +302,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/UI/NodeCanvasTests.cpp
         Tests/UI/LevelMeterBarTests.cpp
         Tests/UI/LinkAudioSendPanelTests.cpp
+        Tests/UI/OscSettingsComponentTests.cpp
         Tests/UI/SequencerControlPanelTests.cpp
         Tests/Util/ScaleQuantizerTests.cpp
         Tests/Util/SpscQueueTests.cpp
@@ -349,6 +352,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/LinkSendCreateDialog.cpp
         Source/UI/NodeCanvas.cpp
         Source/UI/NodeComponent.cpp
+        Source/UI/OscSettingsComponent.cpp
         Source/UI/PortComponent.cpp
         Source/UI/ScopeDisplay.cpp
         Source/UI/SequencerControlPanel.cpp

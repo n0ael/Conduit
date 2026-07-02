@@ -366,10 +366,56 @@ TEST_CASE ("OscSendService: Deaktivieren trennt und stoppt", "[oscsend]")
 }
 
 //==============================================================================
-TEST_CASE ("OscAddress: Send-Adressen == Receive-Registry-Adressen", "[oscsend][osc]")
+namespace
 {
-    // Voller Receive-Stack (GraphManager + OscController) gegen den Helper
+
+/** Voller Receive-Stack (GraphManager + OscController) plus Send-Service —
+    für Adress-Äquivalenz und /conduit/sync. */
+struct ControllerRig
+{
+    ControllerRig()
+        : settings (temp.options())
+    {
+        conduit::registerDefaultModules (factory);
+
+        auto sinkOwned = std::make_unique<FakeSink>();
+        sink = sinkOwned.get();
+        service = std::make_unique<conduit::OscSendService> (root, settings,
+                                                             std::move (sinkOwned));
+
+        // Verdrahtung wie im EngineProcessor (7.3)
+        osc.onSyncRequested = [this] { service->sendFullDump(); };
+        osc.onRemoteValueApplied = [this] (const juce::String& uuid,
+                                           const juce::String& paramId, float value)
+        {
+            service->noteRemoteValue (uuid, paramId, value);
+        };
+    }
+
+    juce::ValueTree addModuleNodeWithState (const juce::String& factoryKey)
+    {
+        auto module = factory.create (factoryKey);
+        REQUIRE (module != nullptr);
+
+        auto node = module->createState();
+        root.getChildWithName (conduit::id::nodes).appendChild (node, nullptr);
+        return node;
+    }
+
+    void flushAll()
+    {
+        manager.flushPendingTopologyUpdate();
+        osc.flushPendingUpdates();
+    }
+
+    void enable()
+    {
+        settings.setEnabled (true);
+        settings.dispatchPendingMessages();
+    }
+
     juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempOscSendSettings temp;
     juce::ValueTree root = makeRootTree();
     juce::AudioProcessorGraph graph;
     conduit::GraphFader fader;
@@ -379,19 +425,73 @@ TEST_CASE ("OscAddress: Send-Adressen == Receive-Registry-Adressen", "[oscsend][
     conduit::GraphManager manager { root, graph, fader, factory, undoManager, uiRegistry };
     conduit::SpscQueue<conduit::ParameterUpdate> audioQueue { 64 };
     conduit::OscController osc { root, manager, audioQueue };
+    conduit::OscSendSettings settings;
+    FakeSink* sink = nullptr;
+    std::unique_ptr<conduit::OscSendService> service;
+};
 
-    conduit::registerDefaultModules (factory);
+} // namespace
 
-    auto module = factory.create ("attenuator");
-    REQUIRE (module != nullptr);
-    auto node = module->createState();
-    root.getChildWithName (conduit::id::nodes).appendChild (node, nullptr);
+TEST_CASE ("OscAddress: Send-Adressen == Receive-Registry-Adressen", "[oscsend][osc]")
+{
+    ControllerRig rig;
+    auto node = rig.addModuleNodeWithState ("attenuator");
+    rig.flushAll();
 
-    manager.flushPendingTopologyUpdate();
-    osc.flushPendingUpdates();
-
-    const auto registered = osc.getRegisteredAddresses();
+    const auto registered = rig.osc.getRegisteredAddresses();
     REQUIRE (registered.contains (conduit::osc::parameterAddress (node, "gain")));
     REQUIRE (conduit::osc::parameterAddress (node, "gain")
              == "/conduit/utility/attenuator/gain");
+}
+
+TEST_CASE ("/conduit/sync: Voll-Dump aller registrierten Werte (7.3)", "[oscsend][osc]")
+{
+    ControllerRig rig;
+    rig.addModuleNodeWithState ("attenuator");
+    rig.addModuleNodeWithState ("lfo");
+    rig.flushAll();
+
+    rig.enable();
+    rig.service->flushPendingSend();  // Cache warm — sync muss TROTZDEM senden
+    rig.sink->clear();
+
+    rig.osc.oscMessageReceived (juce::OSCMessage (juce::OSCAddressPattern (
+        conduit::osc::syncAddress)));
+    rig.osc.flushPendingUpdates();
+
+    REQUIRE (rig.sink->messages().size() == 3);  // gain + rate + depth
+}
+
+TEST_CASE ("/conduit/sync: bei disabled passiert nichts", "[oscsend][osc]")
+{
+    ControllerRig rig;
+    rig.addModuleNodeWithState ("attenuator");
+    rig.flushAll();
+
+    rig.osc.oscMessageReceived (juce::OSCMessage (juce::OSCAddressPattern (
+        conduit::osc::syncAddress)));
+    rig.osc.flushPendingUpdates();
+
+    REQUIRE (rig.sink->bundles.empty());
+}
+
+TEST_CASE ("Empfang → Tree-Übernahme impft den Send-Cache (Ende-zu-Ende-Echo-Test)", "[oscsend][osc]")
+{
+    ControllerRig rig;
+    auto node = rig.addModuleNodeWithState ("attenuator");
+    rig.flushAll();
+
+    rig.enable();
+    rig.service->flushPendingSend();
+    rig.sink->clear();
+
+    // Empfangener Wert läuft durch den echten applyTreeUpdates-Pfad
+    juce::OSCMessage incoming { juce::OSCAddressPattern (
+        conduit::osc::parameterAddress (node, "gain")) };
+    incoming.addFloat32 (0.3f);
+    rig.osc.oscMessageReceived (incoming);
+    rig.osc.flushPendingUpdates();
+
+    rig.service->flushPendingSend();
+    REQUIRE (rig.sink->messages().empty());  // kein Echo
 }

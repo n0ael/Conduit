@@ -82,6 +82,9 @@ EngineProcessor::EngineProcessor()
     {
         oscSendService.noteRemoteValue (nodeUuid, parameterId, value);
     };
+
+    // /conduit/sync (7.3): Client fordert den kompletten Ist-Zustand an
+    oscController.onSyncRequested = [this] { oscSendService.sendFullDump(); };
 }
 
 EngineProcessor::~EngineProcessor()

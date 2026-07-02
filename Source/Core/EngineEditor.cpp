@@ -75,7 +75,9 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
         juce::DialogWindow::LaunchOptions options;
         options.content.setOwned (new SettingsWindow (deviceManager, engine.getMeterSettings(),
                                                       engine.getCaptureSettings(),
-                                                      engine.getCaptureService()));
+                                                      engine.getCaptureService(),
+                                                      engine.getOscSendSettings(),
+                                                      engine.getOscController()));
         options.dialogTitle                   = "Einstellungen";
         options.dialogBackgroundColour        = juce::Colour (0xff24272c);
         options.escapeKeyTriggersCloseButton  = true;

@@ -9,6 +9,8 @@ namespace conduit
 
 class CaptureSettings;
 class CaptureService;
+class OscController;
+class OscSendSettings;
 
 //==============================================================================
 /**
@@ -21,6 +23,7 @@ class CaptureService;
         RAM-Limit/Bit-Tiefe/Export-Ordner). Die Capture-AKTIONen bleiben in
         der Toolbar/CapturePanel.
       - „Metering" (Clip-Reset-Modus, bindet MeterSettings).
+      - „OSC" (OscSettingsComponent — Empfangs-Status + Send-Ziel, 7.3).
 
     Wird non-modal in einem juce::DialogWindow gezeigt (EngineEditor,
     launchAsync). Dark-Look via LookAndFeel_V4 (Midnight).
@@ -29,7 +32,8 @@ class SettingsWindow final : public juce::Component
 {
 public:
     SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSettings& meterSettings,
-                    CaptureSettings& captureSettings, CaptureService& captureService);
+                    CaptureSettings& captureSettings, CaptureService& captureService,
+                    OscSendSettings& oscSendSettings, OscController& oscController);
     ~SettingsWindow() override;
 
     void paint (juce::Graphics& g) override;

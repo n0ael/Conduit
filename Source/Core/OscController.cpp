@@ -73,6 +73,16 @@ void OscController::oscMessageReceived (const juce::OSCMessage& message)
 {
     // Netzwerk-Thread (CLAUDE.md 7) — keine ValueTree-Zugriffe, kein Kontakt
     // zum Audio Thread außer dem lock-freien Queue-Push.
+
+    // /conduit/sync (7.3): Voll-Dump-Anfrage — VOR dem Endpoint-Lookup,
+    // Argumente sind egal; Ausführung gemarshallt auf den Message Thread
+    if (message.getAddressPattern().toString() == osc::syncAddress)
+    {
+        syncRequested.store (true, std::memory_order_release);
+        triggerAsyncUpdate();
+        return;
+    }
+
     if (message.size() < 1)
         return;
 
@@ -136,6 +146,12 @@ void OscController::handleAsyncUpdate()
 
     if (registryDirty)
         rebuildEndpoints();
+
+    // Sync NACH applyTreeUpdates — der Dump enthält damit auch Werte,
+    // die im selben Durchlauf angekommen sind
+    if (syncRequested.exchange (false, std::memory_order_acq_rel))
+        if (onSyncRequested != nullptr)
+            onSyncRequested();
 }
 
 void OscController::applyTreeUpdates()
