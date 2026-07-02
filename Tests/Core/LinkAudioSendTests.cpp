@@ -261,9 +261,11 @@ TEST_CASE ("LinkAudioSendModule: Sink-Lifecycle über den GraphManager (7.2)", "
     REQUIRE (manager.getModuleFor (uuidOf (node1)) == nullptr);
     REQUIRE (clock.isAudioEnabled());
 
-    // Letztes Send-Modul weg → Audio deaktiviert (Refcount 0)
+    // Letztes Send-Modul weg → Audio deaktiviert (Refcount 0; das finale
+    // Disable ist deferred — Shutdown-Race-Schutz, LinkClock-Doku)
     REQUIRE (manager.requestNodeDelete (uuidOf (node2)));
     manager.flushPendingTopologyUpdate();
+    clock.flushPendingAudioState();
     REQUIRE_FALSE (clock.isAudioEnabled());
 }
 
@@ -293,6 +295,7 @@ TEST_CASE ("LinkAudioSendModule: Destruktion ohne Phase 1 balanciert den Refcoun
         REQUIRE (module.getSinkNames() == juce::StringArray ("solo/input1"));
     }
 
+    clock.flushPendingAudioState();  // finales Disable ist deferred (Shutdown-Race-Schutz)
     REQUIRE_FALSE (clock.isAudioEnabled());
 
     // Ohne Link-Kontext (Tests): kein Sink, Status offline, Input unangetastet
@@ -365,6 +368,7 @@ TEST_CASE ("LinkAudioSendModule: Retire-Handshake unter echtem Audio-Thread", "[
     keepRunning.store (false);
     audioThread.join();
 
+    clock.flushPendingAudioState();
     REQUIRE_FALSE (clock.isAudioEnabled());
     REQUIRE (module.getSendStatusForUi() == conduit::LinkAudioSendModule::SendStatus::offline);
 }

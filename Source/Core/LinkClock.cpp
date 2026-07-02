@@ -124,7 +124,12 @@ LinkClock::LinkClock (double initialBpm, const juce::String& peerName)
         });
 }
 
-LinkClock::~LinkClock() = default;
+LinkClock::~LinkClock()
+{
+    // Ein ausstehendes verzögertes enableLinkAudio(false) verwerfen — der
+    // ~LinkAudio-Teardown deaktiviert selbst und racefrei (enableAudio-Doku)
+    cancelPendingUpdate();
+}
 
 void LinkClock::prepare (double sampleRate) noexcept
 {
@@ -156,7 +161,29 @@ void LinkClock::enableAudio (bool shouldBeEnabled)
     jassert (audioRefCount >= 0);  // unbalancierter enableAudio(false)-Aufruf
     audioRefCount = juce::jmax (audioRefCount, 0);
 
-    impl->link.enableLinkAudio (audioRefCount > 0);
+    if (audioRefCount > 0)
+    {
+        cancelPendingUpdate();  // schnelles Re-Enable schlägt das Deferred-Off
+        impl->link.enableLinkAudio (true);
+    }
+    else
+    {
+        // Finales Deaktivieren um einen Message-Loop-Hop verzögern — schützt
+        // den App-Shutdown vor dem SDK-Teardown-Race (Header-Doku, 02.07.2026)
+        triggerAsyncUpdate();
+    }
+}
+
+void LinkClock::handleAsyncUpdate()
+{
+    if (audioRefCount == 0)
+        impl->link.enableLinkAudio (false);
+}
+
+void LinkClock::flushPendingAudioState()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+    handleUpdateNowIfNeeded();
 }
 
 bool LinkClock::isAudioEnabled() const

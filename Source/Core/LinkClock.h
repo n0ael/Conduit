@@ -46,7 +46,8 @@ namespace conduit
       - captureClockState()   → Audio Thread, lock-free (Link-Garantie)
 */
 class LinkClock final : public IClockSource,
-                        public juce::ChangeBroadcaster
+                        public juce::ChangeBroadcaster,
+                        private juce::AsyncUpdater
 {
 public:
     explicit LinkClock (double initialBpm = 120.0,
@@ -69,8 +70,25 @@ public:
         Aktivierung und enableAudio(false) bei Deaktivierung (Phase 1 des
         zweiphasigen Delete). Link-Audio ist enabled, solange der Zähler > 0
         ist — das erste Modul aktiviert, das letzte deaktiviert.
+
+        Das FINALE Deaktivieren (Zähler → 0) läuft um einen Message-Loop-Hop
+        verzögert (AsyncUpdater): enableLinkAudio(false) postet Bye-Arbeit auf
+        den Link-IO-Thread; wird die LinkAudio-Instanz kurz danach destruiert
+        (App-Shutdown), läuft diese Arbeit gegen bereits zerstörte Callback-
+        Member — std::bad_function_call → terminate/abort (SDK-Teardown-Race,
+        Stacktrace-Diagnose 02.07.2026: Controller::setChannelsChangedCallback
+        postet den Reset async, die IO-Queue arbeitet FIFO — die zuvor
+        gequeute Bye-Arbeit trifft den noch alten Callback). Mit dem Hop
+        deaktiviert der laufende Betrieb einen Loop-Durchlauf später
+        (Idle-Sinks sind gratis, 7.2); beim Shutdown steht der Loop und der
+        ~LinkAudio-Teardown übernimmt racefrei (sein Callback-Reset liegt
+        VOR der Teardown-Arbeit in der IO-Queue).
     */
     void enableAudio (bool shouldBeEnabled);
+
+    /** Test-Seam: verzögertes Deaktivieren synchron ausführen (Message
+        Thread) — für Assertions direkt nach dem letzten enableAudio(false). */
+    void flushPendingAudioState();
 
     /** Beliebiger Thread, RT-safe (Link-Garantie). */
     [[nodiscard]] bool isAudioEnabled() const;
@@ -247,6 +265,9 @@ public:
 
 private:
     static constexpr double quantum = 4.0;  // 4/4 — Phase-Sync auf Takt-Ebene
+
+    // Verzögertes enableLinkAudio(false) — Begründung an enableAudio()
+    void handleAsyncUpdate() override;
 
     struct Impl;
     std::unique_ptr<Impl> impl;

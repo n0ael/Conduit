@@ -71,6 +71,7 @@ TEST_CASE ("LinkSendTaps: Tap-Lifecycle — Refcount, Retire-Handshake, Pool-Reu
     // retireAll: letzter aktiver Tap gibt den Refcount frei
     taps.retireAll();
     REQUIRE (taps.getNumActiveTaps() == 0);
+    clock.flushPendingAudioState();  // finales Disable ist deferred (Shutdown-Race-Schutz)
     REQUIRE_FALSE (clock.isAudioEnabled());
 
     taps.noteBlockBegin();
@@ -131,6 +132,45 @@ TEST_CASE ("LinkSendTaps: Breiten-Umschaltung am LEBENDEN Sink (mono ↔ stereo)
     REQUIRE (tap->getWidth() == 2);
     tap->setWidth (0);
     REQUIRE (tap->getWidth() == 1);
+}
+
+//==============================================================================
+TEST_CASE ("LinkClock: finales enableAudio(false) ist deferred (Shutdown-Race-Schutz)", "[linkaudio][sendtaps]")
+{
+    // enableLinkAudio(false) postet Bye-Arbeit auf den Link-IO-Thread; direkt
+    // vor der LinkAudio-Destruktion racet die gegen die Callback-Member
+    // (bad_function_call → abort, Diagnose 02.07.2026). Deshalb: Zähler → 0
+    // deaktiviert erst im nächsten Message-Loop-Hop.
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    conduit::LinkClock clock (120.0, "ConduitTest");
+    clock.prepare (48000.0);
+
+    clock.enableAudio (true);
+    REQUIRE (clock.isAudioEnabled());
+
+    // Zähler → 0: SDK bleibt zunächst enabled (deferred) …
+    clock.enableAudio (false);
+    REQUIRE (clock.isAudioEnabled());
+
+    // … der Flush führt das Disable aus
+    clock.flushPendingAudioState();
+    REQUIRE_FALSE (clock.isAudioEnabled());
+
+    // Schnelles Re-Enable schlägt ein ausstehendes Deferred-Off
+    clock.enableAudio (true);
+    clock.enableAudio (false);
+    clock.enableAudio (true);
+    clock.flushPendingAudioState();
+    REQUIRE (clock.isAudioEnabled());
+
+    clock.enableAudio (false);
+    clock.flushPendingAudioState();
+    REQUIRE_FALSE (clock.isAudioEnabled());
+
+    // Destruktion mit ausstehendem Deferred-Off ist gefahrlos (cancel im Dtor,
+    // der ~LinkAudio-Teardown deaktiviert selbst)
+    clock.enableAudio (true);
+    clock.enableAudio (false);
 }
 
 //==============================================================================

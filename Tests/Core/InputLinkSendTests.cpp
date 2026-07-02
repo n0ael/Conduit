@@ -128,6 +128,7 @@ TEST_CASE ("InputLinkSend: Diff-basiertes applySends — Handle-Identität (7.2)
     REQUIRE (send.tapHandleForPort (0) == nullptr);
     REQUIRE (send.getNumActiveSends() == 0);
     REQUIRE (send.isRetirePending());
+    clock.flushPendingAudioState();  // finales Disable ist deferred (Shutdown-Race-Schutz)
     REQUIRE_FALSE (clock.isAudioEnabled());
     REQUIRE (send.statusForPort (0) == Status::offline);
 
@@ -217,6 +218,7 @@ TEST_CASE ("InputLinkSend: Retire unter echtem Audio-Thread (TSan-Ziel)", "[inpu
     keepRunning.store (false);
     audioThread.join();
 
+    clock.flushPendingAudioState();
     REQUIRE_FALSE (clock.isAudioEnabled());
     REQUIRE (send.statusForPort (0) == Status::offline);
     REQUIRE (send.statusForPort (2) == Status::offline);
