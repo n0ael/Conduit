@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -98,6 +99,14 @@ public:
 
     /** Aktuell registrierte OSC-Adressen — für Tests und die spätere UI. */
     [[nodiscard]] juce::StringArray getRegisteredAddresses() const;
+
+    /** [Message Thread] Feuert nach jedem in den Tree übernommenen
+        Empfangswert (6.1 Pfad 2) — der OscSendService impft darüber seinen
+        Echo-Cache (noteRemoteValue, 7.3). Verdrahtet vom EngineProcessor;
+        optional (Tests laufen ohne). */
+    std::function<void (const juce::String& nodeUuid,
+                        const juce::String& parameterId,
+                        float value)> onRemoteValueApplied;
 
     //==========================================================================
     /** Netzwerk-Thread. Public, damit Tests Messages ohne Socket einspeisen

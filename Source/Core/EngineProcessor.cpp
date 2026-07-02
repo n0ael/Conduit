@@ -73,6 +73,15 @@ EngineProcessor::EngineProcessor()
         return ChannelNames::sanitizeFileLabel (
             channelNames.getLabel (ChannelNames::Direction::input, channel), {});
     };
+
+    // Echo-Suppression des Send-Pfads (7.3): jeder in den Tree übernommene
+    // Empfangswert impft den Diff-Cache — kein Rücksenden eigener Empfänge
+    oscController.onRemoteValueApplied = [this] (const juce::String& nodeUuid,
+                                                 const juce::String& parameterId,
+                                                 float value)
+    {
+        oscSendService.noteRemoteValue (nodeUuid, parameterId, value);
+    };
 }
 
 EngineProcessor::~EngineProcessor()
@@ -450,5 +459,7 @@ LevelMeter& EngineProcessor::getInputLevels() noexcept  { return inputLevels; }
 LevelMeter& EngineProcessor::getOutputLevels() noexcept { return outputLevels; }
 MeterSettings& EngineProcessor::getMeterSettings() noexcept { return meterSettings; }
 InputLinkSend& EngineProcessor::getInputLinkSend() noexcept { return inputLinkSend; }
+OscSendSettings& EngineProcessor::getOscSendSettings() noexcept { return oscSendSettings; }
+OscSendService& EngineProcessor::getOscSendService() noexcept   { return oscSendService; }
 
 } // namespace conduit

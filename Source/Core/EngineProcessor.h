@@ -12,6 +12,8 @@
 #include "MeterSettings.h"
 #include "NodeUiRegistry.h"
 #include "OscController.h"
+#include "OscSendService.h"
+#include "OscSendSettings.h"
 #include "Interfaces/IClockSource.h"
 #include "Modules/ConduitModule.h"
 #include "Modules/ModuleFactory.h"
@@ -125,6 +127,11 @@ public:
         an den audio_in-Kanal-Zeilen liest den Status daraus. */
     [[nodiscard]] InputLinkSend& getInputLinkSend() noexcept;
 
+    /** OSC-Send-Pfad (7.3): Ziel-Host/Port/Enable (App-Zustand, Settings-UI)
+        und der Snapshot-Diff-Sender selbst. */
+    [[nodiscard]] OscSendSettings& getOscSendSettings() noexcept;
+    [[nodiscard]] OscSendService& getOscSendService() noexcept;
+
 private:
     /** Legt die reservierten I/O-Tree-Nodes (audio_input/audio_output) an,
         falls sie fehlen — frischer Patch oder Preset ohne I/O. Idempotent. */
@@ -225,6 +232,12 @@ private:
     // Nach allen Abhängigkeiten deklariert — Initialisierungsreihenfolge!
     GraphManager graphManager { rootState, graph, graphFader,
                                 moduleFactory, undoManager, nodeUiRegistry };
+
+    // OSC-Send-Pfad (7.3): Snapshot-Diff-Timer auf dem Message Thread.
+    // VOR dem OscController deklariert — dessen onRemoteValueApplied-Callback
+    // referenziert den Service, der Controller muss zuerst sterben.
+    OscSendSettings oscSendSettings;
+    OscSendService oscSendService { rootState, oscSendSettings };
 
     // OSC-Dual-State (CLAUDE.md 6.1): Netzwerk → Audio (lock-free) und
     // Netzwerk → ValueTree (async). Nach dem GraphManager deklariert —

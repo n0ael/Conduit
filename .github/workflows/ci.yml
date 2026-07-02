@@ -3,9 +3,11 @@
 # Die Tests laufen headless ohne Audio-Device — kein ASIO/JACK-Setup nötig.
 name: CI
 
+# claude/**: Remote-Sessions können nicht lokal bauen (Egress-Policy blockt
+# FetchContent) — die CI ist dort die Build- und Test-Verifikation pro Commit.
 on:
   push:
-    branches: [master]
+    branches: [master, 'claude/**']
   pull_request:
     branches: [master]
 

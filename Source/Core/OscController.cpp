@@ -2,6 +2,7 @@
 
 #include "GraphManager.h"
 #include "Modules/ConduitModule.h"
+#include "OscAddress.h"
 
 namespace conduit
 {
@@ -159,7 +160,13 @@ void OscController::applyTreeUpdates()
                              .getChildWithProperty (id::paramId, update.parameterId);
 
         if (parameter.isValid())
+        {
             parameter.setProperty (id::paramValue, update.value, nullptr);
+
+            // Echo-Impfung des Send-Pfads (7.3): der Wert gilt als gesendet
+            if (onRemoteValueApplied != nullptr)
+                onRemoteValueApplied (update.nodeUuid, update.parameterId, update.value);
+        }
     }
 }
 
@@ -200,10 +207,6 @@ void OscController::rebuildEndpoints()
             && nodeTree.getProperty (id::nodeError).toString().isEmpty())
             unresolvedModuleRemaining = true;  // materialisiert erst nach dem Swap
 
-        const auto addressPrefix = "/conduit/"
-                                   + nodeTree.getProperty (id::type).toString().toLowerCase()
-                                   + "/" + moduleId + "/";
-
         for (int p = 0; p < parameters.getNumChildren(); ++p)
         {
             const auto parameter = parameters.getChild (p);
@@ -220,7 +223,8 @@ void OscController::rebuildEndpoints()
             endpoint.target      = module != nullptr ? module->getParameterTarget (parameterId) : nullptr;
 
             // try_emplace: bei moduleId-Kollision gewinnt der erste Node
-            rebuilt.try_emplace (addressPrefix + parameterId, std::move (endpoint));
+            rebuilt.try_emplace (osc::parameterAddress (nodeTree, parameterId),
+                                 std::move (endpoint));
         }
     }
 
