@@ -1,6 +1,6 @@
 # Conduit Alpha — Projektstatus
 
-> Letzte Aktualisierung: 2026-07-02 | wird nach jedem Meilenstein gepflegt
+> Letzte Aktualisierung: 2026-07-03 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit_Alpha_v2
 
 ## Fundament (steht komplett)
@@ -24,6 +24,13 @@
 - **TransportSettings:** neu `tapAutoCommit` (default aus) + `tapResetHold` (default 1.0 s); `tapCount` umgewidmet zur Auto-Commit-Tap-Anzahl.
 - **Tap zählt beim DRÜCKEN** (`setTriggeredOnMouseDown`, Timing wie Hardware); Tempo-Kachel zeigt immer die Session (kein Preview-Kampf mehr).
 - **Verifikation:** 230 Testfälle / 10851 Assertions grün (Debug + ASan lokal). Neue/umgebaute Tests: TapTempo (endlos ohne Commit, Pause-Toleranz, rollierendes Fenster folgt Tempowechsel, Auto-Commit ab Tap n, reset), TransportBar (Set-Kachel-Monitor + commitTapPreview, Auto-Commit-Pfad, resetTapMeasurement), TransportSettings-Roundtrip/Clamp der neuen Keys.
+
+**Davor: M4L-Stock-Device-Kopplung (Ableton Stock-LFO ↔ Conduit-LFO) — Exploration, Rate/Depth-Bridge pausiert:**
+
+- **Live-12-Smoke des Announce-Protokolls bestätigt (7.4):** `Tools/Max/ConduitLFO/ConduitLFO.maxpat` geladen → Conduit legt automatisch die LFO-Kachel an (find-or-create über remoteId), Rate UND Depth in beide Richtungen live steuerbar — sauberer End-to-End-Beweis für Announce + Alias-Adressierung (`/conduit/remote/{remoteId}/...`) + Dual-State-Pfad (6.1). Kein Conduit-Code geändert, das Feature war bereits vollständig implementiert
+- **Stock-Ableton-LFO-Rate ↔ Conduit-LFO-Rate direkt verkabelt:** generische OSC-Auto-Registration (7.1) greift ohne Zusatzcode — `LfoModule` exponiert `rate`/`depth` bereits über `appendParametersTo`/`getParameterTarget`. Einheiten-Mismatch identifiziert: Conduit rechnet in Zyklen/Beat (tempo-relativ, phasenstarr), Stock-LFO im Hz-Modus absolut — Umrechnung gehört bewusst ins Max-Patch, nicht ins DSP-Modul (`cyclesPerBeat = Hz × 60 / BPM` und umgekehrt)
+- **Bug im User-Bridge-Patch gefunden, noch nicht behoben:** `expr`-Objekte in Max feuern bei JEDEM Inlet (nicht nur links) — der Tempo-Feed in den rechten Inlet löste vor Eintreffen eines echten Rate-Werts eine Berechnung mit `$f1=0` aus und nullte den Rate-Dial. Fix skizziert (Tempo über ein `f`-Objekt cold zwischenspeichern, `t f f` synchronisiert die Auslösung ausschließlich über den Rate-Wert) — **Umsetzung vom User auf später verschoben**
+- **Nächster Schritt (später):** Fix im Bridge-Patch anwenden, danach eigentliche Conduit-M4L-Devices (analog `ConduitLFO`) für weitere Module bauen
 
 **Davor: Push-3-Transport-Header (CLAUDE.md 10.0) — 6 Schritte, abgeschlossen:**
 
@@ -58,7 +65,7 @@
 - **`Tools/Max/ConduitLFO/`**: `.maxpat` + `conduit_announce.js` + README — `live.thisdevice` (nicht loadbang) → Announce + 30-s-Heartbeat, persistente remoteId in hidden `live.numbox` („Stored Only"), Rate/Depth-Dials → Alias-Adressen, `udpsend` mit `host <ip>`-Umkonfiguration. **Kein Audio im Device** — der LFO läuft nativ in Conduit
 - **CLAUDE.md**: neue Abschnitte 7.3/7.4, Schema-6.2-Erweiterung, Roadmap (OSC-Send/M4L-Announce/Max-Testdevice → v2.0)
 
-- **Verifikation (Remote-Session, Build nur via CI — Egress-Policy blockt FetchContent lokal):** CI (Ubuntu, `tsan` + `asan-linux`, jetzt auch auf `claude/**`-Branches) grün pro Schritt — neue Suiten `OscSendServiceTests`, `OscSettingsComponentTests`, `RemoteModuleBinderTests` (inkl. `[announce][osc][threading]`-Dauerfeuer-Stresstest) plus IP-Learn-Tests (Loopback-Tests hidden `[osc][network][.]`, lokal via Tag). **Ausstehend (User, Windows):** Debug-Build + ConduitTests-Zahlen, App-Smoke (OSC-Tab, TouchOSC-Follow + /conduit/sync + IP-Learn), Live-12-Smoke (Max-Device → LFO-Kachel mit Track-Name/-Farbe, Dial moduliert, Re-Announce nach Neustart)
+- **Verifikation (Remote-Session, Build nur via CI — Egress-Policy blockt FetchContent lokal):** CI (Ubuntu, `tsan` + `asan-linux`, jetzt auch auf `claude/**`-Branches) grün pro Schritt — neue Suiten `OscSendServiceTests`, `OscSettingsComponentTests`, `RemoteModuleBinderTests` (inkl. `[announce][osc][threading]`-Dauerfeuer-Stresstest) plus IP-Learn-Tests (Loopback-Tests hidden `[osc][network][.]`, lokal via Tag). **Live-12-Smoke bestätigt (03.07.2026):** Max-Device (`ConduitLFO.maxpat`) → LFO-Kachel wird automatisch angelegt, Dial moduliert in beide Richtungen (Details siehe M4L-Stock-Device-Kopplung oben). **Weiterhin ausstehend (User, Windows):** Debug-Build + ConduitTests-Zahlen, App-Smoke (OSC-Tab, TouchOSC-Follow + /conduit/sync + IP-Learn), Re-Announce-Test nach Neustart
 
 **Davor: OscController-Threading-Fix: audioQueue.push unter registryLock (Audit-Befund):**
 
