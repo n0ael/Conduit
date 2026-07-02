@@ -116,6 +116,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/CapturePanel.cpp
     Source/UI/CaptureSettingsComponent.cpp
     Source/UI/CaptureToast.cpp
+    Source/UI/InputSendButton.cpp
     Source/UI/LevelMeterBar.cpp
     Source/UI/LinkAudioSendPanel.cpp
     Source/UI/LinkAudioStatusBadge.cpp
@@ -177,6 +178,7 @@ target_sources(Conduit PRIVATE
     Source/UI/CaptureAllButton.h
     Source/UI/CapturePanel.h
     Source/UI/CaptureToast.h
+    Source/UI/InputSendButton.h
     Source/UI/LinkAudioSendPanel.h
     Source/UI/LinkAudioStatusBadge.h
     Source/UI/LinkSendCreateDialog.h
@@ -332,6 +334,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/CapturePanel.cpp
         Source/UI/CaptureSettingsComponent.cpp
         Source/UI/CaptureToast.cpp
+        Source/UI/InputSendButton.cpp
         Source/UI/LevelMeterBar.cpp
         Source/UI/LinkAudioSendPanel.cpp
         Source/UI/LinkAudioStatusBadge.cpp

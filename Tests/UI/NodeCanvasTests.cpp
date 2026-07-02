@@ -477,10 +477,12 @@ TEST_CASE ("NodeComponent: Stereo-Paar verschmilzt Ports, Meter bleiben pro Kana
     auto* component = rig.canvas.findNodeComponent (PairingRig::uuidOf (node));
     REQUIRE (component != nullptr);
 
-    // Paar (0,1): 3 Ports, aber weiterhin 4 Meter (eine Zeile pro Kanal)
+    // Paar (0,1): 3 Ports, aber weiterhin 4 Meter (eine Zeile pro Kanal);
+    // ein Send-Toggle pro Port-ZEILE (Paar = ein Send am Anker)
     REQUIRE (component->getNumOutputPorts() == 3);
     REQUIRE (component->getNumMeterBars() == 4);
-    REQUIRE (component->getWidth() == 320);  // endpointWidth + Koppel-Spalte
+    REQUIRE (component->getNumSendButtons() == 3);
+    REQUIRE (component->getWidth() == 344);  // endpointWidth + Koppel- + Send-Spalte
 
     // Kabel-Anker des Paars: derselbe Port, ∓3px versetzt (Doppel-Linie)
     const auto anchor0 = component->getPortCentre (false, 0);
@@ -498,7 +500,15 @@ TEST_CASE ("NodeComponent: Stereo-Paar verschmilzt Ports, Meter bleiben pro Kana
     rig.temp.names->dispatchPendingMessages();
     REQUIRE (component->getNumOutputPorts() == 4);
     REQUIRE (component->getNumMeterBars() == 4);
+    REQUIRE (component->getNumSendButtons() == 4);  // eine Zeile pro Kanal
     REQUIRE_FALSE (component->pairAnchorForPort (false, 0).has_value());
+
+    // Send-Flag setzen (wie ein Button-Klick): Broadcast baut die Buttons
+    // neu, der Zustand bleibt konsistent — normale Module tragen keine
+    rig.temp.names->setPortLinkSendEnabled (conduit::ChannelNames::Direction::input, 0, true);
+    rig.temp.names->dispatchPendingMessages();
+    REQUIRE (component->getNumSendButtons() == 4);
+    REQUIRE (rig.temp.names->isPortLinkSendEnabled (conduit::ChannelNames::Direction::input, 0));
 }
 
 //==============================================================================

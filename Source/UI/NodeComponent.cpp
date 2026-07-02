@@ -16,6 +16,7 @@ namespace
     constexpr int endpointPortInset   = 24;   // Port ↔ Meter-Kante
     constexpr int endpointWidth       = 300;  // verbreiterte Kachel (Label + Meter + Port)
     constexpr int endpointPairColumn  = 20;   // Koppel-Toggle-Spalte (nur audio_in)
+    constexpr int endpointSendColumn  = 24;   // Link-Send-Toggle-Spalte (nur audio_in)
 
     // Vertikaler Versatz der beiden Kabel-Anker eines Stereo-Paar-Ports —
     // die zwei Connections starten dicht beieinander (Doppel-Linien-Optik)
@@ -27,13 +28,15 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
                               NodeUiRegistry& uiRegistryToUse,
                               ChannelNames* channelNamesToUse,
                               LevelMeter* inputLevelsToUse,
-                              LevelMeter* outputLevelsToUse)
+                              LevelMeter* outputLevelsToUse,
+                              InputLinkSend* inputSendToUse)
     : nodeTree (std::move (nodeTreeToBind)),
       graphManager (graphManagerToUse),
       uiRegistry (uiRegistryToUse),
       channelNames (channelNamesToUse),
       inputLevels (inputLevelsToUse),
       outputLevels (outputLevelsToUse),
+      inputSend (inputSendToUse),
       nodeUuid (nodeTree.getProperty (id::nodeId).toString())
 {
     uiRegistry.acquire (nodeUuid);
@@ -184,6 +187,9 @@ void NodeComponent::beginTeardown()
     for (auto& toggle : pairToggles)
         toggle->setEnabled (false);
 
+    for (auto& sendButton : sendButtons)
+        sendButton->stopUpdates();
+
     for (auto& bar : meterBars)
         bar->stopUpdates();
 
@@ -303,6 +309,10 @@ void NodeComponent::rebuildPorts()
     outputPorts.clear();
     pairToggles.clear();
 
+    for (auto& sendButton : sendButtons)
+        sendButton->stopUpdates();
+    sendButtons.clear();
+
     inputChannelCount  = (int) nodeTree.getProperty (id::numInputChannels,  0);
     outputChannelCount = (int) nodeTree.getProperty (id::numOutputChannels, 0);
 
@@ -329,6 +339,18 @@ void NodeComponent::rebuildPorts()
 
     makePorts (true,  inputRows,  inputPorts);
     makePorts (false, outputRows, outputPorts);
+
+    // Link-Send-Toggles: einer pro Port-ZEILE (Paar = ein Send am Anker) —
+    // Klick schreibt nur das ChannelNames-Flag, Engine und UI folgen dem
+    // Broadcast (7.2)
+    if (hasPairingUi())
+        for (const auto& row : outputRows)
+        {
+            auto sendButton = std::make_unique<InputSendButton> (*channelNames, inputSend,
+                                                                 row.channel);
+            addAndMakeVisible (*sendButton);
+            sendButtons.push_back (std::move (sendButton));
+        }
 
     // Koppel-Toggles zwischen benachbarten Kanal-Zeilen (audio_in): Klick
     // koppelt/löst (ChannelNames räumt Konflikte), der ChangeBroadcast baut
@@ -363,8 +385,9 @@ void NodeComponent::updateEndpointSize()
     // Zeile pro Kanal, auch wenn Paare zu einem Port verschmelzen). Mit
     // Metern breitere Kachel; audio_in zusätzlich die Koppel-Spalte.
     const auto maxChannels = juce::jmax (inputChannelCount, outputChannelCount, 1);
-    const auto width = hasMeters() ? endpointWidth + (hasPairingUi() ? endpointPairColumn : 0)
-                                   : defaultWidth;
+    const auto width = hasMeters()
+                     ? endpointWidth + (hasPairingUi() ? endpointPairColumn + endpointSendColumn : 0)
+                     : defaultWidth;
     setSize (width, touchTarget + maxChannels * 30);
 }
 
@@ -404,9 +427,9 @@ juce::Rectangle<int> NodeComponent::meterBoundsFor (bool isInputEndpoint, int ch
     // Eingangs. Feste Zeile pro KANAL (Pairing verschiebt nur die Ports).
     const auto rowY = channelRowY (! isInputEndpoint, channel);
     const int  y    = rowY - endpointMeterHeight / 2;
-    const int  pairColumn = hasPairingUi() ? endpointPairColumn : 0;
+    const int  rightColumns = hasPairingUi() ? endpointPairColumn + endpointSendColumn : 0;
     const int  x    = isInputEndpoint
-                    ? getWidth() - endpointPortInset - pairColumn - endpointMeterWidth
+                    ? getWidth() - endpointPortInset - rightColumns - endpointMeterWidth
                     : endpointPortInset;
     return { x, y, endpointMeterWidth, endpointMeterHeight };
 }
@@ -465,6 +488,7 @@ void NodeComponent::changeListenerCallback (juce::ChangeBroadcaster*)
 int NodeComponent::getNumInputPorts() const noexcept  { return static_cast<int> (inputPorts.size()); }
 int NodeComponent::getNumOutputPorts() const noexcept { return static_cast<int> (outputPorts.size()); }
 int NodeComponent::getNumMeterBars() const noexcept   { return static_cast<int> (meterBars.size()); }
+int NodeComponent::getNumSendButtons() const noexcept { return static_cast<int> (sendButtons.size()); }
 
 int NodeComponent::channelRowY (bool isInputBank, int channel) const
 {
@@ -642,13 +666,27 @@ void NodeComponent::resized()
     placePorts (inputPorts);
     placePorts (outputPorts);
 
-    // Koppel-Toggles: in der Spalte zwischen Meter und Port, mittig zwischen
+    // Koppel-Toggles: in der Spalte zwischen Send und Port, mittig zwischen
     // den beiden Kanal-Zeilen, die sie koppeln (Toggle i = Kanäle i, i+1)
     for (int i = 0; i < (int) pairToggles.size(); ++i)
     {
         const auto y = (channelRowY (false, i) + channelRowY (false, i + 1)) / 2;
         pairToggles[(std::size_t) i]->setBounds (getWidth() - endpointPortInset - endpointPairColumn,
                                                  y - 10, endpointPairColumn, 20);
+    }
+
+    // Link-Send-Toggles: eigene Spalte links der Koppel-Toggles, ein Button
+    // pro Port-Zeile (Paar-Zeilen mittig zwischen ihren Kanal-Zeilen)
+    for (auto& sendButton : sendButtons)
+    {
+        const auto anchor = sendButton->getAnchorPort();
+        const auto row = pairAnchorForPort (false, anchor).has_value()
+                       ? (channelRowY (false, anchor) + channelRowY (false, anchor + 1)) / 2
+                       : channelRowY (false, anchor);
+
+        sendButton->setBounds (getWidth() - endpointPortInset - endpointPairColumn
+                                   - endpointSendColumn,
+                               row - 10, endpointSendColumn - 2, 20);
     }
 
     for (int channel = 0; channel < (int) meterBars.size(); ++channel)

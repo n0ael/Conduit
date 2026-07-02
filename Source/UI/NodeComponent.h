@@ -9,7 +9,9 @@
 
 #include "Core/ChannelNames.h"
 #include "Core/GraphManager.h"
+#include "Core/InputLinkSend.h"
 #include "Core/NodeUiRegistry.h"
+#include "UI/InputSendButton.h"
 #include "UI/LevelMeterBar.h"
 #include "UI/LinkAudioSendPanel.h"
 #include "UI/PortComponent.h"
@@ -48,13 +50,16 @@ class NodeComponent final : public juce::Component,
 public:
     /** channelNamesToUse darf nullptr sein (Tests) — dann keine Port-Labels.
         inputLevels/outputLevels darf nullptr sein (Tests) — dann keine Meter;
-        die I/O-Endpunkte lesen daraus Peak/RMS/Clip pro Kanal (Ableton-Style). */
+        die I/O-Endpunkte lesen daraus Peak/RMS/Clip pro Kanal (Ableton-Style).
+        inputSendToUse (nullptr in Tests): Status-Quelle der Send-LEDs an den
+        audio_in-Zeilen — die Buttons existieren mit ChannelNames auch ohne. */
     NodeComponent (juce::ValueTree nodeTreeToBind,
                    GraphManager& graphManagerToUse,
                    NodeUiRegistry& uiRegistryToUse,
                    ChannelNames* channelNamesToUse = nullptr,
                    LevelMeter* inputLevelsToUse = nullptr,
-                   LevelMeter* outputLevelsToUse = nullptr);
+                   LevelMeter* outputLevelsToUse = nullptr,
+                   InputLinkSend* inputSendToUse = nullptr);
     ~NodeComponent() override;
 
     static constexpr int defaultWidth  = 168;
@@ -104,6 +109,7 @@ public:
     [[nodiscard]] int getNumInputPorts() const noexcept;
     [[nodiscard]] int getNumOutputPorts() const noexcept;
     [[nodiscard]] int getNumMeterBars() const noexcept;  // Pegelanzeigen (I/O-Endpunkte)
+    [[nodiscard]] int getNumSendButtons() const noexcept;  // Link-Send-Toggles (audio_in)
 
     //==========================================================================
     void paint (juce::Graphics& g) override;
@@ -163,6 +169,7 @@ private:
     ChannelNames* channelNames;  // nullptr außerhalb der App (Tests)
     LevelMeter* inputLevels;     // Sicht-Metering audio_in (nullptr in Tests)
     LevelMeter* outputLevels;    // Sicht-Metering audio_out (nullptr in Tests)
+    InputLinkSend* inputSend;    // Status-Quelle der Send-LEDs (nullptr in Tests)
     const juce::String nodeUuid;
 
     juce::Label titleLabel;  // named_id — Doppelklick benennt um (renameNode)
@@ -182,6 +189,10 @@ private:
     // Hit-Zone 24px wie die Ports — bewusst unter dem 44px-Touch-Ziel (10),
     // gleiche Ausnahme wie die Port-Hit-Zonen.
     std::vector<std::unique_ptr<juce::TextButton>> pairToggles;
+
+    // Link-Send-Toggles: einer pro Port-ZEILE (Paar = ein Send am Anker),
+    // nur audio_in (7.2) — mit den Ports neu gebaut
+    std::vector<std::unique_ptr<InputSendButton>> sendButtons;
 
     // Pegelanzeigen der I/O-Endpunkte — eine pro Kanal der aktiven Bank
     std::vector<std::unique_ptr<LevelMeterBar>> meterBars;

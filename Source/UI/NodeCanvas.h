@@ -41,13 +41,15 @@ public:
     /** channelNamesToUse darf nullptr sein (Tests) — die NodeComponents
         der I/O-Endpunkte zeigen dann keine Port-Labels. inputLevels/
         outputLevels (nullptr in Tests) speisen die Pegelanzeigen der
-        I/O-Endpunkte. */
+        I/O-Endpunkte; inputSendToUse (nullptr in Tests) den Status der
+        Link-Send-Toggles an den audio_in-Zeilen (7.2). */
     NodeCanvas (juce::ValueTree rootTree,
                 GraphManager& graphManagerToUse,
                 NodeUiRegistry& uiRegistryToUse,
                 ChannelNames* channelNamesToUse = nullptr,
                 LevelMeter* inputLevelsToUse = nullptr,
-                LevelMeter* outputLevelsToUse = nullptr);
+                LevelMeter* outputLevelsToUse = nullptr,
+                InputLinkSend* inputSendToUse = nullptr);
     ~NodeCanvas() override;
 
     [[nodiscard]] int getNumNodeComponents() const noexcept;
@@ -91,6 +93,7 @@ private:
     ChannelNames* channelNames;  // nullptr in Tests
     LevelMeter* inputLevels;     // Sicht-Metering audio_in (nullptr in Tests)
     LevelMeter* outputLevels;    // Sicht-Metering audio_out (nullptr in Tests)
+    InputLinkSend* inputSend;    // Send-LED-Status audio_in (nullptr in Tests)
 
     std::vector<std::unique_ptr<NodeComponent>> nodeComponents;
 
