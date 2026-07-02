@@ -96,7 +96,7 @@ TEST_CASE ("Re-Announce ist idempotent — nur der Tint zieht nach", "[announce]
     BinderRig rig;
     rig.announce ("dev", "lfo", "Pad", 0x00112233);
 
-    const auto node = rig.nodes().getChild (0);
+    auto node = rig.nodes().getChild (0);
     node.setProperty (conduit::id::moduleId, "user_renamed", nullptr);  // User-Hoheit
 
     rig.announce ("dev", "lfo", "Pad (neu)", 0x00445566);
