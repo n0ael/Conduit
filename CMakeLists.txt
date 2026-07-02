@@ -72,6 +72,16 @@ include(${abletonlink_SOURCE_DIR}/AbletonLinkConfig.cmake)
 set(CMAKE_CXX_STANDARD 20)
 
 # ---------------------------------------------------------------------------
+# Eingebettete Assets — Jost-Font (Google Fonts, OFL-Lizenz in Assets/Fonts)
+# für das Push-3-Design (CLAUDE.md 10)
+# ---------------------------------------------------------------------------
+juce_add_binary_data(ConduitAssets
+    SOURCES
+        Assets/Fonts/Jost-Regular.ttf
+        Assets/Fonts/Jost-Medium.ttf
+)
+
+# ---------------------------------------------------------------------------
 # App-Target (eigenständige GUI-App, kein Plugin)
 # ---------------------------------------------------------------------------
 juce_add_gui_app(Conduit
@@ -128,6 +138,8 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/NodeComponent.cpp
     Source/UI/OscSettingsComponent.cpp
     Source/UI/PortComponent.cpp
+    Source/UI/PushIcons.cpp
+    Source/UI/PushLookAndFeel.cpp
     Source/UI/ScopeDisplay.cpp
     Source/UI/SequencerControlPanel.cpp
     Source/UI/SettingsWindow.cpp
@@ -194,6 +206,8 @@ target_sources(Conduit PRIVATE
     Source/UI/NodeComponent.h
     Source/UI/OscSettingsComponent.h
     Source/UI/PortComponent.h
+    Source/UI/PushIcons.h
+    Source/UI/PushLookAndFeel.h
     Source/UI/ScopeDisplay.h
     Source/UI/SequencerControlPanel.h
     Source/UI/StepGridDisplay.h
@@ -243,6 +257,7 @@ endif()
 
 target_link_libraries(Conduit
     PRIVATE
+        ConduitAssets
         juce::juce_audio_utils
         juce::juce_osc
         Ableton::Link
@@ -306,6 +321,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/UI/LevelMeterBarTests.cpp
         Tests/UI/LinkAudioSendPanelTests.cpp
         Tests/UI/OscSettingsComponentTests.cpp
+        Tests/UI/PushDesignTests.cpp
         Tests/UI/SequencerControlPanelTests.cpp
         Tests/Util/ScaleQuantizerTests.cpp
         Tests/Util/SpscQueueTests.cpp
@@ -358,6 +374,8 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/NodeComponent.cpp
         Source/UI/OscSettingsComponent.cpp
         Source/UI/PortComponent.cpp
+        Source/UI/PushIcons.cpp
+        Source/UI/PushLookAndFeel.cpp
         Source/UI/ScopeDisplay.cpp
         Source/UI/SequencerControlPanel.cpp
         Source/UI/SettingsWindow.cpp
@@ -383,6 +401,7 @@ if(CONDUIT_BUILD_TESTS)
 
     target_link_libraries(ConduitTests
         PRIVATE
+            ConduitAssets
             Catch2::Catch2WithMain
             juce::juce_audio_formats
             juce::juce_audio_processors

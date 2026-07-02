@@ -1,0 +1,65 @@
+#pragma once
+
+#include <juce_gui_basics/juce_gui_basics.h>
+
+namespace conduit::push
+{
+
+//==============================================================================
+/**
+    Farbwelt des Push-3-Designs (CLAUDE.md 10) — eine zentrale Definition,
+    damit TransportBar, Browser und Pages identisch aussehen.
+
+    Werte aus den Referenzfotos abgeleitet: fast-schwarze Fläche, dunkle
+    Button-Kacheln mit dezenter Kontur, hellgraue Beschriftung, LED-Akzente.
+*/
+namespace colours
+{
+    inline const juce::Colour background   { 0xff121212 };  // App-Fläche
+    inline const juce::Colour panel        { 0xff1a1a1a };  // Header/Panels
+    inline const juce::Colour tile         { 0xff262626 };  // Button-Kachel
+    inline const juce::Colour tileActive   { 0xff333333 };  // gedrückt/hover
+    inline const juce::Colour outline      { 0xff3a3a3a };  // Kachel-Kontur
+    inline const juce::Colour text         { 0xffd8d8d8 };
+    inline const juce::Colour textDim      { 0xff8a8a8a };
+
+    inline const juce::Colour ledGreen     { 0xff3ddc84 };  // Play
+    inline const juce::Colour ledRed       { 0xffff453a };  // Automate/Looper
+    inline const juce::Colour ledCyan      { 0xff00bfd8 };  // Link (Ableton-Cyan)
+    inline const juce::Colour ledOrange    { 0xffffa726 };  // Capture aktiv
+    inline const juce::Colour ledWhite     { 0xfff0f0f0 };  // neutrale LED
+}
+
+//==============================================================================
+/**
+    Look-and-Feel im Push-3-Stil: Jost als App-Font (BinaryData, OFL-Lizenz
+    in Assets/Fonts/OFL.txt), dunkle Kacheln mit 4-px-Radius, dezente
+    Konturen, PopupMenus/ComboBoxen im selben Ton.
+
+    Eine Instanz lebt im EngineEditor und wird per setDefaultLookAndFeel
+    bzw. setLookAndFeel an die Header-Komponenten gereicht. Message Thread.
+*/
+class PushLookAndFeel final : public juce::LookAndFeel_V4
+{
+public:
+    PushLookAndFeel();
+
+    /** Jost Regular/Medium — Medium ersetzt "bold" (Push nutzt keine fetten
+        Schnitte, nur die mittlere Stärke für Hervorhebungen). */
+    juce::Typeface::Ptr getTypefaceForFont (const juce::Font& font) override;
+
+    void drawButtonBackground (juce::Graphics& g, juce::Button& button,
+                               const juce::Colour& backgroundColour,
+                               bool isHighlighted, bool isDown) override;
+
+    /** Jost in gegebener Höhe — zentraler Helper für Custom-Komponenten. */
+    [[nodiscard]] juce::Font getJost (float height, bool medium = false) const;
+
+private:
+    juce::Typeface::Ptr jostRegular;
+    juce::Typeface::Ptr jostMedium;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PushLookAndFeel)
+};
+
+} // namespace conduit::push

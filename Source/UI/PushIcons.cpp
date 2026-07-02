@@ -1,0 +1,265 @@
+#include "PushIcons.h"
+
+namespace conduit::push
+{
+
+namespace
+{
+
+//==============================================================================
+// Geometrie im normierten 0..1-Quadrat. Strokes werden erst beim Zeichnen
+// skaliert — die Pfade hier sind reine Mittellinien bzw. Umrisse.
+
+juce::Path playTriangle()
+{
+    juce::Path p;
+    p.addTriangle (0.20f, 0.10f, 0.20f, 0.90f, 0.88f, 0.50f);
+    return p;
+}
+
+juce::Path tapeLoopOutline()
+{
+    // Doppel-oo mit Strich an der Oberkante (Tape-Symbol, User-Wunsch):
+    // zwei Spulen unten, die Bandkante läuft als Linie oben drüber.
+    juce::Path p;
+    p.addEllipse (0.10f, 0.42f, 0.34f, 0.34f);
+    p.addEllipse (0.56f, 0.42f, 0.34f, 0.34f);
+    p.startNewSubPath (0.10f, 0.22f);
+    p.lineTo (0.90f, 0.22f);
+    return p;
+}
+
+juce::Path captureCorners()
+{
+    // ⛶ — vier Eckwinkel wie auf dem Push-Capture-Button
+    constexpr auto inset = 0.10f;
+    constexpr auto arm   = 0.26f;
+
+    juce::Path p;
+    // oben links
+    p.startNewSubPath (inset, inset + arm);
+    p.lineTo (inset, inset);
+    p.lineTo (inset + arm, inset);
+    // oben rechts
+    p.startNewSubPath (1.0f - inset - arm, inset);
+    p.lineTo (1.0f - inset, inset);
+    p.lineTo (1.0f - inset, inset + arm);
+    // unten rechts
+    p.startNewSubPath (1.0f - inset, 1.0f - inset - arm);
+    p.lineTo (1.0f - inset, 1.0f - inset);
+    p.lineTo (1.0f - inset - arm, 1.0f - inset);
+    // unten links
+    p.startNewSubPath (inset + arm, 1.0f - inset);
+    p.lineTo (inset, 1.0f - inset);
+    p.lineTo (inset, 1.0f - inset - arm);
+    return p;
+}
+
+juce::Path metronomeOutline()
+{
+    // ○● — Kreis-Outline links; der gefüllte Punkt rechts kommt in draw()
+    juce::Path p;
+    p.addEllipse (0.06f, 0.30f, 0.40f, 0.40f);
+    return p;
+}
+
+juce::Path metronomeDot()
+{
+    juce::Path p;
+    p.addEllipse (0.56f, 0.30f, 0.40f, 0.40f);
+    return p;
+}
+
+juce::Path plusSign()
+{
+    juce::Path p;
+    p.startNewSubPath (0.50f, 0.12f);
+    p.lineTo (0.50f, 0.88f);
+    p.startNewSubPath (0.12f, 0.50f);
+    p.lineTo (0.88f, 0.50f);
+    return p;
+}
+
+juce::Path gearSun()
+{
+    // ☼ wie auf dem Push (Setup): Kreis mit acht kurzen Strahlen
+    juce::Path p;
+    p.addEllipse (0.30f, 0.30f, 0.40f, 0.40f);
+
+    const juce::Point<float> centre (0.50f, 0.50f);
+    for (int ray = 0; ray < 8; ++ray)
+    {
+        const auto angle = juce::MathConstants<float>::twoPi * (float) ray / 8.0f;
+        const auto dir   = juce::Point<float> (std::sin (angle), -std::cos (angle));
+        p.startNewSubPath (centre + dir * 0.30f);
+        p.lineTo (centre + dir * 0.44f);
+    }
+    return p;
+}
+
+juce::Path chevron (bool pointsRight)
+{
+    juce::Path p;
+    const auto x0 = pointsRight ? 0.36f : 0.64f;
+    const auto x1 = pointsRight ? 0.64f : 0.36f;
+    p.startNewSubPath (x0, 0.18f);
+    p.lineTo (x1, 0.50f);
+    p.lineTo (x0, 0.82f);
+    return p;
+}
+
+juce::Path chevronDownSmall()
+{
+    juce::Path p;
+    p.addTriangle (0.22f, 0.36f, 0.78f, 0.36f, 0.50f, 0.72f);
+    return p;
+}
+
+juce::Path mixerBars()
+{
+    // Fader-Optik: vier vertikale Bahnen, Ticks auf verschiedenen Höhen
+    juce::Path p;
+    const float xs[]    = { 0.16f, 0.39f, 0.61f, 0.84f };
+    const float ticks[] = { 0.36f, 0.62f, 0.28f, 0.52f };
+
+    for (int i = 0; i < 4; ++i)
+    {
+        p.startNewSubPath (xs[i], 0.10f);
+        p.lineTo (xs[i], 0.90f);
+        p.startNewSubPath (xs[i] - 0.09f, ticks[i]);
+        p.lineTo (xs[i] + 0.09f, ticks[i]);
+    }
+    return p;
+}
+
+juce::Path clipBoxOutline()
+{
+    juce::Path p;
+    p.addRoundedRectangle (0.08f, 0.16f, 0.84f, 0.68f, 0.10f);
+    return p;
+}
+
+juce::Path clipBoxTriangle()
+{
+    juce::Path p;
+    p.addTriangle (0.40f, 0.36f, 0.40f, 0.64f, 0.66f, 0.50f);
+    return p;
+}
+
+juce::Path deviceLines()
+{
+    juce::Path p;
+    for (const auto x : { 0.26f, 0.50f, 0.74f })
+    {
+        p.startNewSubPath (x, 0.12f);
+        p.lineTo (x, 0.88f);
+    }
+    return p;
+}
+
+juce::Path gridLoop()
+{
+    // Ω-Schleife: großer Bogen mit zwei Füßchen
+    juce::Path p;
+    p.startNewSubPath (0.12f, 0.84f);
+    p.lineTo (0.32f, 0.84f);
+    p.addCentredArc (0.50f, 0.46f, 0.30f, 0.30f,
+                     0.0f,
+                     juce::MathConstants<float>::pi * 1.30f,
+                     juce::MathConstants<float>::pi * 2.70f);
+    p.lineTo (0.68f, 0.84f);
+    p.lineTo (0.88f, 0.84f);
+    return p;
+}
+
+//==============================================================================
+juce::AffineTransform fitToBounds (const juce::Rectangle<float>& bounds)
+{
+    // Größtes einbeschriebenes Quadrat, zentriert — Icons bleiben proportional
+    const auto side = juce::jmin (bounds.getWidth(), bounds.getHeight());
+    const auto target = bounds.withSizeKeepingCentre (side, side);
+    return juce::AffineTransform::scale (side, side)
+               .translated (target.getX(), target.getY());
+}
+
+juce::Path strokeGeometry (Icon icon)
+{
+    switch (icon)
+    {
+        case Icon::play:         return playTriangle();
+        case Icon::tapeLoop:     return tapeLoopOutline();
+        case Icon::captureFrame: return captureCorners();
+        case Icon::metronome:    return metronomeOutline();
+        case Icon::plus:         return plusSign();
+        case Icon::gear:         return gearSun();
+        case Icon::nudgeLeft:    return chevron (false);
+        case Icon::nudgeRight:   return chevron (true);
+        case Icon::chevronDown:  return chevronDownSmall();
+        case Icon::pageMixer:    return mixerBars();
+        case Icon::pageClip:     return clipBoxOutline();
+        case Icon::pageDevice:   return deviceLines();
+        case Icon::pageGrid:     return gridLoop();
+    }
+
+    jassertfalse;
+    return {};
+}
+
+/** Zusätzliche gefüllte Teilfläche (leer, wenn das Icon reiner Stroke ist). */
+juce::Path fillGeometry (Icon icon)
+{
+    switch (icon)
+    {
+        case Icon::metronome:   return metronomeDot();
+        case Icon::pageClip:    return clipBoxTriangle();
+        case Icon::chevronDown: return chevronDownSmall();
+        default:                return {};
+    }
+}
+
+} // namespace
+
+//==============================================================================
+void draw (juce::Graphics& g, Icon icon, juce::Rectangle<float> bounds, juce::Colour colour)
+{
+    if (bounds.isEmpty())
+        return;
+
+    const auto transform = fitToBounds (bounds);
+    const auto side = juce::jmin (bounds.getWidth(), bounds.getHeight());
+    const auto strokeWidth = juce::jmax (1.0f, side * 0.085f);
+
+    g.setColour (colour);
+
+    // chevronDown ist NUR Füllung (kleines Dreieck) — kein Stroke obendrauf
+    if (icon != Icon::chevronDown)
+    {
+        auto stroke = strokeGeometry (icon);
+        stroke.applyTransform (transform);
+        g.strokePath (stroke, juce::PathStrokeType (strokeWidth,
+                                                    juce::PathStrokeType::curved,
+                                                    juce::PathStrokeType::rounded));
+    }
+
+    auto fill = fillGeometry (icon);
+
+    if (! fill.isEmpty())
+    {
+        fill.applyTransform (transform);
+        g.fillPath (fill);
+    }
+}
+
+juce::Path outlinePath (Icon icon, juce::Rectangle<float> bounds)
+{
+    auto path = strokeGeometry (icon);
+    const auto fill = fillGeometry (icon);
+
+    if (! fill.isEmpty())
+        path.addPath (fill);
+
+    path.applyTransform (fitToBounds (bounds));
+    return path;
+}
+
+} // namespace conduit::push
