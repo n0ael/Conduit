@@ -38,6 +38,52 @@ OscSettingsComponent::OscSettingsComponent (OscSendSettings& settingsToUse,
     enableToggle.onClick = [this] { settings.setEnabled (enableToggle.getToggleState()); };
     addAndMakeVisible (enableToggle);
 
+    // Learn-Probe (7.3): OSCReceiver liefert keine Absender-IP — der
+    // Controller lauscht kurz selbst auf dem Empfangsport
+    learnButton.onClick = [this]
+    {
+        if (oscController.isLearning())
+        {
+            oscController.cancelIpLearn();
+            learnStatusLabel.setText ("Abgebrochen.", juce::dontSendNotification);
+            updateLearnUi();
+            return;
+        }
+
+        // Das Fenster kann während der Probe geschlossen werden — die
+        // Settings überleben (EngineProcessor), die UI nur via SafePointer
+        juce::Component::SafePointer<OscSettingsComponent> safeThis (this);
+        auto* settingsPtr = &settings;
+
+        const auto started = oscController.beginIpLearn (
+            [safeThis, settingsPtr] (const juce::String& ip)
+            {
+                if (ip.isNotEmpty())
+                    settingsPtr->setHost (ip);
+
+                if (safeThis == nullptr)
+                    return;
+
+                safeThis->learnStatusLabel.setText (
+                    ip.isNotEmpty() ? "Gelernt: " + ip
+                                    : juce::String ("Kein Paket empfangen (Timeout)."),
+                    juce::dontSendNotification);
+                safeThis->syncControls();
+                safeThis->updateLearnUi();
+            });
+
+        learnStatusLabel.setText (started
+                                      ? juce::String ("Warte auf ein UDP-Paket vom Sender ...")
+                                      : juce::String ("Empfang nicht verbunden."),
+                                  juce::dontSendNotification);
+        updateLearnUi();
+    };
+    addAndMakeVisible (learnButton);
+
+    learnStatusLabel.setColour (juce::Label::textColourId,
+                                juce::Colours::white.withAlpha (0.7f));
+    addAndMakeVisible (learnStatusLabel);
+
     syncHintLabel.setText (juce::String ("Clients ziehen den Ist-Zustand per ")
                                + osc::syncAddress + " (Voll-Dump).",
                            juce::dontSendNotification);
@@ -48,6 +94,7 @@ OscSettingsComponent::OscSettingsComponent (OscSendSettings& settingsToUse,
 
     settings.addChangeListener (this);
     syncControls();
+    updateLearnUi();
 }
 
 OscSettingsComponent::~OscSettingsComponent()
@@ -80,6 +127,13 @@ void OscSettingsComponent::syncControls()
     portEditor.setText (juce::String (settings.getPort()), juce::dontSendNotification);
     enableToggle.setToggleState (settings.isEnabled(), juce::dontSendNotification);
     updateStatusLabels();
+}
+
+void OscSettingsComponent::updateLearnUi()
+{
+    learnButton.setButtonText (oscController.isLearning()
+                                   ? "Lernen abbrechen"
+                                   : "IP vom letzten Sender lernen");
 }
 
 void OscSettingsComponent::updateStatusLabels()
@@ -120,6 +174,12 @@ void OscSettingsComponent::resized()
 
     enableToggle.setBounds (area.removeFromTop (30));
     area.removeFromTop (10);
+
+    learnButton.setBounds (area.removeFromTop (30).withWidth (240));
+    area.removeFromTop (4);
+    learnStatusLabel.setBounds (area.removeFromTop (24));
+    area.removeFromTop (10);
+
     syncHintLabel.setBounds (area.removeFromTop (20));
 }
 

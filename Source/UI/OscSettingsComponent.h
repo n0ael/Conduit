@@ -32,6 +32,7 @@ public:
     juce::TextEditor hostEditor;
     juce::TextEditor portEditor;
     juce::ToggleButton enableToggle { "Parameter-Feedback senden" };
+    juce::TextButton learnButton;
 
     /** Übernimmt Host/Port aus den Editoren in die Settings (Return/Focus-
         Lost der Editoren — Tests rufen direkt). */
@@ -44,6 +45,7 @@ private:
     /** Settings → Controls (Start + jeder Settings-Broadcast). */
     void syncControls();
     void updateStatusLabels();
+    void updateLearnUi();
 
     /** Beschriftete Zeile (Label links, Control rechts) im Formular-Layout. */
     void layoutRow (juce::Rectangle<int>& area, juce::Label& label,
@@ -57,6 +59,7 @@ private:
     juce::Label sendHeader;
     juce::Label hostLabel { {}, "Ziel-Host" };
     juce::Label portLabel { {}, "Ziel-Port" };
+    juce::Label learnStatusLabel;
     juce::Label syncHintLabel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OscSettingsComponent)

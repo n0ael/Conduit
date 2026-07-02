@@ -7,6 +7,84 @@
 namespace conduit
 {
 
+//==============================================================================
+/** Learn-Probe (7.3): bindet den freigegebenen Empfangsport mit einem
+    eigenen DatagramSocket und liest die Absender-IP des ersten Pakets.
+    Ergebnis-Übergabe: learnResultIp schreiben → learnDone (release) →
+    triggerAsyncUpdate. Bei Cancel (threadShouldExit) endet der Thread
+    ohne Signal — der Aufrufer restauriert selbst. */
+class OscController::LearnProbe final : public juce::Thread
+{
+public:
+    LearnProbe (OscController& ownerToUse, int portToUse, int timeoutMsToUse)
+        : juce::Thread ("Conduit OSC IP-Learn"),
+          owner (ownerToUse), port (portToUse), timeoutMs (timeoutMsToUse)
+    {
+    }
+
+    ~LearnProbe() override { stopThread (2000); }
+
+    void run() override
+    {
+        juce::DatagramSocket socket;
+        juce::String senderIp;
+
+        // Port-Rebind-Fenster: der Receiver hat den Port gerade erst
+        // freigegeben — kurzer Retry statt sofortigem Fehler
+        bool bound = false;
+
+        for (int attempt = 0; attempt < 20 && ! threadShouldExit(); ++attempt)
+        {
+            if (socket.bindToPort (port))
+            {
+                bound = true;
+                break;
+            }
+
+            wait (50);
+        }
+
+        if (bound)
+        {
+            const auto deadline = juce::Time::getMillisecondCounter()
+                                  + static_cast<juce::uint32> (juce::jmax (0, timeoutMs));
+
+            while (! threadShouldExit()
+                   && juce::Time::getMillisecondCounter() < deadline)
+            {
+                if (socket.waitUntilReady (true, 100) != 1)
+                    continue;
+
+                char buffer[64];
+                int senderPort = 0;
+                juce::String ip;
+
+                if (socket.read (buffer, sizeof (buffer), false, ip, senderPort) > 0
+                    && ip.isNotEmpty())
+                {
+                    senderIp = ip;
+                    break;
+                }
+            }
+        }
+
+        if (threadShouldExit())
+            return;  // Cancel — kein Signal, cancelIpLearn() restauriert
+
+        owner.learnResultIp = senderIp;  // vor dem Release-Store (Ordering)
+        owner.learnDone.store (true, std::memory_order_release);
+        owner.triggerAsyncUpdate();
+    }
+
+private:
+    OscController& owner;
+    const int port;
+    const int timeoutMs;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LearnProbe)
+};
+
+//==============================================================================
 OscController::OscController (juce::ValueTree rootTree,
                               GraphManager& graphManagerToUse,
                               SpscQueue<ParameterUpdate>& audioQueueToUse)
@@ -21,6 +99,7 @@ OscController::OscController (juce::ValueTree rootTree,
 
 OscController::~OscController()
 {
+    cancelIpLearn();  // joint den Probe-Thread, bevor Member sterben
     disconnect();
     receiver.removeListener (this);
     rootState.removeListener (this);
@@ -53,6 +132,74 @@ void OscController::flushPendingUpdates()
     handleUpdateNowIfNeeded();
 }
 
+//==============================================================================
+bool OscController::beginIpLearn (LearnCallback callback, int timeoutMs)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (learnProbe != nullptr || connectedPort <= 0 || callback == nullptr)
+        return false;
+
+    learnPort = connectedPort;
+    learnCallback = std::move (callback);
+    learnDone.store (false, std::memory_order_release);
+
+    disconnect();  // Port freigeben — learnPort merkt sich das Rebind-Ziel
+
+    learnProbe = std::make_unique<LearnProbe> (*this, learnPort, timeoutMs);
+    learnProbe->startThread();
+    return true;
+}
+
+void OscController::cancelIpLearn()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    if (learnProbe == nullptr)
+        return;
+
+    learnProbe->stopThread (2000);
+    learnProbe.reset();
+
+    // Ein evtl. schon gesetztes Ergebnis verwerfen — nach Cancel darf der
+    // Callback nicht mehr feuern
+    learnDone.store (false, std::memory_order_release);
+    learnCallback = nullptr;
+
+    restoreReceiverAfterLearn();
+}
+
+void OscController::finishIpLearn()
+{
+    if (learnProbe == nullptr)
+        return;  // Cancel hat gewonnen
+
+    learnProbe->stopThread (2000);
+    learnProbe.reset();
+
+    restoreReceiverAfterLearn();
+
+    const auto callback = std::move (learnCallback);
+    learnCallback = nullptr;
+
+    if (callback != nullptr)
+        callback (learnResultIp);
+}
+
+void OscController::restoreReceiverAfterLearn()
+{
+    for (int attempt = 0; attempt < 10; ++attempt)
+    {
+        if (connect (learnPort))
+            return;
+
+        juce::Thread::sleep (20);  // Freigabe des Probe-Sockets kann nachlaufen
+    }
+
+    // connectedPort bleibt -1 — die Status-UI zeigt „nicht verbunden"
+}
+
+//==============================================================================
 juce::StringArray OscController::getRegisteredAddresses() const
 {
     juce::StringArray addresses;
@@ -152,6 +299,10 @@ void OscController::handleAsyncUpdate()
     if (syncRequested.exchange (false, std::memory_order_acq_rel))
         if (onSyncRequested != nullptr)
             onSyncRequested();
+
+    // Learn-Probe fertig (Ergebnis oder Timeout) — Receiver wiederherstellen
+    if (learnDone.exchange (false, std::memory_order_acq_rel))
+        finishIpLearn();
 }
 
 void OscController::applyTreeUpdates()

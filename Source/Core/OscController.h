@@ -114,6 +114,28 @@ public:
     std::function<void()> onSyncRequested;
 
     //==========================================================================
+    // IP-Learn (7.3) — Message Thread
+
+    /** Callback der Learn-Probe: Absender-IP des ersten UDP-Pakets, leer bei
+        Timeout oder Bind-Fehler. Läuft auf dem Message Thread; der Receiver
+        ist beim Aufruf bereits wiederhergestellt. */
+    using LearnCallback = std::function<void (const juce::String& senderIp)>;
+
+    /** Startet die Learn-Probe: juce::OSCReceiver verwirft die Absender-IP
+        (socket->read ohne senderAddress in juce_OSCReceiver.cpp) — deshalb
+        wird der Receiver kurz getrennt und ein eigener DatagramSocket bindet
+        den Empfangsport, dessen read() die IP liefert. Kein OSC-Parsing
+        nötig — das erste Paket gewinnt. false, wenn nicht verbunden oder
+        schon im Learn-Modus. */
+    [[nodiscard]] bool beginIpLearn (LearnCallback callback, int timeoutMs = 15000);
+
+    /** Bricht die Learn-Probe ab und stellt den Receiver wieder her —
+        der Callback feuert danach nicht mehr. No-op ohne aktive Probe. */
+    void cancelIpLearn();
+
+    [[nodiscard]] bool isLearning() const noexcept { return learnProbe != nullptr; }
+
+    //==========================================================================
     /** Netzwerk-Thread. Public, damit Tests Messages ohne Socket einspeisen
         können (juce::OSCMessage ist frei konstruierbar). */
     void oscMessageReceived (const juce::OSCMessage& message) override;
@@ -161,6 +183,15 @@ private:
                                                    const juce::ValueTree& child) noexcept;
 
     //==========================================================================
+    /** Beendet die Learn-Probe regulär (aus handleAsyncUpdate): Thread
+        joinen, Receiver wiederherstellen, Callback mit dem Ergebnis rufen. */
+    void finishIpLearn();
+
+    /** Rebind nach der Probe — kurzer Retry, das Port-Freigabe-Fenster des
+        Probe-Sockets kann nachlaufen (v.a. Windows). */
+    void restoreReceiverAfterLearn();
+
+    //==========================================================================
     juce::ValueTree rootState;             // ref-counted Handle
     GraphManager& graphManager;
     SpscQueue<ParameterUpdate>& audioQueue;
@@ -180,6 +211,17 @@ private:
 
     bool registryDirty = true;  // nur Message Thread
     int connectedPort = -1;     // nur Message Thread
+
+    //==========================================================================
+    // IP-Learn: Probe-Thread schreibt learnResultIp VOR dem Release-Store auf
+    // learnDone; der Message Thread liest nach dem Acquire-Exchange — geordnet.
+    class LearnProbe;
+
+    std::unique_ptr<LearnProbe> learnProbe;  // nur Message Thread
+    LearnCallback learnCallback;             // nur Message Thread
+    int learnPort = -1;                      // nur Message Thread
+    std::atomic<bool> learnDone { false };
+    juce::String learnResultIp;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OscController)
 };

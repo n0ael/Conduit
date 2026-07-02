@@ -278,3 +278,113 @@ TEST_CASE ("OscController: Empfang nebenläufig zu Audio-Drain und Tree-Flush",
     REQUIRE (treeValue >= 0.0f);
     REQUIRE (treeValue <= 1.0f);
 }
+
+//==============================================================================
+// IP-Learn (7.3) — die Loopback-Tests binden echte UDP-Ports und sind
+// deshalb hidden ([.], Projektkonvention: Tests/CI bleiben netzwerkfrei);
+// lokal explizit via Tag ausführbar: ConduitTests "[network]"
+
+TEST_CASE ("OscController: beginIpLearn ohne Verbindung schlägt fehl", "[osc]")
+{
+    OscTestRig rig;
+
+    REQUIRE_FALSE (rig.osc.beginIpLearn ([] (const juce::String&) {}));
+    REQUIRE_FALSE (rig.osc.isLearning());
+}
+
+namespace
+{
+
+/** Pumpt Learn-Ergebnisse ohne Message-Loop: der AsyncUpdater wird über
+    flushPendingUpdates() synchron abgearbeitet. */
+bool pumpUntil (conduit::OscController& osc, const bool& done, int maxMs)
+{
+    for (int elapsed = 0; elapsed < maxMs && ! done; elapsed += 10)
+    {
+        juce::Thread::sleep (10);
+        osc.flushPendingUpdates();
+    }
+
+    return done;
+}
+
+} // namespace
+
+TEST_CASE ("OscController: Learn-Probe lernt die Loopback-Absender-IP", "[osc][network][.]")
+{
+    OscTestRig rig;
+    constexpr int port = 58231;
+    REQUIRE (rig.osc.connect (port));
+
+    bool fired = false;
+    juce::String learned;
+
+    REQUIRE (rig.osc.beginIpLearn ([&] (const juce::String& ip)
+    {
+        learned = ip;
+        fired = true;
+    }, 5000));
+    REQUIRE (rig.osc.isLearning());
+
+    // Probe Zeit zum Binden geben, dann wiederholt ein Paket schicken
+    juce::DatagramSocket sender;
+
+    for (int attempt = 0; attempt < 100 && ! fired; ++attempt)
+    {
+        sender.write ("127.0.0.1", port, "ping", 4);
+        juce::Thread::sleep (20);
+        rig.osc.flushPendingUpdates();
+    }
+
+    REQUIRE (fired);
+    REQUIRE (learned == "127.0.0.1");
+    REQUIRE_FALSE (rig.osc.isLearning());
+    REQUIRE (rig.osc.getConnectedPort() == port);  // Receiver restauriert
+
+    rig.osc.disconnect();
+}
+
+TEST_CASE ("OscController: Learn-Timeout restauriert den Receiver", "[osc][network][.]")
+{
+    OscTestRig rig;
+    constexpr int port = 58233;
+    REQUIRE (rig.osc.connect (port));
+
+    bool fired = false;
+    juce::String learned { "unset" };
+
+    REQUIRE (rig.osc.beginIpLearn ([&] (const juce::String& ip)
+    {
+        learned = ip;
+        fired = true;
+    }, 150));
+
+    REQUIRE (pumpUntil (rig.osc, fired, 5000));
+    REQUIRE (learned.isEmpty());  // Timeout → leere IP
+    REQUIRE_FALSE (rig.osc.isLearning());
+    REQUIRE (rig.osc.getConnectedPort() == port);
+
+    rig.osc.disconnect();
+}
+
+TEST_CASE ("OscController: cancelIpLearn restauriert ohne Callback", "[osc][network][.]")
+{
+    OscTestRig rig;
+    constexpr int port = 58235;
+    REQUIRE (rig.osc.connect (port));
+
+    bool fired = false;
+    REQUIRE (rig.osc.beginIpLearn ([&] (const juce::String&) { fired = true; }, 5000));
+
+    rig.osc.cancelIpLearn();
+
+    REQUIRE_FALSE (rig.osc.isLearning());
+    REQUIRE (rig.osc.getConnectedPort() == port);
+
+    // Kein nachlaufender Callback — auch nicht über den AsyncUpdater
+    juce::Thread::sleep (50);
+    rig.osc.flushPendingUpdates();
+    REQUIRE_FALSE (fired);
+
+    rig.osc.disconnect();
+}
