@@ -147,6 +147,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/PushLookAndFeel.cpp
     Source/UI/PushTiles.cpp
     Source/UI/ScopeDisplay.cpp
+    Source/UI/TapMenuPanel.cpp
     Source/UI/TransportBar.cpp
     Source/UI/SequencerControlPanel.cpp
     Source/UI/SettingsWindow.cpp
@@ -222,6 +223,7 @@ target_sources(Conduit PRIVATE
     Source/UI/PushLookAndFeel.h
     Source/UI/PushTiles.h
     Source/UI/ScopeDisplay.h
+    Source/UI/TapMenuPanel.h
     Source/UI/TransportBar.h
     Source/UI/SequencerControlPanel.h
     Source/UI/StepGridDisplay.h
@@ -401,6 +403,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/PushLookAndFeel.cpp
         Source/UI/PushTiles.cpp
         Source/UI/ScopeDisplay.cpp
+        Source/UI/TapMenuPanel.cpp
         Source/UI/TransportBar.cpp
         Source/UI/SequencerControlPanel.cpp
         Source/UI/SettingsWindow.cpp

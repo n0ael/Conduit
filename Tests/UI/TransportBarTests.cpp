@@ -166,20 +166,68 @@ TEST_CASE ("TransportBar: formatPosition — Ableton-Zählweise Takt. Beat. Sech
     REQUIRE (TransportBar::formatPosition (-3.0)  == "1. 1. 1");  // vor Session-Start
 }
 
-TEST_CASE ("TransportBar: Tap-and-Commit — Preview cyan, Commit-Tap setzt die Session",
+TEST_CASE ("TransportBar: Tap misst nur (Set-Kachel), Set-Klick committet zur Session",
            "[transport][ui]")
 {
     TransportBarRig rig;
-    rig.settings.setTapCount (2);  // kompakter Test: 2 Taps erfassen, Tap 3 committet
 
-    // Erfassung: 100 BPM (0,6 s Abstand) — Session bleibt bei 120
+    // Vor dem ersten Tap: Set idle (kein Preview committbar)
+    REQUIRE_FALSE (rig.bar.getSetTile().isEnabled());
+
+    // Messung: 100 BPM (0,6 s Abstand) — Preview lebt in der Set-Kachel,
+    // die Session UND die Tempo-Kachel bleiben unberührt (M4L-Modell)
     rig.bar.tapWithTime (100.0);
     rig.bar.tapWithTime (100.6);
-    REQUIRE (rig.bar.getTempoTile().getText() == "100.00");
+    rig.bar.tapWithTime (101.2);
+    REQUIRE (rig.bar.getSetTile().isEnabled());
+    REQUIRE (rig.bar.getSetTile().isActive());
+    REQUIRE (rig.bar.getSetTile().getText() == "100.00");
     REQUIRE (waitForTempo (rig.clock, 120.0));
+    rig.bar.refresh();
+    REQUIRE (rig.bar.getTempoTile().getText() == "120.00");
 
-    rig.bar.tapWithTime (101.2);   // Tap 3 = Commit
+    // Set-Klick committet und konsumiert die Messung
+    rig.bar.commitTapPreview();
     REQUIRE (waitForTempo (rig.clock, 100.0));
+    REQUIRE_FALSE (rig.bar.getSetTile().isEnabled());
+    REQUIRE (rig.bar.getSetTile().getText() == "Set");
+}
+
+TEST_CASE ("TransportBar: Tap-Auto-Commit committet ab Tap n (MIDI/OSC-Mapping)",
+           "[transport][ui]")
+{
+    TransportBarRig rig;
+    rig.settings.setTapAutoCommitEnabled (true);
+    rig.settings.setTapCount (2);
+
+    rig.bar.tapWithTime (100.0);
+    REQUIRE (waitForTempo (rig.clock, 120.0));   // Tap 1: nichts committet
+
+    rig.bar.tapWithTime (100.6);                 // Tap 2 = Auto-Commit (100 BPM)
+    REQUIRE (waitForTempo (rig.clock, 100.0));
+
+    rig.bar.tapWithTime (101.1);                 // Tap 3 committet verfeinert weiter
+    REQUIRE (waitForTempo (rig.clock, 60.0 / 0.55));  // Median {0.6, 0.5} = 0.55 s
+}
+
+TEST_CASE ("TransportBar: resetTapMeasurement verwirft die Messung (Tap halten)",
+           "[transport][ui]")
+{
+    TransportBarRig rig;
+
+    rig.bar.tapWithTime (100.0);
+    rig.bar.tapWithTime (100.6);
+    REQUIRE (rig.bar.getSetTile().isEnabled());
+
+    rig.bar.resetTapMeasurement();
+    REQUIRE_FALSE (rig.bar.getSetTile().isEnabled());
+    REQUIRE (rig.bar.getSetTile().getText() == "Set");
+
+    // Commit ohne Preview ist ein No-Op; ein Einzel-Tap liefert noch keinen
+    rig.bar.commitTapPreview();
+    rig.bar.tapWithTime (200.0);
+    REQUIRE_FALSE (rig.bar.getSetTile().isEnabled());
+    REQUIRE (waitForTempo (rig.clock, 120.0));
 }
 
 TEST_CASE ("TransportBar: Swing-Kachel schreibt die globale Root-Property", "[transport][ui]")

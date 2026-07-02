@@ -46,10 +46,20 @@ public:
     [[nodiscard]] bool isFixedLengthEnabled() const noexcept { return fixedLength; }
     void setFixedLengthEnabled (bool enabled);
 
-    /** Taps, die das Tempo erfassen — der (n+1)-te Tap committet zur Session
-        (Tap-and-Commit, User-Entwurf 2026-07-02). Clamp 2..8, Default 4. */
+    /** Auto-Commit-Tap-Anzahl: bei aktivem Auto-Commit committet ab Tap n
+        jeder weitere Tap (fürs MIDI/OSC-Mapping des Tap-Buttons, wo kein
+        Set-Klick möglich ist). Clamp 2..8, Default 4. */
     [[nodiscard]] int getTapCount() const noexcept { return tapCount; }
     void setTapCount (int taps);
+
+    /** Auto-Commit des getappten Tempos (default aus — normal committet
+        erst der Set-Klick, M4L-"TAP and CHANGE"-Modell). */
+    [[nodiscard]] bool isTapAutoCommitEnabled() const noexcept { return tapAutoCommit; }
+    void setTapAutoCommitEnabled (bool enabled);
+
+    /** Haltedauer des Tap-Buttons, die die Messung resettet (0.3..3.0 s). */
+    [[nodiscard]] double getTapResetHoldSeconds() const noexcept { return tapResetHoldSeconds; }
+    void setTapResetHoldSeconds (double seconds);
 
     /** Metronom (Link-synchroner Click): an/aus + Stereo-Anker der
         Ziel-Kanäle (Paar n = Kanäle 2n/2n+1, z. B. 1 = Headphones). */
@@ -70,6 +80,8 @@ private:
     bool   automate      = false;
     bool   fixedLength   = false;
     int    tapCount      = 4;
+    bool   tapAutoCommit = false;
+    double tapResetHoldSeconds = 1.0;
     bool   metronome        = false;
     int    metronomeAnchor  = 0;
 

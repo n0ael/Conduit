@@ -3,6 +3,7 @@
 #include "Core/LinkClock.h"
 #include "LinkMenuPanel.h"
 #include "Modules/ConduitModule.h"
+#include "TapMenuPanel.h"
 #include "Util/ScaleQuantizer.h"
 
 namespace conduit
@@ -13,6 +14,7 @@ namespace
 constexpr double minTempo = 20.0;
 constexpr double maxTempo = 300.0;
 constexpr double tempoPerPixel = 0.25;  // Vertikal-Drag: 4 px pro BPM
+constexpr int chevronZoneWidth = 18;    // rechte Zone der Tap-Kachel = Menü
 
 juce::String formatTempo (double bpm)
 {
@@ -64,11 +66,36 @@ TransportBar::TransportBar (juce::ValueTree rootTree, LinkClock& linkClockToUse,
         }
     };
 
-    // Tap-and-Commit (User-Entwurf): n Taps erfassen, der (n+1)-te committet
-    // zur Link-Session; n steht im Link-Menü. Preview cyan in der Tempo-Kachel.
-    tapTile.setTooltip (juce::String::fromUTF8 ("Tap-Tempo: n Taps erfassen, der nächste committet (n im Link-Menü)"));
+    // Tap-Monitor (M4L-"TAP and CHANGE"-Modell): Taps messen NUR, die
+    // Session bleibt unberührt — Set committet. Tap zählt beim DRÜCKEN
+    // (Timing wie Hardware); Chevron rechts öffnet das Tap-Menü,
+    // Gedrückthalten resettet die Messung (Dauer im Menü).
+    tapTile.setTooltip (juce::String::fromUTF8 (
+        "Tap-Tempo: misst ohne die Session zu ändern — Set committet.\n"
+        "Halten: Reset. ▾: Auto-Commit + Reset-Dauer"));
+    tapTile.setTriggeredOnMouseDown (true);
     tapTile.onClick = [this]
-    { tapWithTime (juce::Time::getMillisecondCounterHiRes() * 0.001); };
+    {
+        if (tapTile.getMouseXYRelative().x >= tapTile.getWidth() - chevronZoneWidth)
+            openTapMenu();
+        else
+            tapWithTime (juce::Time::getMillisecondCounterHiRes() * 0.001);
+    };
+    tapTile.onStateChange = [this]
+    {
+        const auto down = tapTile.isDown();
+
+        if (down == tapWasDown)
+            return;  // onStateChange feuert auch für Hover — nur Flanken zählen
+
+        tapWasDown = down;
+        tapHeldSince = down ? juce::Time::getMillisecondCounterHiRes() * 0.001 : -1.0;
+        tapHoldConsumed = false;
+    };
+
+    setTile.setTooltip (juce::String::fromUTF8 ("Getapptes Tempo zur Link-Session committen"));
+    setTile.setEnabled (false);
+    setTile.onClick = [this] { commitTapPreview(); };
 
     // Nudge (DJ-Angleichen): solange gehalten läuft die Session ±2 % —
     // Loslassen stellt das Tempo wieder her, der Phasen-Versatz bleibt
@@ -178,7 +205,7 @@ TransportBar::TransportBar (juce::ValueTree rootTree, LinkClock& linkClockToUse,
 
     for (auto* component : std::initializer_list<juce::Component*> {
              &playTile, &tapeTile, &captureTile, &fixedLengthTile, &automateTile,
-             &tapTile, &nudgeDownTile, &nudgeUpTile,
+             &tapTile, &setTile, &nudgeDownTile, &nudgeUpTile,
              &metronomeTile, &tempoTile, &positionTile, &swingTile, &linkTile,
              &plusTile, &undoTile, &saveTile, &gearTile, &rootCombo, &scaleCombo,
              &warningLabel })
@@ -203,6 +230,13 @@ void TransportBar::openBrowser()
                                             plusTile.getScreenBounds(), nullptr);
 }
 
+void TransportBar::openTapMenu()
+{
+    auto panel = std::make_unique<TapMenuPanel> (transportSettings);
+    juce::CallOutBox::launchAsynchronously (std::move (panel),
+                                            tapTile.getScreenBounds(), nullptr);
+}
+
 void TransportBar::openLinkMenu()
 {
     auto panel = std::make_unique<LinkMenuPanel> (
@@ -218,18 +252,16 @@ void TransportBar::refresh()
 {
     const auto now = juce::Time::getMillisecondCounterHiRes() * 0.001;
 
-    // Tap-Preview verlischt nach dem Timeout — danach folgt die Kachel
-    // wieder der Session
-    if (tapPreviewShowing && ! tapTempo.isActive (now))
+    // Tap gedrückt halten = Messung verwerfen (Dauer im Tap-Menü)
+    if (tapTile.isDown() && tapHeldSince >= 0.0 && ! tapHoldConsumed
+        && now - tapHeldSince > transportSettings.getTapResetHoldSeconds())
     {
-        tapPreviewShowing = false;
-        tempoTile.setAccentColour (push::colours::text);
-        tapTempo.reset();
+        resetTapMeasurement();
+        tapHoldConsumed = true;
     }
 
-    // Kein Kampf mit dem User: während Tempo-Drag oder Tap-Preview gewinnt
-    // die Kachel
-    if (! tempoTile.isMouseButtonDown (true) && ! tapPreviewShowing)
+    // Kein Kampf mit dem User: während des Tempo-Drags gewinnt die Kachel
+    if (! tempoTile.isMouseButtonDown (true))
         tempoTile.setText (formatTempo (linkClock.getTempo()));
 
     positionTile.setText (formatPosition (linkClock.getBeatPosition()));
@@ -279,7 +311,8 @@ juce::String TransportBar::formatPosition (double beatPosition)
 
 void TransportBar::tapWithTime (double timeSeconds)
 {
-    tapTempo.setRequiredTaps (transportSettings.getTapCount());
+    tapTempo.setAutoCommit (transportSettings.isTapAutoCommitEnabled(),
+                            transportSettings.getTapCount());
     const auto result = tapTempo.tap (timeSeconds);
 
     if (! result.hasPreview)
@@ -287,21 +320,33 @@ void TransportBar::tapWithTime (double timeSeconds)
 
     const auto previewBpm = juce::jlimit (minTempo, maxTempo, result.previewBpm);
 
+    // Auto-Commit (MIDI/OSC-Mapping): ab Tap n committet jeder weitere Tap
+    // das verfeinerte Tempo — die Messung läuft weiter
     if (result.committed)
-    {
-        // Commit-Tap: Tempo in die Link-Session, Kachel zurück in Normalfarbe
         linkClock.setTempo (previewBpm);
-        tempoTile.setAccentColour (push::colours::text);
-        tempoTile.setText (formatTempo (linkClock.getTempo()));
-        tapPreviewShowing = false;
-    }
-    else
-    {
-        // Erfassungs-Phase: Preview cyan, Session bleibt unberührt
-        tempoTile.setAccentColour (push::colours::ledCyan);
-        tempoTile.setText (formatTempo (previewBpm));
-        tapPreviewShowing = true;
-    }
+
+    // Preview lebt in der Set-Kachel (Monitor) — die Session-Anzeige der
+    // Tempo-Kachel bleibt unberührt (M4L-Modell)
+    setTile.setEnabled (true);
+    setTile.setActive (true);
+    setTile.setText (formatTempo (previewBpm));
+}
+
+void TransportBar::commitTapPreview()
+{
+    if (! tapTempo.hasPreview())
+        return;
+
+    linkClock.setTempo (juce::jlimit (minTempo, maxTempo, tapTempo.getPreviewBpm()));
+    resetTapMeasurement();
+}
+
+void TransportBar::resetTapMeasurement()
+{
+    tapTempo.reset();
+    setTile.setText ("Set");
+    setTile.setActive (false);
+    setTile.setEnabled (false);
 }
 
 void TransportBar::handleNudge (push::IconTile& tile, bool& wasDown, double factor)
@@ -399,7 +444,8 @@ void TransportBar::resized()
     placeLeft (fixedLengthTile, 92);
     placeLeft (automateTile,    76, 14);
 
-    placeLeft (tapTile,       52);
+    placeLeft (tapTile,       64);
+    placeLeft (setTile,       56);
     placeLeft (nudgeDownTile, 30);
     placeLeft (nudgeUpTile,   30);
     placeLeft (metronomeTile, tile, 14);

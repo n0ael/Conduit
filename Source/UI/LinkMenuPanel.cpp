@@ -34,15 +34,6 @@ LinkMenuPanel::LinkMenuPanel (TransportSettings& settingsToUse, const LinkClock&
     offsetSlider.onValueChange = [this]
     { settings.setClockOffsetMs (offsetSlider.getValue()); };
 
-    tapCaption.setText ("Taps bis Tempo-Commit", juce::dontSendNotification);
-    tapCaption.setColour (juce::Label::textColourId, push::colours::textDim);
-
-    tapCountSlider.setRange (2.0, 8.0, 1.0);
-    tapCountSlider.setValue (settings.getTapCount(), juce::dontSendNotification);
-    tapCountSlider.setTooltip (juce::String::fromUTF8 ("n Taps erfassen das Tempo, der (n+1). Tap committet zur Session"));
-    tapCountSlider.onValueChange = [this]
-    { settings.setTapCount (juce::roundToInt (tapCountSlider.getValue())); };
-
     metronomeCaption.setText ("Metronom-Ausgang", juce::dontSendNotification);
     metronomeCaption.setColour (juce::Label::textColourId, push::colours::textDim);
 
@@ -62,8 +53,6 @@ LinkMenuPanel::LinkMenuPanel (TransportSettings& settingsToUse, const LinkClock&
     addAndMakeVisible (syncToggle);
     addAndMakeVisible (offsetCaption);
     addAndMakeVisible (offsetSlider);
-    addAndMakeVisible (tapCaption);
-    addAndMakeVisible (tapCountSlider);
     addChildComponent (metronomeCaption);
     addChildComponent (metronomeTargetBox);
     metronomeCaption.setVisible (showMetronome);
@@ -82,9 +71,6 @@ void LinkMenuPanel::resized()
     bounds.removeFromTop (8);
     offsetCaption.setBounds (bounds.removeFromTop (18));
     offsetSlider.setBounds (bounds.removeFromTop (28));
-    bounds.removeFromTop (8);
-    tapCaption.setBounds (bounds.removeFromTop (18));
-    tapCountSlider.setBounds (bounds.removeFromTop (28));
     bounds.removeFromTop (8);
     metronomeCaption.setBounds (bounds.removeFromTop (18));
     metronomeTargetBox.setBounds (bounds.removeFromTop (26));

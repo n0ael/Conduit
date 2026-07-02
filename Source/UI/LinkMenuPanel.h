@@ -32,12 +32,11 @@ public:
     void paint (juce::Graphics& g) override;
 
     static constexpr int panelWidth  = 260;
-    static constexpr int panelHeight = 232;
+    static constexpr int panelHeight = 178;
 
     // Test-Zugriff
     [[nodiscard]] juce::ToggleButton& getSyncToggle() noexcept { return syncToggle; }
     [[nodiscard]] juce::Slider& getOffsetSlider() noexcept { return offsetSlider; }
-    [[nodiscard]] juce::Slider& getTapCountSlider() noexcept { return tapCountSlider; }
     [[nodiscard]] juce::ComboBox& getMetronomeTargetBox() noexcept { return metronomeTargetBox; }
 
 private:
@@ -47,8 +46,6 @@ private:
     juce::ToggleButton syncToggle { "Start/Stop-Sync" };
     juce::Label offsetCaption;
     juce::Slider offsetSlider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
-    juce::Label tapCaption;
-    juce::Slider tapCountSlider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::Label metronomeCaption;
     juce::ComboBox metronomeTargetBox;
 

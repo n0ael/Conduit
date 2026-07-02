@@ -16,7 +16,16 @@
 
 ## Aktueller Meilenstein (Juli 2026 — in Arbeit)
 
-**Push-3-Transport-Header (CLAUDE.md 10.0) — 6 Schritte, abgeschlossen:**
+**Tap-Tempo-Umbau: Monitor + Set-Commit (inspiriert vom M4L-Device „TAP and CHANGE Tempo BPM"):**
+
+- **Modell-Wechsel:** Tappen misst das Tempo NUR (Session bleibt unberührt) — die neue **Set-Kachel** neben Tap zeigt das getappte Tempo als Monitor (cyan) und committet beim Klick zur Link-Session. Ersetzt das alte Auto-Commit beim (n+1)-ten Tap.
+- **Endloses Tappen:** kein Timeout-Reset mehr — Pausen verwerfen nur das unplausible Riesen-Intervall (> 3 s), die Messung läuft weiter (Median über rollierendes 8er-Fenster, folgt Tempowechseln). Reset NUR durch **Gedrückthalten** der Tap-Kachel (Dauer einstellbar 0.3–3 s).
+- **Tap ▾ (Chevron-Menü, `TapMenuPanel`):** optionaler **Auto-Commit ab Tap n** (2–8; fürs MIDI/OSC-Mapping des Tap-Buttons, wo kein Set-Klick möglich ist — ab Tap n committet jeder weitere Tap verfeinert weiter) + Reset-Haltedauer. Der Taps-Slider ist aus dem Link-Menü dorthin umgezogen.
+- **TransportSettings:** neu `tapAutoCommit` (default aus) + `tapResetHold` (default 1.0 s); `tapCount` umgewidmet zur Auto-Commit-Tap-Anzahl.
+- **Tap zählt beim DRÜCKEN** (`setTriggeredOnMouseDown`, Timing wie Hardware); Tempo-Kachel zeigt immer die Session (kein Preview-Kampf mehr).
+- **Verifikation:** 230 Testfälle / 10851 Assertions grün (Debug + ASan lokal). Neue/umgebaute Tests: TapTempo (endlos ohne Commit, Pause-Toleranz, rollierendes Fenster folgt Tempowechsel, Auto-Commit ab Tap n, reset), TransportBar (Set-Kachel-Monitor + commitTapPreview, Auto-Commit-Pfad, resetTapMeasurement), TransportSettings-Roundtrip/Clamp der neuen Keys.
+
+**Davor: Push-3-Transport-Header (CLAUDE.md 10.0) — 6 Schritte, abgeschlossen:**
 
 - **Schritt 1 — Design-Fundament:** Jost (Google Fonts, OFL) als BinaryData; `PushLookAndFeel` (Default-LnF der App: dunkle Kacheln, LED-Akzente, Jost app-weit); `PushIcons` — ALLE Symbole als `juce::Path` aus normiertem 0..1-Quadrat (vektorbasiert, DPI-unabhängig)
 - **Schritt 2 — TransportBar + Browser:** ersetzt die Modul-Button-Toolbar komplett; „+" öffnet den ModuleBrowser (Module + Preset laden/speichern als CallOutBox); Undo-Kachel (Shift-Klick = Redo), Capture ⛶ (Klick = Export alle, Shift-Klick = Kanal-Panel), Skala-Combos umgezogen; Bausteine IconTile/TextTile/ValueTile (Drag + Inline-Edit, Editor-Destruktion deferred — kein Use-after-free im eigenen Callback)

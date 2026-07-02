@@ -46,17 +46,25 @@ TEST_CASE ("TransportSettings: Defaults, Clamping und Persistenz-Roundtrip", "[t
         REQUIRE (settings.getClockOffsetMs() == Catch::Approx (0.0));
         REQUIRE_FALSE (settings.isAutomateEnabled());
         REQUIRE_FALSE (settings.isFixedLengthEnabled());
+        REQUIRE_FALSE (settings.isTapAutoCommitEnabled());
+        REQUIRE (settings.getTapResetHoldSeconds() == Catch::Approx (1.0));
 
         settings.setStartStopSyncEnabled (false);
         settings.setClockOffsetMs (12.5);
         settings.setAutomateEnabled (true);
         settings.setFixedLengthEnabled (true);
+        settings.setTapAutoCommitEnabled (true);
 
         // Clamping auf ±maxClockOffsetMs
         settings.setClockOffsetMs (5000.0);
         REQUIRE (settings.getClockOffsetMs()
                  == Catch::Approx (conduit::TransportSettings::maxClockOffsetMs));
         settings.setClockOffsetMs (-31.0);
+
+        // Reset-Haltedauer: Clamp 0.3..3.0
+        settings.setTapResetHoldSeconds (99.0);
+        REQUIRE (settings.getTapResetHoldSeconds() == Catch::Approx (3.0));
+        settings.setTapResetHoldSeconds (0.5);
     }
 
     // Zweite Instanz liest dieselbe Datei
@@ -65,6 +73,8 @@ TEST_CASE ("TransportSettings: Defaults, Clamping und Persistenz-Roundtrip", "[t
     REQUIRE (reloaded.getClockOffsetMs() == Catch::Approx (-31.0));
     REQUIRE (reloaded.isAutomateEnabled());
     REQUIRE (reloaded.isFixedLengthEnabled());
+    REQUIRE (reloaded.isTapAutoCommitEnabled());
+    REQUIRE (reloaded.getTapResetHoldSeconds() == Catch::Approx (0.5));
 }
 
 TEST_CASE ("TransportSettings: ChangeBroadcast bei jeder Änderung", "[transport]")
@@ -89,38 +99,71 @@ TEST_CASE ("TransportSettings: ChangeBroadcast bei jeder Änderung", "[transport
 }
 
 //==============================================================================
-TEST_CASE ("TapTempo: n Taps erfassen, der (n+1)-te committet (Tap-and-Commit)", "[transport]")
+TEST_CASE ("TapTempo: endloses Tappen — Preview ab Tap 2, ohne Auto-Commit nie committed", "[transport]")
 {
     conduit::TapTempo tap;
-    tap.setRequiredTaps (4);
 
-    // 4 Taps im 0,5-s-Raster (120 BPM): Preview ab Tap 2, noch kein Commit
     auto result = tap.tap (10.0);
     REQUIRE_FALSE (result.hasPreview);
 
-    result = tap.tap (10.5);
-    REQUIRE (result.hasPreview);
-    REQUIRE_FALSE (result.committed);
+    // 120 BPM (0,5-s-Raster): Preview ab dem ersten Intervall, Session-Commit
+    // ist NICHT Sache der Messung (M4L-Modell: Set-Klick committet)
+    for (int i = 1; i <= 20; ++i)
+    {
+        result = tap.tap (10.0 + i * 0.5);
+        REQUIRE (result.hasPreview);
+        REQUIRE_FALSE (result.committed);
+    }
+
     REQUIRE (result.previewBpm == Catch::Approx (120.0));
+    REQUIRE (tap.hasPreview());
+    REQUIRE (tap.getPreviewBpm() == Catch::Approx (120.0));
+}
 
-    tap.tap (11.0);
-    result = tap.tap (11.5);
-    REQUIRE_FALSE (result.committed);  // Tap 4 = Erfassung komplett
+TEST_CASE ("TapTempo: Pause verwirft nur das Riesen-Intervall, die Messung bleibt", "[transport]")
+{
+    conduit::TapTempo tap;
 
-    // Tap 5 committet
-    result = tap.tap (12.0);
-    REQUIRE (result.committed);
-    REQUIRE (result.previewBpm == Catch::Approx (120.0));
+    // Messung bei 120 BPM …
+    tap.tap (0.0);
+    tap.tap (0.5);
+    tap.tap (1.0);
+    REQUIRE (tap.getPreviewBpm() == Catch::Approx (120.0));
 
-    // Tap 6 committet verfeinert weiter
-    result = tap.tap (12.5);
-    REQUIRE (result.committed);
+    // … lange Pause (> maxIntervalSeconds): kein Reset, Intervall wird verworfen
+    const auto afterPause = tap.tap (30.0);
+    REQUIRE (afterPause.hasPreview);
+    REQUIRE (afterPause.previewBpm == Catch::Approx (120.0));
+
+    // Weitertappen verfeinert die bestehende Messung
+    const auto next = tap.tap (30.5);
+    REQUIRE (next.previewBpm == Catch::Approx (120.0));
+}
+
+TEST_CASE ("TapTempo: rollierendes Fenster folgt einem Tempowechsel", "[transport]")
+{
+    conduit::TapTempo tap;
+
+    // 8 Intervalle bei 120 BPM füllen das Fenster
+    for (int i = 0; i <= 8; ++i)
+        tap.tap (i * 0.5);
+
+    REQUIRE (tap.getPreviewBpm() == Catch::Approx (120.0));
+
+    // 8 schnellere Intervalle (0,4 s = 150 BPM) verdrängen die alten komplett
+    auto time = 4.0;
+    for (int i = 0; i < 8; ++i)
+    {
+        time += 0.4;
+        tap.tap (time);
+    }
+
+    REQUIRE (tap.getPreviewBpm() == Catch::Approx (150.0));
 }
 
 TEST_CASE ("TapTempo: Median ist robust gegen einen verrissenen Tap", "[transport]")
 {
     conduit::TapTempo tap;
-    tap.setRequiredTaps (4);
 
     tap.tap (0.0);
     tap.tap (0.5);
@@ -129,28 +172,43 @@ TEST_CASE ("TapTempo: Median ist robust gegen einen verrissenen Tap", "[transpor
     const auto result = tap.tap (2.15);
 
     // Median der Intervalle {0.5, 0.5, 0.65, 0.5} = 0.5 → 120 BPM
-    REQUIRE (result.committed);
     REQUIRE (result.previewBpm == Catch::Approx (120.0));
 }
 
-TEST_CASE ("TapTempo: Timeout resettet die Messung", "[transport]")
+TEST_CASE ("TapTempo: Auto-Commit committet ab Tap n jeden weiteren Tap", "[transport]")
 {
     conduit::TapTempo tap;
-    tap.setRequiredTaps (2);
+    tap.setAutoCommit (true, 4);
+
+    // Taps 1–3: nur Preview
+    REQUIRE_FALSE (tap.tap (0.0).committed);
+    REQUIRE_FALSE (tap.tap (0.5).committed);
+    REQUIRE_FALSE (tap.tap (1.0).committed);
+
+    // Ab Tap 4 committet jeder Tap das verfeinerte Tempo
+    auto result = tap.tap (1.5);
+    REQUIRE (result.committed);
+    REQUIRE (result.previewBpm == Catch::Approx (120.0));
+
+    result = tap.tap (2.0);
+    REQUIRE (result.committed);
+}
+
+TEST_CASE ("TapTempo: reset leert die Messung", "[transport]")
+{
+    conduit::TapTempo tap;
 
     tap.tap (0.0);
     tap.tap (0.5);
-    REQUIRE (tap.isActive (1.0));
-    REQUIRE_FALSE (tap.isActive (5.0));
+    REQUIRE (tap.hasPreview());
 
-    // Tap nach dem Timeout zählt als erster einer neuen Messung
-    const auto result = tap.tap (10.0);
-    REQUIRE_FALSE (result.hasPreview);
+    tap.reset();
+    REQUIRE_FALSE (tap.hasPreview());
+    REQUIRE (tap.getPreviewBpm() == Catch::Approx (0.0));
 
-    // Neue Messung: 100 BPM (0,6 s)
-    auto second = tap.tap (10.6);
-    REQUIRE (second.hasPreview);
-    REQUIRE (second.previewBpm == Catch::Approx (100.0));
+    // Erster Tap nach dem Reset startet eine frische Messung
+    REQUIRE_FALSE (tap.tap (10.0).hasPreview);
+    REQUIRE (tap.tap (10.6).previewBpm == Catch::Approx (100.0));
 }
 
 //==============================================================================

@@ -551,10 +551,13 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
 - **TransportBar** ersetzt die Modul-Button-Toolbar komplett: Play (Link
   Start/Stop-Sync), Tape (oo — künftige Looper-Page), Capture ⛶
   (Shift-Klick = Kanal-Panel), Fixed Length/Automate (persistierte
-  Looper-Toggles), Tap-and-Commit-Tempo + Nudge ±, Metronom ○●,
-  Tempo/Position/Swing-Kacheln, Link ▾ (Menü: Start/Stop-Sync, Clock-Offset,
-  Taps-bis-Commit, Metronom-Ausgang), Page-Icons, „+"-Browser (Module +
-  Presets), Undo (Shift-Klick = Redo), Save, ⚙, Skala.
+  Looper-Toggles), Tap-Tempo als Monitor (M4L-„TAP and CHANGE"-Modell:
+  endloses Tappen misst NUR, Set-Kachel committet zur Session; Tap halten
+  = Reset; Tap ▾ = Menü mit Auto-Commit ab Tap n fürs MIDI/OSC-Mapping +
+  Reset-Haltedauer) + Nudge ±, Metronom ○●, Tempo/Position/Swing-Kacheln,
+  Link ▾ (Menü: Start/Stop-Sync, Clock-Offset, Metronom-Ausgang),
+  Page-Icons, „+"-Browser (Module + Presets), Undo (Shift-Klick = Redo),
+  Save, ⚙, Skala.
 - **Pages** (`Source/UI/PageHost`): Grid (Ω, AbletonOSC-Remote) · Mixer (∥∥)
   · Clip (▷▭, Fugue-Machine-Sequencer) · Device (|||, Patch-Canvas). Nur
   Device ist implementiert — die anderen sind gestylte Platzhalter, je ein

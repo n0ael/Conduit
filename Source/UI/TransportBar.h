@@ -21,7 +21,7 @@ class LinkClock;
     Modul-Button-Toolbar komplett (User-Entscheidung 2026-07-02).
 
     Layout (links → rechts):
-      [▷ Play] [oo Tape] [⛶ Capture] · [Tap] [‹] [›] [○● Metronom] ·
+      [▷ Play] [oo Tape] [⛶ Capture] · [Tap ▾] [Set] [‹] [›] [○● Metronom] ·
       [Tempo 120.00] [Position] [Swing] [Link ▾] · … ·
       [Ω Grid] [∥∥ Mixer] [▷▭ Clip] [||| Device] · [+] [Undo] [Save] [⚙] ·
       [Root] [Skala]
@@ -104,9 +104,18 @@ public:
         ruft dieselbe Logik mit der echten Uhr. */
     void tapWithTime (double timeSeconds);
 
+    /** Committet die getappte Preview zur Link-Session (Set-Kachel). */
+    void commitTapPreview();
+
+    /** Verwirft die Tap-Messung (UI: Tap gedrückt halten). */
+    void resetTapMeasurement();
+
+    [[nodiscard]] push::TextTile& getSetTile() noexcept { return setTile; }
+
 private:
     void openBrowser();
     void openLinkMenu();
+    void openTapMenu();
     void applyTempoText (const juce::String& entered);
     void applySwingText (const juce::String& entered);
     void setGlobalSwing (double swing);
@@ -123,7 +132,8 @@ private:
     push::IconTile captureTile  { push::Icon::captureFrame, "capture",  push::colours::ledOrange };
     push::TextTile fixedLengthTile { "Fixed Length" };
     push::TextTile automateTile    { "Automate", push::colours::ledRed };
-    push::TextTile tapTile      { "Tap" };
+    push::TextTile tapTile      { "Tap", push::colours::ledCyan, true };
+    push::TextTile setTile      { "Set", push::colours::ledCyan };
     push::IconTile nudgeDownTile { push::Icon::nudgeLeft,   "nudgeDown" };
     push::IconTile nudgeUpTile   { push::Icon::nudgeRight,  "nudgeUp" };
     push::IconTile metronomeTile { push::Icon::metronome,   "metronome", push::colours::ledWhite };
@@ -150,9 +160,11 @@ private:
     double tempoAtDragStart = 120.0;
     double swingAtDragStart = 0.0;
 
-    // Tap-and-Commit + Nudge (Schritt 4)
+    // Tap-Monitor + Set-Commit (M4L-"TAP and CHANGE"-Modell) + Nudge
     TapTempo tapTempo;
-    bool tapPreviewShowing = false;
+    bool tapWasDown = false;        // Down-Flanken-Tracking (onStateChange)
+    double tapHeldSince = -1.0;     // Gedrückthalten > Settings-Dauer = Reset
+    bool tapHoldConsumed = false;   // ein Reset pro Halten
     bool nudgeUpWasDown = false, nudgeDownWasDown = false;
     double tempoBeforeNudge = 0.0;
 

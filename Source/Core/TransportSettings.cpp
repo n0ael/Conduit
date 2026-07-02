@@ -10,8 +10,13 @@ namespace
     constexpr const char* automateKey      = "automate";
     constexpr const char* fixedLengthKey   = "fixedLength";
     constexpr const char* tapCountKey        = "tapCount";
+    constexpr const char* tapAutoCommitKey   = "tapAutoCommit";
+    constexpr const char* tapResetHoldKey    = "tapResetHold";
     constexpr const char* metronomeKey       = "metronome";
     constexpr const char* metronomeAnchorKey = "metronomeAnchor";
+
+    constexpr double minTapResetHold = 0.3;
+    constexpr double maxTapResetHold = 3.0;
 }
 
 //==============================================================================
@@ -49,6 +54,9 @@ void TransportSettings::loadFromFile()
         automate      = file->getBoolValue (automateKey, false);
         fixedLength   = file->getBoolValue (fixedLengthKey, false);
         tapCount      = juce::jlimit (2, 8, file->getIntValue (tapCountKey, 4));
+        tapAutoCommit = file->getBoolValue (tapAutoCommitKey, false);
+        tapResetHoldSeconds = juce::jlimit (minTapResetHold, maxTapResetHold,
+                                            file->getDoubleValue (tapResetHoldKey, 1.0));
         metronome       = file->getBoolValue (metronomeKey, false);
         metronomeAnchor = juce::jlimit (0, 31, file->getIntValue (metronomeAnchorKey, 0));
     }
@@ -113,6 +121,26 @@ void TransportSettings::setTapCount (int taps)
 
     tapCount = clamped;
     writeValue (tapCountKey, clamped);
+}
+
+void TransportSettings::setTapAutoCommitEnabled (bool enabled)
+{
+    if (tapAutoCommit == enabled)
+        return;
+
+    tapAutoCommit = enabled;
+    writeValue (tapAutoCommitKey, enabled);
+}
+
+void TransportSettings::setTapResetHoldSeconds (double seconds)
+{
+    const auto clamped = juce::jlimit (minTapResetHold, maxTapResetHold, seconds);
+
+    if (juce::exactlyEqual (clamped, tapResetHoldSeconds))
+        return;
+
+    tapResetHoldSeconds = clamped;
+    writeValue (tapResetHoldKey, clamped);
 }
 
 void TransportSettings::setMetronomeEnabled (bool enabled)
