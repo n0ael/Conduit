@@ -97,6 +97,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/OscController.cpp
     Source/Core/OscSendService.cpp
     Source/Core/OscSendSettings.cpp
+    Source/Core/RemoteModuleBinder.cpp
     Source/Core/SourceNameResolver.cpp
     Source/Core/Capture/BufferPool.cpp
     Source/Core/Capture/CaptureChannel.cpp
@@ -150,6 +151,7 @@ target_sources(Conduit PRIVATE
     Source/Core/OscController.h
     Source/Core/OscSendService.h
     Source/Core/OscSendSettings.h
+    Source/Core/RemoteModuleBinder.h
     Source/Core/SourceNameResolver.h
     Source/Core/Capture/BufferPool.h
     Source/Core/Capture/CaptureChannel.h
@@ -294,6 +296,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/OscControllerTests.cpp
         Tests/Core/OscSendServiceTests.cpp
         Tests/Core/PatchingTests.cpp
+        Tests/Core/RemoteModuleBinderTests.cpp
         Tests/Core/PresetTests.cpp
         Tests/Core/ScopeModuleTests.cpp
         Tests/Core/SequencerTests.cpp
@@ -324,6 +327,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/OscController.cpp
         Source/Core/OscSendService.cpp
         Source/Core/OscSendSettings.cpp
+        Source/Core/RemoteModuleBinder.cpp
         Source/Core/SourceNameResolver.cpp
         Source/Core/Capture/BufferPool.cpp
         Source/Core/Capture/CaptureChannel.cpp

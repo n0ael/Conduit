@@ -241,7 +241,7 @@ void NodeComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
         else if (property == id::nodeState
                  && tree.getProperty (id::nodeState).toString() == toString (NodeState::deleting))
             beginTeardown();
-        else if (property == id::nodeError)
+        else if (property == id::nodeError || property == id::tintColour)
             repaint();
         else if (property == id::moduleId)  // Rename (auch Undo/OSC-extern)
             titleLabel.setText (tree.getProperty (id::moduleId).toString(),
@@ -603,6 +603,18 @@ void NodeComponent::paint (juce::Graphics& g)
 
     g.setColour (fill);
     g.fillRoundedRectangle (bounds, 8.0f);
+
+    // Kachel-Tint (7.4): Track-Farbe des announce-gebundenen Live-Devices
+    // als Streifen an der Unterkante der Kopfzeile — Live liefert
+    // 0x00RRGGBB, deshalb opak machen
+    if (const auto tintVar = nodeTree.getProperty (id::tintColour); ! tintVar.isVoid())
+    {
+        const auto tint = juce::Colour (0xff000000u | static_cast<juce::uint32> ((int) tintVar));
+        g.setColour (tearingDown ? tint.withAlpha (0.4f) : tint);
+        g.fillRect (bounds.withY ((float) touchTarget - 3.0f)
+                          .withHeight (3.0f)
+                          .reduced (6.0f, 0.0f));
+    }
 
     g.setColour (error.isNotEmpty() ? juce::Colours::orangered
                                     : juce::Colour (0xff4a5160));

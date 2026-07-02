@@ -8,6 +8,7 @@
 #include <juce_data_structures/juce_data_structures.h>
 #include <juce_osc/juce_osc.h>
 
+#include "Core/OscAddress.h"
 #include "Util/SpscQueue.h"
 
 namespace conduit
@@ -113,6 +114,11 @@ public:
         OscSendService. Optional (Tests laufen ohne). */
     std::function<void()> onSyncRequested;
 
+    /** [Message Thread] Ein validiertes /conduit/announce (7.4) — der
+        EngineProcessor verdrahtet den RemoteModuleBinder (find-or-create)
+        plus Node-Werte-Dump. Optional (Tests laufen ohne). */
+    std::function<void (const osc::AnnounceInfo&)> onAnnounce;
+
     //==========================================================================
     // IP-Learn (7.3) — Message Thread
 
@@ -205,6 +211,10 @@ private:
     // Netzwerk-Thread schreibt, Message Thread dräniert
     juce::CriticalSection treeUpdateLock;
     std::vector<TreeUpdate> pendingTreeUpdates;
+
+    // Announces (7.4) — eigener Lock, gleiche Marshalling-Richtung
+    juce::CriticalSection announceLock;
+    std::vector<osc::AnnounceInfo> pendingAnnounces;
 
     std::atomic<bool> stateDirty { false };
     std::atomic<bool> syncRequested { false };  // Netzwerk → Message Thread

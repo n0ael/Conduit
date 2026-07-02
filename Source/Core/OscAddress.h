@@ -39,4 +39,27 @@ inline constexpr const char* announceAddress = "/conduit/announce";
     return "/conduit/remote/" + remoteId + "/" + parameterId;
 }
 
+//==============================================================================
+/** Validierte Nutzlast eines /conduit/announce (7.4) — vom Netzwerk-Thread
+    geparst, auf dem Message Thread konsumiert (RemoteModuleBinder). */
+struct AnnounceInfo
+{
+    juce::String remoteId;    // beidseitig persistent (Live-Set + Patch)
+    juce::String factoryKey;  // muss in der ModuleFactory registriert sein
+    juce::String trackName;   // Wunsch-Name (wird saniert, nur Erst-Anlage)
+    int tintArgb = 0;         // Track-Farbe (0x00RRGGBB aus der Live API)
+};
+
+/** remoteIds werden Teil von OSC-Adressen — deshalb hartes Zeichen-Limit
+    ([A-Za-z0-9_-], max. 64) statt Sanitizing: ein umgeschriebenes remoteId
+    fände sein Gegenstück im Live-Set nie wieder. */
+[[nodiscard]] inline bool isValidRemoteId (const juce::String& remoteId)
+{
+    if (remoteId.isEmpty() || remoteId.length() > 64)
+        return false;
+
+    return remoteId.containsOnly (
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-");
+}
+
 } // namespace conduit::osc

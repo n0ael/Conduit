@@ -85,6 +85,17 @@ EngineProcessor::EngineProcessor()
 
     // /conduit/sync (7.3): Client fordert den kompletten Ist-Zustand an
     oscController.onSyncRequested = [this] { oscSendService.sendFullDump(); };
+
+    // /conduit/announce (7.4): find-or-create + Werte-Dump des Nodes an
+    // reiche Clients (das Minimal-Max-Device hat keinen Receiver — für den
+    // Re-Announce-Fall trotzdem korrekt, neue Nodes deckt der Diff-Tick ab)
+    oscController.onAnnounce = [this] (const osc::AnnounceInfo& info)
+    {
+        const auto node = remoteModuleBinder.handleAnnounce (info);
+
+        if (node.isValid())
+            oscSendService.sendNodeValues (node.getProperty (id::nodeId).toString());
+    };
 }
 
 EngineProcessor::~EngineProcessor()

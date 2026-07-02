@@ -34,6 +34,14 @@ namespace id
     inline const juce::Identifier numInputChannels  { "numInputChannels" };   // für die Port-UI
     inline const juce::Identifier numOutputChannels { "numOutputChannels" };
 
+    // Announce-Bindung (7.4) — dokumentierte AUSNAHME zur Regel „keine
+    // Laufzeit-IDs serialisieren" (6): remoteId ist in BEIDEN Welten
+    // persistent (das Live-Set speichert sie als Device-Parameter, der
+    // Conduit-Patch als Node-Property) — nur so finden sich Device und
+    // Node nach Neustarts beider Seiten wieder.
+    inline const juce::Identifier remoteId      { "remoteId" };
+    inline const juce::Identifier tintColour    { "tintColour" };  // Track-Farbe (0x00RRGGBB)
+
     // Inputs (Multi-Input Link Audio Send, 7.2) — pro Eingang ein Kanal-Slot
     inline const juce::Identifier inputs            { "Inputs" };
     inline const juce::Identifier input             { "Input" };

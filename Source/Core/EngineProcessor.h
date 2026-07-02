@@ -14,6 +14,7 @@
 #include "OscController.h"
 #include "OscSendService.h"
 #include "OscSendSettings.h"
+#include "RemoteModuleBinder.h"
 #include "Interfaces/IClockSource.h"
 #include "Modules/ConduitModule.h"
 #include "Modules/ModuleFactory.h"
@@ -238,6 +239,10 @@ private:
     // referenziert den Service, der Controller muss zuerst sterben.
     OscSendSettings oscSendSettings;
     OscSendService oscSendService { rootState, oscSendSettings };
+
+    // Announce-Bindung (7.4): find-or-create über remoteId — ebenfalls VOR
+    // dem OscController (dessen onAnnounce-Callback referenziert den Binder)
+    RemoteModuleBinder remoteModuleBinder { rootState, graphManager, moduleFactory };
 
     // OSC-Dual-State (CLAUDE.md 6.1): Netzwerk → Audio (lock-free) und
     // Netzwerk → ValueTree (async). Nach dem GraphManager deklariert —

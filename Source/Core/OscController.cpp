@@ -230,6 +230,35 @@ void OscController::oscMessageReceived (const juce::OSCMessage& message)
         return;
     }
 
+    // /conduit/announce (7.4): s:remoteId s:factoryKey s:trackName i:colour —
+    // hier nur validieren und sammeln, find-or-create läuft auf dem
+    // Message Thread (onAnnounce → RemoteModuleBinder)
+    if (message.getAddressPattern().toString() == osc::announceAddress)
+    {
+        if (message.size() >= 4
+            && message[0].isString() && message[1].isString()
+            && message[2].isString() && message[3].isInt32())
+        {
+            osc::AnnounceInfo info;
+            info.remoteId   = message[0].getString();
+            info.factoryKey = message[1].getString();
+            info.trackName  = message[2].getString();
+            info.tintArgb   = message[3].getInt32();
+
+            if (osc::isValidRemoteId (info.remoteId) && info.factoryKey.isNotEmpty())
+            {
+                {
+                    const juce::ScopedLock lock (announceLock);
+                    pendingAnnounces.push_back (std::move (info));
+                }
+
+                triggerAsyncUpdate();
+            }
+        }
+
+        return;  // Garbage still verwerfen — kein Crash, kein Log-Spam
+    }
+
     if (message.size() < 1)
         return;
 
@@ -293,6 +322,21 @@ void OscController::handleAsyncUpdate()
 
     if (registryDirty)
         rebuildEndpoints();
+
+    // Announces VOR dem Sync-Dump: neu angelegte Nodes stehen sofort im
+    // Tree (createState) und landen damit noch im selben Dump
+    {
+        std::vector<osc::AnnounceInfo> announces;
+
+        {
+            const juce::ScopedLock lock (announceLock);
+            announces.swap (pendingAnnounces);
+        }
+
+        if (onAnnounce != nullptr)
+            for (const auto& announce : announces)
+                onAnnounce (announce);
+    }
 
     // Sync NACH applyTreeUpdates — der Dump enthält damit auch Werte,
     // die im selben Durchlauf angekommen sind
@@ -374,6 +418,10 @@ void OscController::rebuildEndpoints()
             && nodeTree.getProperty (id::nodeError).toString().isEmpty())
             unresolvedModuleRemaining = true;  // materialisiert erst nach dem Swap
 
+        // Announce-gebundene Nodes (7.4) hören ZUSÄTZLICH auf ihren
+        // rename-festen Alias /conduit/remote/{remoteId}/{paramId}
+        const auto remoteId = nodeTree.getProperty (id::remoteId).toString();
+
         for (int p = 0; p < parameters.getNumChildren(); ++p)
         {
             const auto parameter = parameters.getChild (p);
@@ -388,6 +436,10 @@ void OscController::rebuildEndpoints()
             endpoint.minValue    = static_cast<float> ((double) parameter.getProperty (id::paramMin, 0.0));
             endpoint.maxValue    = static_cast<float> ((double) parameter.getProperty (id::paramMax, 1.0));
             endpoint.target      = module != nullptr ? module->getParameterTarget (parameterId) : nullptr;
+
+            if (remoteId.isNotEmpty())
+                rebuilt.try_emplace (osc::remoteAliasAddress (remoteId, parameterId),
+                                     endpoint);
 
             // try_emplace: bei moduleId-Kollision gewinnt der erste Node
             rebuilt.try_emplace (osc::parameterAddress (nodeTree, parameterId),
