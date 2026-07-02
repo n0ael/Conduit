@@ -1,5 +1,8 @@
 #include "ModuleFactory.h"
 
+#include "AirwindowsDensityModule.h"
+#include "AirwindowsSlewModule.h"
+#include "AirwindowsSpiralModule.h"
 #include "AttenuatorModule.h"
 #include "CaptureTapModule.h"
 #include "LfoModule.h"
@@ -36,6 +39,12 @@ void registerDefaultModules (ModuleFactory& factory)
 {
     factory.registerModule (AttenuatorModule::staticModuleId,
                             [] { return std::make_unique<AttenuatorModule>(); });
+    factory.registerModule (AirwindowsDensityModule::staticModuleId,
+                            [] { return std::make_unique<AirwindowsDensityModule>(); });
+    factory.registerModule (AirwindowsSlewModule::staticModuleId,
+                            [] { return std::make_unique<AirwindowsSlewModule>(); });
+    factory.registerModule (AirwindowsSpiralModule::staticModuleId,
+                            [] { return std::make_unique<AirwindowsSpiralModule>(); });
     factory.registerModule (LfoModule::staticModuleId,
                             [] { return std::make_unique<LfoModule>(); });
     factory.registerModule (ScopeModule::staticModuleId,

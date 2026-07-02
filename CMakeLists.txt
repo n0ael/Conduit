@@ -120,6 +120,10 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/Capture/LevelMeter.cpp
     Source/Modules/ConduitModule.cpp
     Source/Modules/ModuleFactory.cpp
+    Source/Modules/AirwindowsProcessorModule.cpp
+    Source/Modules/AirwindowsDensityModule.cpp
+    Source/Modules/AirwindowsSlewModule.cpp
+    Source/Modules/AirwindowsSpiralModule.cpp
     Source/Modules/AttenuatorModule.cpp
     Source/Modules/CaptureTapModule.cpp
     Source/Modules/LfoModule.cpp
@@ -197,7 +201,12 @@ target_sources(Conduit PRIVATE
     Source/Modules/IOModule.h
     Source/Modules/ModuleFactory.h
     Source/Modules/NetworkIOModule.h
+    Source/Modules/ProcessorModule.h
     Source/Modules/UtilityModule.h
+    Source/Modules/AirwindowsProcessorModule.h
+    Source/Modules/AirwindowsDensityModule.h
+    Source/Modules/AirwindowsSlewModule.h
+    Source/Modules/AirwindowsSpiralModule.h
     Source/Modules/AttenuatorModule.h
     Source/Modules/CaptureTapModule.h
     Source/Modules/LfoModule.h
@@ -305,6 +314,7 @@ if(CONDUIT_BUILD_TESTS)
     juce_add_console_app(ConduitTests PRODUCT_NAME "ConduitTests")
 
     set(CONDUIT_TEST_CPP_SOURCES
+        Tests/Core/AirwindowsModuleTests.cpp
         Tests/Core/AudioDeviceControllerTests.cpp
         Tests/Core/CaptureBufferTests.cpp
         Tests/Core/CaptureGateTests.cpp
@@ -376,6 +386,10 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/Capture/LevelMeter.cpp
         Source/Modules/ConduitModule.cpp
         Source/Modules/ModuleFactory.cpp
+        Source/Modules/AirwindowsProcessorModule.cpp
+        Source/Modules/AirwindowsDensityModule.cpp
+        Source/Modules/AirwindowsSlewModule.cpp
+        Source/Modules/AirwindowsSpiralModule.cpp
         Source/Modules/AttenuatorModule.cpp
         Source/Modules/CaptureTapModule.cpp
         Source/Modules/LfoModule.cpp
@@ -447,4 +461,17 @@ if(CONDUIT_BUILD_TESTS)
 
     enable_testing()
     add_test(NAME ConduitTests COMMAND ConduitTests)
+endif()
+
+# ---------------------------------------------------------------------------
+# ConduitAirwindows — portierte Airwindows-DSP (Density/Slew/Spiral).
+# Muss NACH der Catch2-FetchContent stehen (siehe CONDUIT_BUILD_TESTS oben),
+# sonst baut Source/DSP/Airwindows/CMakeLists.txt sein konditionales
+# ConduitAirwindowsTests-Target nicht mit (if(TARGET Catch2::Catch2WithMain)).
+# ---------------------------------------------------------------------------
+add_subdirectory(Source/DSP/Airwindows)
+target_link_libraries(Conduit PRIVATE ConduitAirwindows)
+
+if(CONDUIT_BUILD_TESTS)
+    target_link_libraries(ConduitTests PRIVATE ConduitAirwindows)
 endif()

@@ -1,6 +1,9 @@
 #include "EngineEditor.h"
 
 #include "EngineProcessor.h"
+#include "Modules/AirwindowsDensityModule.h"
+#include "Modules/AirwindowsSlewModule.h"
+#include "Modules/AirwindowsSpiralModule.h"
 #include "Modules/AttenuatorModule.h"
 #include "Modules/CaptureTapModule.h"
 #include "Modules/LfoModule.h"
@@ -149,6 +152,9 @@ std::vector<ModuleBrowser::Item> EngineEditor::buildBrowserItems()
     items.push_back ({ "Scope",       [addModule] { addModule (ScopeModule::staticModuleId); }, false });
     items.push_back ({ "Sequencer",   [addModule] { addModule (StepSequencerModule::staticModuleId); }, false });
     items.push_back ({ "Capture Tap", [addModule] { addModule (CaptureTapModule::staticModuleId); }, false });
+    items.push_back ({ "Density",     [addModule] { addModule (AirwindowsDensityModule::staticModuleId); }, false });
+    items.push_back ({ "Slew",        [addModule] { addModule (AirwindowsSlewModule::staticModuleId); }, false });
+    items.push_back ({ "Spiral",      [addModule] { addModule (AirwindowsSpiralModule::staticModuleId); }, false });
 
     // Link-Send: Eingangszahl ist fix beim Anlegen (7.2) → kleiner Dialog
     // (Mono-/Stereo-Anzahl), dann Node mit der gewählten Config materialisieren
