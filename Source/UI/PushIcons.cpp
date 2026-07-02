@@ -213,8 +213,23 @@ juce::Path fillGeometry (Icon icon)
         case Icon::metronome:   return metronomeDot();
         case Icon::pageClip:    return clipBoxTriangle();
         case Icon::chevronDown: return chevronDownSmall();
-        default:                return {};
+
+        // reine Stroke-Icons — explizit statt default (Clang -Wswitch-enum)
+        case Icon::play:
+        case Icon::tapeLoop:
+        case Icon::captureFrame:
+        case Icon::plus:
+        case Icon::gear:
+        case Icon::nudgeLeft:
+        case Icon::nudgeRight:
+        case Icon::pageMixer:
+        case Icon::pageDevice:
+        case Icon::pageGrid:
+            return {};
     }
+
+    jassertfalse;
+    return {};
 }
 
 } // namespace
