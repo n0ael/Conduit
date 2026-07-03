@@ -11,6 +11,7 @@
 #include "Modules/ChassisSchema.h"
 #include "Modules/LinkAudioSendModule.h"
 #include "Modules/ModuleFactory.h"
+#include "Modules/ProcessorModule.h"
 #include "NodeUiRegistry.h"
 #include "SourceNameResolver.h"
 
@@ -121,6 +122,26 @@ bool GraphManager::renameNode (const juce::String& nodeUuid, const juce::String&
     // Rename ändert OSC-Pfade — patchbare Aktion, also undo-fähig
     undoManager.beginNewTransaction ("Modul umbenennen");
     nodeTree.setProperty (id::moduleId, sanitized, &undoManager);
+    return true;
+}
+
+bool GraphManager::setLinkSendEnabled (const juce::String& nodeUuid, bool enabled)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    auto nodeTree = rootState.getChildWithName (id::nodes)
+                        .getChildWithProperty (id::nodeId, nodeUuid);
+
+    if (! nodeTree.isValid())
+        return false;
+
+    if ((bool) nodeTree.getProperty (id::linkSendEnabled, false) == enabled)
+        return true;  // No-op
+
+    // Ändert die announcten Link-Kanäle der Session — patchbare Aktion (4.6)
+    undoManager.beginNewTransaction (enabled ? "Link-Send aktivieren"
+                                             : "Link-Send deaktivieren");
+    nodeTree.setProperty (id::linkSendEnabled, enabled, &undoManager);
     return true;
 }
 
@@ -507,6 +528,17 @@ void GraphManager::valueTreePropertyChanged (juce::ValueTree& tree, const juce::
         return;
     }
 
+    // Link-Send-Tap des FX-Chassis (4.6): Node-Property → Modul, LIVE ohne
+    // Rebuild (create/retire am laufenden System). Auch via Undo/Preset-Diff.
+    if (property == id::linkSendEnabled && tree.hasType (id::node))
+    {
+        if (auto* processor = dynamic_cast<ProcessorModule*> (
+                getModuleFor (tree.getProperty (id::nodeId).toString())))
+            processor->setSendEnabled ((bool) tree.getProperty (id::linkSendEnabled, false));
+
+        return;
+    }
+
     // Tree → Atomic: paramValue-Änderungen (UI-Slider, OSC-Nachzug, Undo,
     // Preset-Load) auf das Echtzeit-Target spiegeln — KEIN Rebuild.
     if (property == id::paramValue && tree.hasType (id::parameter))
@@ -719,6 +751,11 @@ std::unique_ptr<ConduitModule> GraphManager::materializeModule (juce::ValueTree 
     if (auto* linkAudioClient = dynamic_cast<ILinkAudioClient*> (module.get()))
         linkAudioClient->setLinkAudioContext (linkClock,
             nodeTree.getProperty (id::moduleId).toString());
+
+    // FX-Chassis (4.6): persistierten Send-Zustand VOR prepareForGraph
+    // setzen — der Tap entsteht dann in prepareToPlay (Preset-Load-Pfad)
+    if (auto* processor = dynamic_cast<ProcessorModule*> (module.get()))
+        processor->setSendEnabled ((bool) nodeTree.getProperty (id::linkSendEnabled, false));
 
     // Send-Kanal-Layout VOR prepareForGraph (7.2): setzt die Bus-Kanalzahl
     // (fixe Eingangszahl) und die Eingangs-Struktur, aus der prepareToPlay

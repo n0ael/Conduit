@@ -327,6 +327,14 @@ LinkSendTaps::Status ProcessorModule::getLinkSendStatus() const noexcept
     return LinkSendTaps::Status::offline;
 }
 
+juce::String ProcessorModule::getSendSinkName() const
+{
+    if (auto* tap = rtTap.load (std::memory_order_relaxed))
+        return tap->getSinkName();
+
+    return {};
+}
+
 bool ProcessorModule::isSinkRetirePending() const noexcept
 {
     return taps.isRetirePending();

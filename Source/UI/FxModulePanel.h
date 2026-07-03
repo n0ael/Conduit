@@ -6,6 +6,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Core/GraphManager.h"
+#include "Core/LinkSendTaps.h"
 #include "UI/GainFaderMeter.h"
 #include "UI/PortComponent.h"
 
@@ -33,7 +34,8 @@ namespace conduit
     ParameterPanel); externe Änderungen kommen über den ValueTree-Listener.
 */
 class FxModulePanel final : public juce::Component,
-                            private juce::ValueTree::Listener
+                            private juce::ValueTree::Listener,
+                            private juce::Timer
 {
 public:
     FxModulePanel (juce::ValueTree nodeTreeToBind, GraphManager& graphManagerToUse);
@@ -92,11 +94,29 @@ public:
     std::unique_ptr<GainFaderMeter> inputFader;
     std::unique_ptr<GainFaderMeter> outputFader;
 
+    //==========================================================================
+    // Link-Send-Tap am Modul-Ausgang (4.6): Toggle unter dem Output-Zug,
+    // schreibt undo-fähig über GraphManager::setLinkSendEnabled; die LED
+    // daneben zeigt offline/announced/streaming (Status pro Tick transient
+    // aus dem Modul — Muster LinkAudioStatusBadge)
+    juce::TextButton linkSendButton { "LINK" };
+
+    /** LED-Status jetzt aus dem Modul ziehen — public für headless Tests. */
+    void refreshSendStatusNow();
+
+    [[nodiscard]] LinkSendTaps::Status getShownSendStatus() const noexcept { return shownSendStatus; }
+
+    void paint (juce::Graphics& g) override;
+
 private:
     //==========================================================================
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override;
+    void timerCallback() override;
 
     void buildColumns();
+    void refreshSendButtonState();
+
+    [[nodiscard]] juce::Rectangle<int> sendLedBounds() const;
 
     [[nodiscard]] juce::ValueTree parametersTree() const;
     [[nodiscard]] juce::ValueTree paramTreeFor (const juce::String& paramId) const;
@@ -104,6 +124,8 @@ private:
     //==========================================================================
     juce::ValueTree nodeTree;   // NUR der Subtree (5.3)
     GraphManager& graphManager;
+
+    LinkSendTaps::Status shownSendStatus = LinkSendTaps::Status::offline;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FxModulePanel)
 };

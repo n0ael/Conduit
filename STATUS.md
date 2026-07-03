@@ -16,7 +16,7 @@
 
 ## Aktueller Meilenstein (Juli 2026 — in Arbeit)
 
-**FX-Chassis-Standard für alle Audio-FX-Module (Plan: 7 Meilensteine M1–M7) — M1–M3 abgeschlossen:**
+**FX-Chassis-Standard für alle Audio-FX-Module (Plan: 7 Meilensteine M1–M7) — M1–M4 abgeschlossen:**
 
 Ziel des Gesamtvorhabens (User-Plan 03.07.): jedes FX-Modul bekommt einheitlich
 Ableton-artige I/O-Gain-Fader mit Meter, einen Link-Audio-Send-Button am Output,
@@ -45,7 +45,11 @@ Bezier-Fader-Kurven, Modul-Typ-Defaults). Wird als CLAUDE.md 4.6 verbindlich.
   - `NodeComponent::getPortCentre`/`findPortNear` delegieren CV-Kanäle ≥ 2 an `FxModulePanel::cvPortCentre` — Kabel-Zeichnung und Drop-Toleranz des NodeCanvas funktionieren unverändert; linke Kachelkante trägt nur noch die Audio-Eingänge (Kanäle 0/1)
   - `PushLookAndFeel::drawRotarySlider`: MI-Stil (Körper, Zeiger, Wert-Bogen ab Mittelstellung bei bipolaren Ranges)
   - Verifikation: 261 Testfälle / 11070 Assertions grün (Debug + ASan). Neu: CV-Knob-Bindung beidseitig, Port-Kanal-Layout, Anker-Delegation + findPortNear, End-to-End durch den ECHTEN Graph (EngineProcessor: In-ch1 als CV-Quelle auf Density-CV-Kanal 2 → Ausgang ändert sich messbar; cv_amt 0 = wirkungslos)
-- **Als Nächstes:** M4 Link-Send-Button · M5 Dev-Modus · M6 Kurven + Defaults · M7 CLAUDE.md 4.6
+- **M4 — Link-Send-Button am Output (fertig):**
+  - `FxModulePanel`: LINK-Button + Status-LED (offline grau / announced gelb / streaming grün, Farben wie StatusBadge) unter dem Output-Zug; Klick togglet den Send des Post-Output-Gain-Signals, Kanal-Name = moduleId
+  - `GraphManager::setLinkSendEnabled` (undo-fähige Patch-Aktion) + Property-Listener-Zweig → `ProcessorModule::setSendEnabled` LIVE (Tap create/retire ohne Rebuild); `materializeModule` setzt den persistierten Send-Zustand VOR prepareForGraph (Preset-Load-Pfad)
+  - Verifikation: 265 Testfälle / 11098 Assertions grün (Debug + ASan; TSan via CI). Neu: Toggle an/aus/Undo mit echtem LinkClock-Rig, Rename propagiert Sink-Name live, persistierter Send entsteht bei Materialisierung, Delete Phase 1 zieht Tap sofort zurück, Epoch-Retire-Handshake (Audio-Block-Surrogat), UI-Button undo-fähig + LED offline-safe
+- **Als Nächstes:** M5 Dev-Modus · M6 Kurven + Defaults · M7 CLAUDE.md 4.6
 
 **Davor: Tap-Tempo-Umbau: Monitor + Set-Commit (inspiriert vom M4L-Device „TAP and CHANGE Tempo BPM"):**
 

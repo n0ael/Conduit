@@ -2,8 +2,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "Core/EngineProcessor.h"
+#include "Core/GraphFader.h"
+#include "Core/LinkClock.h"
+#include "Core/NodeUiRegistry.h"
 #include "Modules/AirwindowsDensityModule.h"
 #include "Modules/ChassisSchema.h"
+#include "Modules/ModuleFactory.h"
 #include "Modules/ProcessorModule.h"
 #include "Util/RtAllocationGuard.h"
 
@@ -427,6 +431,119 @@ TEST_CASE ("FX-Chassis: CV-Kabel im Graph moduliert einen DSP-Parameter end-to-e
         difference += std::abs (outputA.getSample (0, i) - outputB.getSample (0, i));
 
     REQUIRE (difference > 0.01f);   // Modulation hörbar am Ausgang angekommen
+}
+
+//==============================================================================
+namespace
+{
+
+[[nodiscard]] juce::ValueTree makeRootTree()
+{
+    juce::ValueTree root (conduit::id::root);
+    root.appendChild (juce::ValueTree (conduit::id::nodes),               nullptr);
+    root.appendChild (juce::ValueTree (conduit::id::connections),         nullptr);
+    root.appendChild (juce::ValueTree (conduit::id::calibrationProfiles), nullptr);
+    return root;
+}
+
+/** GraphManager-Rig MIT Link-Kontext — der Send-Tap braucht die LinkClock. */
+struct LinkSendRig
+{
+    LinkSendRig()
+    {
+        conduit::registerDefaultModules (factory);
+        clock.prepare (48000.0);
+        manager.setLinkClock (&clock);
+
+        node = manager.addModuleNode (conduit::AirwindowsDensityModule::staticModuleId, {});
+        manager.flushPendingTopologyUpdate();
+    }
+
+    [[nodiscard]] juce::String uuid() const { return node.getProperty (conduit::id::nodeId).toString(); }
+
+    [[nodiscard]] conduit::ProcessorModule* module() const
+    {
+        return dynamic_cast<conduit::ProcessorModule*> (manager.getModuleFor (uuid()));
+    }
+
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    juce::ValueTree root = makeRootTree();
+    juce::AudioProcessorGraph graph;
+    conduit::GraphFader fader;
+    conduit::ModuleFactory factory;
+    juce::UndoManager undoManager;
+    conduit::NodeUiRegistry uiRegistry;
+    conduit::GraphManager manager { root, graph, fader, factory, undoManager, uiRegistry };
+    conduit::LinkClock clock { 120.0, "ConduitTest" };
+    juce::ValueTree node;
+};
+
+} // namespace
+
+TEST_CASE ("FX-Chassis: linkSendEnabled steuert den Tap live (an/aus/undo)", "[chassis][linkaudio]")
+{
+    LinkSendRig rig;
+    auto* module = rig.module();
+    REQUIRE (module != nullptr);
+    REQUIRE_FALSE (module->hasActiveSendTap());
+
+    // An: Property (undo-fähig) → Listener → Modul erzeugt den Tap live
+    REQUIRE (rig.manager.setLinkSendEnabled (rig.uuid(), true));
+    REQUIRE ((bool) rig.node.getProperty (conduit::id::linkSendEnabled));
+    REQUIRE (module->hasActiveSendTap());
+    REQUIRE (module->getSendSinkName() == rig.node.getProperty (conduit::id::moduleId).toString());
+
+    // Rename propagiert live zum Sink (Kanal-Name = moduleId)
+    REQUIRE (rig.manager.renameNode (rig.uuid(), "mein_density"));
+    REQUIRE (module->getSendSinkName() == "mein_density");
+
+    // Aus: Tap retired (Phase-1-Muster). Audio-Thread-Surrogat: ein Block
+    // nach dem Store erfüllt den Epoch-Handshake (Muster LinkAudioSendTests)
+    REQUIRE (rig.manager.setLinkSendEnabled (rig.uuid(), false));
+    REQUIRE_FALSE (module->hasActiveSendTap());
+
+    juce::AudioBuffer<float> buffer (6, 32);
+    juce::MidiBuffer midi;
+    buffer.clear();
+    module->processBlock (buffer, midi);
+
+    module->flushPendingSinkRetirement();
+    REQUIRE_FALSE (module->isSinkRetirePending());
+
+    // Undo (Aus rückgängig) → wieder an
+    REQUIRE (rig.undoManager.undo());
+    REQUIRE (module->hasActiveSendTap());
+}
+
+TEST_CASE ("FX-Chassis: persistierter Send entsteht bei der Materialisierung", "[chassis][linkaudio]")
+{
+    LinkSendRig rig;
+
+    // Zweiter Node mit linkSendEnabled=true VOR der Materialisierung
+    // (Preset-Load-Pfad: Property steht im Tree, Modul entsteht danach)
+    auto second = rig.manager.addModuleNode (conduit::AirwindowsDensityModule::staticModuleId, {});
+    second.setProperty (conduit::id::linkSendEnabled, true, nullptr);
+    rig.manager.flushPendingTopologyUpdate();
+
+    auto* module = dynamic_cast<conduit::ProcessorModule*> (
+        rig.manager.getModuleFor (second.getProperty (conduit::id::nodeId).toString()));
+    REQUIRE (module != nullptr);
+    REQUIRE (module->isSendEnabled());
+    REQUIRE (module->hasActiveSendTap());
+}
+
+TEST_CASE ("FX-Chassis: Delete Phase 1 zieht den Send-Tap sofort zurueck", "[chassis][linkaudio]")
+{
+    LinkSendRig rig;
+    REQUIRE (rig.manager.setLinkSendEnabled (rig.uuid(), true));
+
+    auto* module = rig.module();
+    REQUIRE (module->hasActiveSendTap());
+
+    // Phase 1 (5.3): GraphManager-Listener ruft releaseSessionResources —
+    // keine Zombie-Kanäle bei den Peers (7.2)
+    REQUIRE (rig.manager.requestNodeDelete (rig.uuid()));
+    REQUIRE_FALSE (module->hasActiveSendTap());
 }
 
 //==============================================================================

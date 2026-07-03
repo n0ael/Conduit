@@ -111,6 +111,15 @@ public:
     [[nodiscard]] bool isSinkRetirePending() const noexcept;
     void flushPendingSinkRetirement();
 
+    /** true, wenn ein announcter Tap am Audio-Thread hängt. */
+    [[nodiscard]] bool hasActiveSendTap() const noexcept
+    {
+        return rtTap.load (std::memory_order_relaxed) != nullptr;
+    }
+
+    /** Aktueller Sink-Name (leer ohne Tap) — Message Thread, Diagnose/Tests. */
+    [[nodiscard]] juce::String getSendSinkName() const;
+
     //==========================================================================
     // Meter [beliebiger Thread] — UI löst pro Tick transient über
     // GraphManager::getModuleFor auf (Zombie-UI-Regel 5.3). Non-const,

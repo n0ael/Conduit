@@ -240,6 +240,30 @@ TEST_CASE ("FxModulePanel: stopUpdates deaktiviert auch die CV-Knobs", "[ui][cha
     REQUIRE_FALSE (panel.columns[0]->cvKnob.isEnabled());
 }
 
+TEST_CASE ("FxModulePanel: LINK-Button toggelt linkSendEnabled undo-faehig", "[ui][chassis]")
+{
+    ChassisRig rig;
+    conduit::FxModulePanel panel { rig.node, rig.manager };
+
+    REQUIRE_FALSE ((bool) rig.node.getProperty (conduit::id::linkSendEnabled));
+    REQUIRE_FALSE (panel.linkSendButton.getToggleState());
+
+    // Klick → Patch-Property (undo-fähig), Button-Zustand folgt dem Tree
+    // (onClick direkt — triggerClick dispatched async, headless unzuverlässig)
+    panel.linkSendButton.onClick();
+    REQUIRE ((bool) rig.node.getProperty (conduit::id::linkSendEnabled));
+    REQUIRE (panel.linkSendButton.getToggleState());
+
+    // Undo nimmt den Toggle zurück — UI zieht über den Listener nach
+    REQUIRE (rig.undoManager.undo());
+    REQUIRE_FALSE ((bool) rig.node.getProperty (conduit::id::linkSendEnabled));
+    REQUIRE_FALSE (panel.linkSendButton.getToggleState());
+
+    // LED-Status ohne Link-Kontext: offline, refresh crashfrei
+    panel.refreshSendStatusNow();
+    REQUIRE (panel.getShownSendStatus() == conduit::LinkSendTaps::Status::offline);
+}
+
 TEST_CASE ("FxModulePanel: widthForColumns ist die zentrale Breitenformel", "[ui][chassis]")
 {
     using Panel = conduit::FxModulePanel;

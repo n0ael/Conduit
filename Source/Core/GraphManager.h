@@ -99,6 +99,12 @@ public:
         unbekanntem Node. Message Thread. */
     bool renameNode (const juce::String& nodeUuid, const juce::String& requestedName);
 
+    /** Patch-Aktion (FX-Chassis 4.6): Link-Send-Tap eines Processor-Nodes
+        an/aus — undo-fähig; der Property-Listener leitet live ans Modul
+        weiter (create/retire ohne Rebuild). false bei unbekanntem Node.
+        Message Thread. */
+    bool setLinkSendEnabled (const juce::String& nodeUuid, bool enabled);
+
     /** Phase 1 des zweiphasigen Deletes (5.3): setzt nodeState → Deleting.
         false, wenn kein Node mit dieser nodeId existiert oder der Node ein
         externer Endpunkt ist (I/O-Nodes sind nicht löschbar). Message Thread. */

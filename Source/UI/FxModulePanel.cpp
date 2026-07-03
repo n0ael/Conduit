@@ -1,9 +1,17 @@
 #include "FxModulePanel.h"
 
 #include "Modules/ChassisSchema.h"
+#include "Modules/ProcessorModule.h"
+#include "UI/PushLookAndFeel.h"
 
 namespace conduit
 {
+
+namespace
+{
+    constexpr int sendRowHeight = 24;   // LED + LINK-Button unter dem Out-Zug
+    constexpr int sendLedWidth  = 16;
+}
 
 FxModulePanel::FxModulePanel (juce::ValueTree nodeTreeToBind, GraphManager& graphManagerToUse)
     : nodeTree (std::move (nodeTreeToBind)),
@@ -19,7 +27,21 @@ FxModulePanel::FxModulePanel (juce::ValueTree nodeTreeToBind, GraphManager& grap
                                                     graphManager, false);
     addAndMakeVisible (*outputFader);
 
+    // Link-Send-Toggle: patchbare Aktion → undo-fähig über den GraphManager;
+    // der Property-Listener des Managers leitet live ans Modul weiter (4.6)
+    linkSendButton.setTooltip ("Post-Output-Gain als Link-Audio-Kanal zu Ableton streamen");
+    linkSendButton.setClickingTogglesState (false);
+    linkSendButton.onClick = [this]
+    {
+        const auto enabled = (bool) nodeTree.getProperty (id::linkSendEnabled, false);
+        graphManager.setLinkSendEnabled (nodeTree.getProperty (id::nodeId).toString(),
+                                         ! enabled);
+    };
+    addAndMakeVisible (linkSendButton);
+    refreshSendButtonState();
+
     buildColumns();
+    startTimerHz (10);  // LED-Statuswechsel sind selten (Muster StatusBadge)
 }
 
 FxModulePanel::~FxModulePanel()
@@ -29,11 +51,13 @@ FxModulePanel::~FxModulePanel()
 
 void FxModulePanel::stopUpdates()
 {
+    stopTimer();
     nodeTree.removeListener (this);
     setInterceptsMouseClicks (false, false);
 
     inputFader->stopUpdates();
     outputFader->stopUpdates();
+    linkSendButton.setEnabled (false);
 
     for (auto& column : columns)
     {
@@ -143,8 +167,62 @@ const PortComponent* FxModulePanel::getCvPort (int columnIndex) const noexcept
 }
 
 //==============================================================================
+void FxModulePanel::timerCallback()
+{
+    refreshSendStatusNow();
+}
+
+void FxModulePanel::refreshSendStatusNow()
+{
+    // Transiente Auflösung pro Tick (5.3) — nullptr während Deleting/Swap
+    auto* module = dynamic_cast<ProcessorModule*> (graphManager.getModuleFor (
+        nodeTree.getProperty (id::nodeId).toString()));
+
+    const auto status = module != nullptr ? module->getLinkSendStatus()
+                                          : LinkSendTaps::Status::offline;
+
+    if (status != shownSendStatus)
+    {
+        shownSendStatus = status;
+        repaint (sendLedBounds());
+    }
+}
+
+void FxModulePanel::refreshSendButtonState()
+{
+    const auto enabled = (bool) nodeTree.getProperty (id::linkSendEnabled, false);
+    linkSendButton.setToggleState (enabled, juce::dontSendNotification);
+    linkSendButton.setColour (juce::TextButton::textColourOffId,
+                              enabled ? push::colours::ledCyan : push::colours::textDim);
+}
+
+juce::Rectangle<int> FxModulePanel::sendLedBounds() const
+{
+    return { getWidth() - GainFaderMeter::preferredWidth,
+             getHeight() - sendRowHeight, sendLedWidth, sendRowHeight };
+}
+
+void FxModulePanel::paint (juce::Graphics& g)
+{
+    // Send-Status-LED links neben dem LINK-Button (Farben wie StatusBadge)
+    const auto colour = shownSendStatus == LinkSendTaps::Status::streaming ? juce::Colour (0xff58d68d)
+                      : shownSendStatus == LinkSendTaps::Status::announced ? juce::Colour (0xffe8b339)
+                                                                           : juce::Colour (0xff5a6170);
+
+    g.setColour (colour);
+    g.fillEllipse (sendLedBounds().toFloat().withSizeKeepingCentre (8.0f, 8.0f));
+}
+
+//==============================================================================
 void FxModulePanel::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
+    // Link-Send-Toggle folgt dem Patch-Zustand (auch Undo/Preset-Load)
+    if (property == id::linkSendEnabled && tree == nodeTree)
+    {
+        refreshSendButtonState();
+        return;
+    }
+
     // Spalten-Fader folgen externen Quellen (OSC-Nachzug 6.1, Undo,
     // Preset-Load); die Gain-Züge hören selbst auf denselben Tree.
     if (property != id::paramValue || ! tree.hasType (id::parameter))
@@ -176,7 +254,13 @@ void FxModulePanel::resized()
     auto bounds = getLocalBounds();
 
     inputFader->setBounds (bounds.removeFromLeft (GainFaderMeter::preferredWidth));
-    outputFader->setBounds (bounds.removeFromRight (GainFaderMeter::preferredWidth));
+
+    // Rechte Spalte: Out-Zug oben, darunter LED + LINK-Button (4.6)
+    auto right = bounds.removeFromRight (GainFaderMeter::preferredWidth);
+    auto sendRow = right.removeFromBottom (sendRowHeight);
+    sendRow.removeFromLeft (sendLedWidth);   // LED zeichnet paint()
+    linkSendButton.setBounds (sendRow.reduced (0, 2));
+    outputFader->setBounds (right);
 
     // DSP-Spalten mittig zwischen den Gain-Zügen
     bounds.reduce (8, 0);
