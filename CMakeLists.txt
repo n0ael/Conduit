@@ -146,6 +146,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/NodeComponent.cpp
     Source/UI/OscSettingsComponent.cpp
     Source/UI/PageHost.cpp
+    Source/UI/ParameterPanel.cpp
     Source/UI/PortComponent.cpp
     Source/UI/PushIcons.cpp
     Source/UI/PushLookAndFeel.cpp
@@ -227,6 +228,7 @@ target_sources(Conduit PRIVATE
     Source/UI/ModuleBrowser.h
     Source/UI/OscSettingsComponent.h
     Source/UI/PageHost.h
+    Source/UI/ParameterPanel.h
     Source/UI/PortComponent.h
     Source/UI/PushIcons.h
     Source/UI/PushLookAndFeel.h
@@ -412,6 +414,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/ModuleBrowser.cpp
         Source/UI/OscSettingsComponent.cpp
         Source/UI/PageHost.cpp
+        Source/UI/ParameterPanel.cpp
         Source/UI/PortComponent.cpp
         Source/UI/PushIcons.cpp
         Source/UI/PushLookAndFeel.cpp

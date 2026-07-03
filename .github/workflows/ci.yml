@@ -53,8 +53,8 @@ jobs:
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
 
-      - name: Build (nur ConduitTests — die GUI-App braucht die CI nicht)
-        run: cmake --build --preset ${{ matrix.preset }} --target ConduitTests
+      - name: Build (Test-Targets — die GUI-App braucht die CI nicht)
+        run: cmake --build --preset ${{ matrix.preset }} --target ConduitTests --target ConduitAirwindowsTests
 
       - name: Tests unter ${{ matrix.preset }}
         env:

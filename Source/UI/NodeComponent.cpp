@@ -91,28 +91,14 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
         channelNames->addChangeListener (this);
 
     // Sequencer- und Send-Kacheln haben eine eigene Bedienleiste (Grid bzw.
-    // Attenuator-Zeilen) — kein generischer Slider
-    if (const auto parameter = firstParameter();
-        parameter.isValid()
-        && factoryKey != StepSequencerModule::staticModuleId
-        && factoryKey != LinkAudioSendModule::staticModuleId)
+    // Attenuator-Zeilen) — der generische ParameterPanel deckt alle anderen
+    // Module mit >= 1 Parameter ab (eine Zeile pro Parameter, Label = paramId)
+    if (factoryKey != StepSequencerModule::staticModuleId
+        && factoryKey != LinkAudioSendModule::staticModuleId
+        && nodeTree.getChildWithName (id::parameters).getNumChildren() > 0)
     {
-        parameterSlider.setRange ((double) parameter.getProperty (id::paramMin, 0.0),
-                                  (double) parameter.getProperty (id::paramMax, 1.0), 0.0);
-        parameterSlider.setValue ((double) parameter.getProperty (id::paramValue, 0.0),
-                                  juce::dontSendNotification);
-
-        // Schreibt NUR in den Tree — der GraphManager spiegelt auf das
-        // Echtzeit-Atomic. Bewusst ohne UndoManager: Parameter-Sweeps sind
-        // keine patchbaren Aktionen (gleiches Verhalten wie der OSC-Pfad 6.1).
-        parameterSlider.onValueChange = [this]
-        {
-            // eigener Name — verschattet sonst das 'parameter' des umgebenden
-            // if-Init (Clang -Wshadow-uncaptured-local unter -Werror)
-            if (auto liveParameter = firstParameter(); liveParameter.isValid())
-                liveParameter.setProperty (id::paramValue, parameterSlider.getValue(), nullptr);
-        };
-        addAndMakeVisible (parameterSlider);
+        parameterPanel = std::make_unique<ParameterPanel> (nodeTree);
+        addAndMakeVisible (*parameterPanel);
     }
 
     // Modulspezifische Anzeigen direkt in der Kachel
@@ -143,6 +129,17 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
     else if (isExternalEndpoint)
     {
         updateEndpointSize();  // Höhe folgt der Hardware-Kanalzahl (Schritt B)
+    }
+    else if (parameterPanel != nullptr)
+    {
+        // Eigene Zonen für Ports und Parameter-Zeilen (sonst überlappen sich
+        // Port-Kreise und Fader-Zeilen im selben Y-Bereich) — die Ports-Zone
+        // bekommt mindestens die alte Standardhöhe (defaultHeight-Header),
+        // damit z.B. 2 Ports wie bisher komfortabel Platz haben.
+        const auto maxPorts  = juce::jmax (inputChannelCount, outputChannelCount);
+        const auto portsZone = juce::jmax (defaultHeight - touchTarget, maxPorts * 30);
+        setSize (defaultWidth, touchTarget + portsZone
+                              + ParameterPanel::heightForParameters (parameterPanel->getNumRows()));
     }
     else
     {
@@ -177,7 +174,6 @@ void NodeComponent::beginTeardown()
         channelNames->removeChangeListener (this);
     setInterceptsMouseClicks (false, false);
     deleteButton.setEnabled (false);
-    parameterSlider.setEnabled (false);
     titleLabel.setEnabled (false);
 
     if (scopeDisplay != nullptr)
@@ -191,6 +187,9 @@ void NodeComponent::beginTeardown()
 
     if (sendPanel != nullptr)
         sendPanel->stopUpdates();
+
+    if (parameterPanel != nullptr)
+        parameterPanel->stopUpdates();
 
     for (auto& toggle : pairToggles)
         toggle->setEnabled (false);
@@ -267,12 +266,8 @@ void NodeComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
         return;
     }
 
-    // Slider folgt externen Quellen (OSC-Nachzug 6.1, Undo, Preset-Load) —
-    // dontSendNotification verhindert die Rückkopplungsschleife.
-    if (tree.hasType (id::parameter) && property == id::paramValue
-        && tree == firstParameter())
-        parameterSlider.setValue ((double) tree.getProperty (id::paramValue),
-                                  juce::dontSendNotification);
+    // Parameter-Sync (OSC-Nachzug 6.1, Undo, Preset-Load) übernimmt der
+    // ParameterPanel selbst — er hört als eigener Listener auf denselben Tree.
 }
 
 void NodeComponent::applyTreePosition()
@@ -310,11 +305,6 @@ juce::Point<int> NodeComponent::snapToSiblings (juce::Point<int> position) const
 
     return { std::abs (bestDx) <= siblingSnapRange ? position.x + bestDx : position.x,
              std::abs (bestDy) <= siblingSnapRange ? position.y + bestDy : position.y };
-}
-
-juce::ValueTree NodeComponent::firstParameter() const
-{
-    return nodeTree.getChildWithName (id::parameters).getChild (0);
 }
 
 std::vector<NodeComponent::PortRow> NodeComponent::buildPortRows (
@@ -532,7 +522,12 @@ int NodeComponent::getNumSendButtons() const noexcept { return static_cast<int> 
 int NodeComponent::channelRowY (bool isInputBank, int channel) const
 {
     const auto count = juce::jmax (1, isInputBank ? inputChannelCount : outputChannelCount);
-    const auto availableHeight = getHeight() - touchTarget;  // unterhalb des Headers
+
+    // Unterhalb des Headers, oberhalb der Parameter-Zeilen (falls vorhanden) —
+    // sonst würden Ports und Fader-Zeilen sich denselben Y-Bereich teilen.
+    const auto paramsHeight = parameterPanel != nullptr
+        ? ParameterPanel::heightForParameters (parameterPanel->getNumRows()) : 0;
+    const auto availableHeight = getHeight() - touchTarget - paramsHeight;
 
     return touchTarget + availableHeight * (channel + 1) / (count + 1);
 }
@@ -684,8 +679,10 @@ void NodeComponent::resized()
     deleteButton.setBounds (header.removeFromRight (touchTarget));
     titleLabel.setBounds (header.withTrimmedLeft (8));
 
-    // Eingerückt, damit der Slider nicht unter den Port-Hit-Zonen liegt
-    parameterSlider.setBounds (bounds.removeFromBottom (touchTarget).reduced (28, 0));
+    // Eingerückt, damit die Slider nicht unter den Port-Hit-Zonen liegen
+    if (parameterPanel != nullptr)
+        parameterPanel->setBounds (bounds.removeFromBottom (
+            ParameterPanel::heightForParameters (parameterPanel->getNumRows())).reduced (28, 0));
 
     if (scopeDisplay != nullptr)
         scopeDisplay->setBounds (getLocalBounds().withTrimmedTop (touchTarget)

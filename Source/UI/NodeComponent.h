@@ -14,6 +14,7 @@
 #include "UI/InputSendButton.h"
 #include "UI/LevelMeterBar.h"
 #include "UI/LinkAudioSendPanel.h"
+#include "UI/ParameterPanel.h"
 #include "UI/PortComponent.h"
 #include "UI/ScopeDisplay.h"
 #include "UI/SequencerControlPanel.h"
@@ -143,7 +144,6 @@ private:
         je Achse unabhängig innerhalb von siblingSnapRange — außerhalb des
         Fangbereichs bleibt die Bewegung pixelgenau. */
     [[nodiscard]] juce::Point<int> snapToSiblings (juce::Point<int> position) const;
-    [[nodiscard]] juce::ValueTree firstParameter() const;
 
     /** (Neu-)Baut die Port-Components aus numInputChannels/numOutputChannels
         (Schema 6.2) und zieht die Kanal-Labels nach. Am audio_in-Endpunkt
@@ -185,7 +185,6 @@ private:
 
     juce::Label titleLabel;  // named_id — Doppelklick benennt um (renameNode)
     juce::TextButton deleteButton;
-    juce::Slider parameterSlider { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::ComponentDragger dragger;
 
     std::vector<std::unique_ptr<PortComponent>> inputPorts;
@@ -224,6 +223,11 @@ private:
     // Nur bei Link-Audio-Send-Nodes (factoryId == "link_audio_send") —
     // Bedien-Panel: pro Eingang Attenuator + Name + Status-LED (7.2)
     std::unique_ptr<LinkAudioSendPanel> sendPanel;
+
+    // Alle anderen Module mit >= 1 Parameter (nicht Scope/Sequencer/Send,
+    // die eigene Bedienoberflächen haben) — eine Zeile pro Parameter,
+    // Label = paramId. nullptr bei 0 Parametern (z.B. Spiral, I/O-Endpunkte).
+    std::unique_ptr<ParameterPanel> parameterPanel;
 
     std::unique_ptr<juce::VBlankAttachment> teardownVBlank;
     bool tearingDown = false;
