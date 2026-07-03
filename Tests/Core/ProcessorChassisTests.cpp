@@ -182,9 +182,9 @@ TEST_CASE ("FX-Chassis: 0 dB ist unity, -60 dB ist Stille", "[chassis]")
 
         module.processBlock (buffer, midi);
 
-        REQUIRE (buffer.getSample (0, 0)   == 0.5f);
-        REQUIRE (buffer.getSample (0, 511) == 0.5f);
-        REQUIRE (buffer.getSample (1, 100) == -0.25f);
+        REQUIRE (juce::exactlyEqual (buffer.getSample (0, 0), 0.5f));
+        REQUIRE (juce::exactlyEqual (buffer.getSample (0, 511), 0.5f));
+        REQUIRE (juce::exactlyEqual (buffer.getSample (1, 100), -0.25f));
     }
 
     SECTION ("-60 dB: nach der 5-ms-Rampe exakt 0")
@@ -203,8 +203,8 @@ TEST_CASE ("FX-Chassis: 0 dB ist unity, -60 dB ist Stille", "[chassis]")
         fillChannel (buffer, 1, 1.0f);
         module.processBlock (buffer, midi);
 
-        REQUIRE (buffer.getMagnitude (0, 0, 512) == 0.0f);
-        REQUIRE (buffer.getMagnitude (1, 0, 512) == 0.0f);
+        REQUIRE (juce::exactlyEqual (buffer.getMagnitude (0, 0, 512), 0.0f));
+        REQUIRE (juce::exactlyEqual (buffer.getMagnitude (1, 0, 512), 0.0f));
     }
 }
 
