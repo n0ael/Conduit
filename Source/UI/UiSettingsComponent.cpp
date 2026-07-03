@@ -37,6 +37,8 @@ UiSettingsComponent::UiSettingsComponent (UiSettings& settingsToUse)
     };
     addAndMakeVisible (fontScaleSlider);
 
+    devModeToggle.setButtonText (juce::String::fromUTF8 (
+        "Development-Modus (DEV-Buttons in den Modul-Köpfen)"));
     devModeToggle.onClick = [this] { settings.setDevModeEnabled (devModeToggle.getToggleState()); };
     addAndMakeVisible (devModeToggle);
 

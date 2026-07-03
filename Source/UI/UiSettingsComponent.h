@@ -40,7 +40,8 @@ public:
     // Controls public für headless Tests
     juce::Slider uiScaleSlider   { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     juce::Slider fontScaleSlider { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
-    juce::ToggleButton devModeToggle { "Development-Modus (DEV-Buttons in den Modul-Köpfen)" };
+    // Text im ctor via String::fromUTF8 (MSVC-CP1252-Falle bei Umlaut-Literalen)
+    juce::ToggleButton devModeToggle;
 
     /** Slider-Werte (Prozent) in die Settings committen — Tests rufen direkt. */
     void applyUiScale();

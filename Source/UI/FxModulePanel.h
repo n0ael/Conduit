@@ -73,13 +73,16 @@ public:
     static constexpr int titleHeight  = 18;
     static constexpr int knobHeight   = 28;
     static constexpr int portRowHeight = 26;
-    static constexpr int hideRowHeight = 16;   // Ausblenden-/Kurven-Zeile (Dev-Modus)
+    // Dev-Zeile (Ausblenden/Fader↔Buttons/Kurve): 26px statt 16 — die
+    // TextButton-Schrift folgt der Button-Höhe (LnF), bei 16px war sie
+    // unlesbar klein (User-Feedback 03.07.); der Fader gibt den Platz her
+    static constexpr int hideRowHeight = 26;
     static constexpr int panelHeight  = 248;
 
     // Fader↔Button-Modus (4.6): ein Button-Stapel ist eine Spaltenbreite,
     // die +/−-Stepper-Zeile sitzt im Dev-Modus unter den Stapeln
     static constexpr int buttonStackWidth = 56;
-    static constexpr int stepperRowHeight = 16;
+    static constexpr int stepperRowHeight = 26;   // +/− lesbar (wie Dev-Zeile)
 
     /** Erster CV-Eingangs-Kanal des Chassis (Audio 0..1, CV 2..N — 4.6). */
     static constexpr int firstCvChannel = 2;
