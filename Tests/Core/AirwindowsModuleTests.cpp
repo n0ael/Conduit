@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_message.hpp>
 
+#include "DSP/Airwindows/AirwindowsRegistry.h"
 #include "Modules/AirwindowsDensityModule.h"
+#include "Modules/AirwindowsProcessorModule.h"
 #include "Modules/AirwindowsSlewModule.h"
 #include "Modules/AirwindowsSpiralModule.h"
 #include "Modules/ChassisSchema.h"
@@ -196,4 +199,52 @@ TEST_CASE ("ModuleFactory registriert alle drei Airwindows-Module", "[airwindows
     auto density = factory.create (conduit::AirwindowsDensityModule::staticModuleId);
     REQUIRE (density != nullptr);
     REQUIRE (dynamic_cast<conduit::AirwindowsDensityModule*> (density.get()) != nullptr);
+}
+
+//==============================================================================
+// Generischer Katalog-Test (deckt ALLE AirwindowsRegistry-Einträge ab, auch
+// die 54 im Juli-2026-Massen-Port dazugekommenen — statt 54x das obige
+// Muster von Hand zu duplizieren): jeder Registry-Eintrag muss sich in ein
+// AirwindowsProcessorModule wrappen lassen, im Graph vorbereiten und einen
+// Parameter-Sweep ohne NaN/Inf überstehen. Der ModuleFactory-Namenskonvention
+// "airwindows_{registryId}" wird zusätzlich gegen die tatsächliche Registrierung
+// geprüft — deckt Tippfehler beim Verdrahten (Registry vs. ModuleFactory) auf.
+TEST_CASE ("AirwindowsRegistry: jeder Eintrag wrappt chassis-konform und übersteht einen Parameter-Sweep", "[airwindows]")
+{
+    conduit::ModuleFactory factory;
+    conduit::registerDefaultModules (factory);
+
+    for (const auto& entry : conduit::airwindows::getRegisteredPlugins())
+    {
+        CAPTURE (entry.id, entry.name);
+
+        auto plugin = conduit::airwindows::createPlugin (entry.id);
+        REQUIRE (plugin != nullptr);
+
+        const juce::String moduleId = "airwindows_" + juce::String (entry.id);
+        REQUIRE (factory.isRegistered (moduleId));
+
+        conduit::AirwindowsProcessorModule module (std::move (plugin), moduleId, entry.name);
+        REQUIRE (module.prepareForGraph (48000.0, 512).wasOk());
+        REQUIRE (module.getNumDspParameters() <= conduit::ProcessorModule::maxDspParameters);
+
+        const auto dspIds = dspParameterIdsOf (module.createState());
+
+        juce::AudioBuffer<float> buffer (2, 512);
+        juce::MidiBuffer midi;
+
+        for (int step = 0; step <= 4; ++step)
+        {
+            const auto value = (float) step / 4.0f;
+
+            for (const auto& dspId : dspIds)
+                if (auto* target = module.getParameterTarget (dspId))
+                    target->store (value, std::memory_order_relaxed);
+
+            fillWithRamp (buffer, value - 0.5f);
+            module.processBlock (buffer, midi);
+
+            REQUIRE_FALSE (hasNanOrInf (buffer));
+        }
+    }
 }

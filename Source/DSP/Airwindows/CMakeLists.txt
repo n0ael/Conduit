@@ -18,6 +18,60 @@ set(CONDUIT_AIRWINDOWS_CPP_SOURCES
     Plugins/Density.cpp
     Plugins/Slew.cpp
     Plugins/Spiral.cpp
+    Plugins/Air4.cpp
+    Plugins/Cans.cpp
+    Plugins/CansAW.cpp
+    Plugins/Console0Buss.cpp
+    Plugins/Console0Channel.cpp
+    Plugins/ConsoleLABuss.cpp
+    Plugins/ConsoleMCBuss.cpp
+    Plugins/DeBess.cpp
+    Plugins/DeBez.cpp
+    Plugins/DeRez3.cpp
+    Plugins/DigitalBlack.cpp
+    Plugins/Discontapeity.cpp
+    Plugins/Distance3.cpp
+    Plugins/DubSub2.cpp
+    Plugins/Dubly3.cpp
+    Plugins/FatEQ.cpp
+    Plugins/Flutter2.cpp
+    Plugins/Gatelope.cpp
+    Plugins/GlitchShifter.cpp
+    Plugins/Hypersoft.cpp
+    Plugins/Inflamer.cpp
+    Plugins/Isolator3.cpp
+    Plugins/Mackity.cpp
+    Plugins/OneCornerClip.cpp
+    Plugins/Parametric.cpp
+    Plugins/PearEQ.cpp
+    Plugins/Pockey2.cpp
+    Plugins/PointyGuitar.cpp
+    Plugins/Pop2.cpp
+    Plugins/Silken.cpp
+    Plugins/SingleEndedTriode.cpp
+    Plugins/Smooth.cpp
+    Plugins/SmoothEQ3.cpp
+    Plugins/SoftGate.cpp
+    Plugins/StoneFireComp.cpp
+    Plugins/Stonefire.cpp
+    Plugins/Sweeten.cpp
+    Plugins/TakeCare.cpp
+    Plugins/TapeDelay2.cpp
+    Plugins/TapeDust.cpp
+    Plugins/TapeHack2.cpp
+    Plugins/ToneSlant.cpp
+    Plugins/TremoSquare.cpp
+    Plugins/Trianglizer.cpp
+    Plugins/Tube2.cpp
+    Plugins/Vibrato.cpp
+    Plugins/Weight.cpp
+    Plugins/Wider.cpp
+    Plugins/Chamber.cpp
+    Plugins/Galactic.cpp
+    Plugins/VerbTiny.cpp
+    Plugins/KBeyond.cpp
+    Plugins/KCathedral5.cpp
+    Plugins/KWoodRoom.cpp
 )
 
 add_library(ConduitAirwindows STATIC
@@ -27,6 +81,60 @@ add_library(ConduitAirwindows STATIC
     Plugins/Density.h
     Plugins/Slew.h
     Plugins/Spiral.h
+    Plugins/Air4.h
+    Plugins/Cans.h
+    Plugins/CansAW.h
+    Plugins/Console0Buss.h
+    Plugins/Console0Channel.h
+    Plugins/ConsoleLABuss.h
+    Plugins/ConsoleMCBuss.h
+    Plugins/DeBess.h
+    Plugins/DeBez.h
+    Plugins/DeRez3.h
+    Plugins/DigitalBlack.h
+    Plugins/Discontapeity.h
+    Plugins/Distance3.h
+    Plugins/DubSub2.h
+    Plugins/Dubly3.h
+    Plugins/FatEQ.h
+    Plugins/Flutter2.h
+    Plugins/Gatelope.h
+    Plugins/GlitchShifter.h
+    Plugins/Hypersoft.h
+    Plugins/Inflamer.h
+    Plugins/Isolator3.h
+    Plugins/Mackity.h
+    Plugins/OneCornerClip.h
+    Plugins/Parametric.h
+    Plugins/PearEQ.h
+    Plugins/Pockey2.h
+    Plugins/PointyGuitar.h
+    Plugins/Pop2.h
+    Plugins/Silken.h
+    Plugins/SingleEndedTriode.h
+    Plugins/Smooth.h
+    Plugins/SmoothEQ3.h
+    Plugins/SoftGate.h
+    Plugins/StoneFireComp.h
+    Plugins/Stonefire.h
+    Plugins/Sweeten.h
+    Plugins/TakeCare.h
+    Plugins/TapeDelay2.h
+    Plugins/TapeDust.h
+    Plugins/TapeHack2.h
+    Plugins/ToneSlant.h
+    Plugins/TremoSquare.h
+    Plugins/Trianglizer.h
+    Plugins/Tube2.h
+    Plugins/Vibrato.h
+    Plugins/Weight.h
+    Plugins/Wider.h
+    Plugins/Chamber.h
+    Plugins/Galactic.h
+    Plugins/VerbTiny.h
+    Plugins/KBeyond.h
+    Plugins/KCathedral5.h
+    Plugins/KWoodRoom.h
 )
 
 # Include-Root ist Source/ — Konsumenten und die Lib selbst inkludieren im
@@ -75,6 +183,60 @@ if(TARGET Catch2::Catch2WithMain)
         ${CONDUIT_AIRWINDOWS_TESTS_DIR}/DensityTests.cpp
         ${CONDUIT_AIRWINDOWS_TESTS_DIR}/SlewTests.cpp
         ${CONDUIT_AIRWINDOWS_TESTS_DIR}/SpiralTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/Air4Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/CansTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/CansAWTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/Console0BussTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/Console0ChannelTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/ConsoleLABussTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/ConsoleMCBussTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/DeBessTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/DeBezTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/DeRez3Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/DigitalBlackTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/DiscontapeityTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/Distance3Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/DubSub2Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/Dubly3Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/FatEQTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/Flutter2Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/GatelopeTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/GlitchShifterTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/HypersoftTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/InflamerTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/Isolator3Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/MackityTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/OneCornerClipTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/ParametricTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/PearEQTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/Pockey2Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/PointyGuitarTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/Pop2Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/SilkenTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/SingleEndedTriodeTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/SmoothTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/SmoothEQ3Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/SoftGateTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/StoneFireCompTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/StonefireTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/SweetenTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/TakeCareTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/TapeDelay2Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/TapeDustTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/TapeHack2Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/ToneSlantTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/TremoSquareTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/TrianglizerTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/Tube2Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/VibratoTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/WeightTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/WiderTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/ChamberTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/GalacticTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/VerbTinyTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/KBeyondTests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/KCathedral5Tests.cpp
+        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/KWoodRoomTests.cpp
     )
 
     add_executable(ConduitAirwindowsTests

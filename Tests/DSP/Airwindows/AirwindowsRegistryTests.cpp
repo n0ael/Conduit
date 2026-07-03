@@ -11,7 +11,7 @@ TEST_CASE ("AirwindowsRegistry: Katalog liefert Instanzen, unbekannte id -> null
     using namespace conduit::airwindows;
 
     const auto entries = getRegisteredPlugins();
-    REQUIRE (entries.size() == 3);
+    REQUIRE (entries.size() == 57);
 
     for (const auto& entry : entries)
     {

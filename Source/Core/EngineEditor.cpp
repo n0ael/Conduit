@@ -4,6 +4,60 @@
 #include "Modules/AirwindowsDensityModule.h"
 #include "Modules/AirwindowsSlewModule.h"
 #include "Modules/AirwindowsSpiralModule.h"
+#include "Modules/AirwindowsAir4Module.h"
+#include "Modules/AirwindowsCansModule.h"
+#include "Modules/AirwindowsCansAWModule.h"
+#include "Modules/AirwindowsConsole0BussModule.h"
+#include "Modules/AirwindowsConsole0ChannelModule.h"
+#include "Modules/AirwindowsConsoleLABussModule.h"
+#include "Modules/AirwindowsConsoleMCBussModule.h"
+#include "Modules/AirwindowsDeBessModule.h"
+#include "Modules/AirwindowsDeBezModule.h"
+#include "Modules/AirwindowsDeRez3Module.h"
+#include "Modules/AirwindowsDigitalBlackModule.h"
+#include "Modules/AirwindowsDiscontapeityModule.h"
+#include "Modules/AirwindowsDistance3Module.h"
+#include "Modules/AirwindowsDubSub2Module.h"
+#include "Modules/AirwindowsDubly3Module.h"
+#include "Modules/AirwindowsFatEQModule.h"
+#include "Modules/AirwindowsFlutter2Module.h"
+#include "Modules/AirwindowsGatelopeModule.h"
+#include "Modules/AirwindowsGlitchShifterModule.h"
+#include "Modules/AirwindowsHypersoftModule.h"
+#include "Modules/AirwindowsInflamerModule.h"
+#include "Modules/AirwindowsIsolator3Module.h"
+#include "Modules/AirwindowsMackityModule.h"
+#include "Modules/AirwindowsOneCornerClipModule.h"
+#include "Modules/AirwindowsParametricModule.h"
+#include "Modules/AirwindowsPearEQModule.h"
+#include "Modules/AirwindowsPockey2Module.h"
+#include "Modules/AirwindowsPointyGuitarModule.h"
+#include "Modules/AirwindowsPop2Module.h"
+#include "Modules/AirwindowsSilkenModule.h"
+#include "Modules/AirwindowsSingleEndedTriodeModule.h"
+#include "Modules/AirwindowsSmoothModule.h"
+#include "Modules/AirwindowsSmoothEQ3Module.h"
+#include "Modules/AirwindowsSoftGateModule.h"
+#include "Modules/AirwindowsStoneFireCompModule.h"
+#include "Modules/AirwindowsStonefireModule.h"
+#include "Modules/AirwindowsSweetenModule.h"
+#include "Modules/AirwindowsTakeCareModule.h"
+#include "Modules/AirwindowsTapeDelay2Module.h"
+#include "Modules/AirwindowsTapeDustModule.h"
+#include "Modules/AirwindowsTapeHack2Module.h"
+#include "Modules/AirwindowsToneSlantModule.h"
+#include "Modules/AirwindowsTremoSquareModule.h"
+#include "Modules/AirwindowsTrianglizerModule.h"
+#include "Modules/AirwindowsTube2Module.h"
+#include "Modules/AirwindowsVibratoModule.h"
+#include "Modules/AirwindowsWeightModule.h"
+#include "Modules/AirwindowsWiderModule.h"
+#include "Modules/AirwindowsChamberModule.h"
+#include "Modules/AirwindowsGalacticModule.h"
+#include "Modules/AirwindowsVerbTinyModule.h"
+#include "Modules/AirwindowsKBeyondModule.h"
+#include "Modules/AirwindowsKCathedral5Module.h"
+#include "Modules/AirwindowsKWoodRoomModule.h"
 #include "Modules/AttenuatorModule.h"
 #include "Modules/CaptureTapModule.h"
 #include "Modules/LfoModule.h"
@@ -155,6 +209,60 @@ std::vector<ModuleBrowser::Item> EngineEditor::buildBrowserItems()
     items.push_back ({ "Density",     [addModule] { addModule (AirwindowsDensityModule::staticModuleId); }, false });
     items.push_back ({ "Slew",        [addModule] { addModule (AirwindowsSlewModule::staticModuleId); }, false });
     items.push_back ({ "Spiral",      [addModule] { addModule (AirwindowsSpiralModule::staticModuleId); }, false });
+    items.push_back ({ "Air4",     [addModule] { addModule (AirwindowsAir4Module::staticModuleId); }, false });
+    items.push_back ({ "Cans",     [addModule] { addModule (AirwindowsCansModule::staticModuleId); }, false });
+    items.push_back ({ "CansAW",     [addModule] { addModule (AirwindowsCansAWModule::staticModuleId); }, false });
+    items.push_back ({ "Console0Buss",     [addModule] { addModule (AirwindowsConsole0BussModule::staticModuleId); }, false });
+    items.push_back ({ "Console0Channel",     [addModule] { addModule (AirwindowsConsole0ChannelModule::staticModuleId); }, false });
+    items.push_back ({ "ConsoleLABuss",     [addModule] { addModule (AirwindowsConsoleLABussModule::staticModuleId); }, false });
+    items.push_back ({ "ConsoleMCBuss",     [addModule] { addModule (AirwindowsConsoleMCBussModule::staticModuleId); }, false });
+    items.push_back ({ "DeBess",     [addModule] { addModule (AirwindowsDeBessModule::staticModuleId); }, false });
+    items.push_back ({ "DeBez",     [addModule] { addModule (AirwindowsDeBezModule::staticModuleId); }, false });
+    items.push_back ({ "DeRez3",     [addModule] { addModule (AirwindowsDeRez3Module::staticModuleId); }, false });
+    items.push_back ({ "DigitalBlack",     [addModule] { addModule (AirwindowsDigitalBlackModule::staticModuleId); }, false });
+    items.push_back ({ "Discontapeity",     [addModule] { addModule (AirwindowsDiscontapeityModule::staticModuleId); }, false });
+    items.push_back ({ "Distance3",     [addModule] { addModule (AirwindowsDistance3Module::staticModuleId); }, false });
+    items.push_back ({ "DubSub2",     [addModule] { addModule (AirwindowsDubSub2Module::staticModuleId); }, false });
+    items.push_back ({ "Dubly3",     [addModule] { addModule (AirwindowsDubly3Module::staticModuleId); }, false });
+    items.push_back ({ "FatEQ",     [addModule] { addModule (AirwindowsFatEQModule::staticModuleId); }, false });
+    items.push_back ({ "Flutter2",     [addModule] { addModule (AirwindowsFlutter2Module::staticModuleId); }, false });
+    items.push_back ({ "Gatelope",     [addModule] { addModule (AirwindowsGatelopeModule::staticModuleId); }, false });
+    items.push_back ({ "GlitchShifter",     [addModule] { addModule (AirwindowsGlitchShifterModule::staticModuleId); }, false });
+    items.push_back ({ "Hypersoft",     [addModule] { addModule (AirwindowsHypersoftModule::staticModuleId); }, false });
+    items.push_back ({ "Inflamer",     [addModule] { addModule (AirwindowsInflamerModule::staticModuleId); }, false });
+    items.push_back ({ "Isolator3",     [addModule] { addModule (AirwindowsIsolator3Module::staticModuleId); }, false });
+    items.push_back ({ "Mackity",     [addModule] { addModule (AirwindowsMackityModule::staticModuleId); }, false });
+    items.push_back ({ "OneCornerClip",     [addModule] { addModule (AirwindowsOneCornerClipModule::staticModuleId); }, false });
+    items.push_back ({ "Parametric",     [addModule] { addModule (AirwindowsParametricModule::staticModuleId); }, false });
+    items.push_back ({ "PearEQ",     [addModule] { addModule (AirwindowsPearEQModule::staticModuleId); }, false });
+    items.push_back ({ "Pockey2",     [addModule] { addModule (AirwindowsPockey2Module::staticModuleId); }, false });
+    items.push_back ({ "PointyGuitar",     [addModule] { addModule (AirwindowsPointyGuitarModule::staticModuleId); }, false });
+    items.push_back ({ "Pop2",     [addModule] { addModule (AirwindowsPop2Module::staticModuleId); }, false });
+    items.push_back ({ "Silken",     [addModule] { addModule (AirwindowsSilkenModule::staticModuleId); }, false });
+    items.push_back ({ "SingleEndedTriode",     [addModule] { addModule (AirwindowsSingleEndedTriodeModule::staticModuleId); }, false });
+    items.push_back ({ "Smooth",     [addModule] { addModule (AirwindowsSmoothModule::staticModuleId); }, false });
+    items.push_back ({ "SmoothEQ3",     [addModule] { addModule (AirwindowsSmoothEQ3Module::staticModuleId); }, false });
+    items.push_back ({ "SoftGate",     [addModule] { addModule (AirwindowsSoftGateModule::staticModuleId); }, false });
+    items.push_back ({ "StoneFireComp",     [addModule] { addModule (AirwindowsStoneFireCompModule::staticModuleId); }, false });
+    items.push_back ({ "Stonefire",     [addModule] { addModule (AirwindowsStonefireModule::staticModuleId); }, false });
+    items.push_back ({ "Sweeten",     [addModule] { addModule (AirwindowsSweetenModule::staticModuleId); }, false });
+    items.push_back ({ "TakeCare",     [addModule] { addModule (AirwindowsTakeCareModule::staticModuleId); }, false });
+    items.push_back ({ "TapeDelay2",     [addModule] { addModule (AirwindowsTapeDelay2Module::staticModuleId); }, false });
+    items.push_back ({ "TapeDust",     [addModule] { addModule (AirwindowsTapeDustModule::staticModuleId); }, false });
+    items.push_back ({ "TapeHack2",     [addModule] { addModule (AirwindowsTapeHack2Module::staticModuleId); }, false });
+    items.push_back ({ "ToneSlant",     [addModule] { addModule (AirwindowsToneSlantModule::staticModuleId); }, false });
+    items.push_back ({ "TremoSquare",     [addModule] { addModule (AirwindowsTremoSquareModule::staticModuleId); }, false });
+    items.push_back ({ "Trianglizer",     [addModule] { addModule (AirwindowsTrianglizerModule::staticModuleId); }, false });
+    items.push_back ({ "Tube2",     [addModule] { addModule (AirwindowsTube2Module::staticModuleId); }, false });
+    items.push_back ({ "Vibrato",     [addModule] { addModule (AirwindowsVibratoModule::staticModuleId); }, false });
+    items.push_back ({ "Weight",     [addModule] { addModule (AirwindowsWeightModule::staticModuleId); }, false });
+    items.push_back ({ "Wider",     [addModule] { addModule (AirwindowsWiderModule::staticModuleId); }, false });
+    items.push_back ({ "Chamber",     [addModule] { addModule (AirwindowsChamberModule::staticModuleId); }, false });
+    items.push_back ({ "Galactic",     [addModule] { addModule (AirwindowsGalacticModule::staticModuleId); }, false });
+    items.push_back ({ "VerbTiny",     [addModule] { addModule (AirwindowsVerbTinyModule::staticModuleId); }, false });
+    items.push_back ({ "kBeyond",     [addModule] { addModule (AirwindowsKBeyondModule::staticModuleId); }, false });
+    items.push_back ({ "kCathedral5",     [addModule] { addModule (AirwindowsKCathedral5Module::staticModuleId); }, false });
+    items.push_back ({ "kWoodRoom",     [addModule] { addModule (AirwindowsKWoodRoomModule::staticModuleId); }, false });
 
     // Link-Send: Eingangszahl ist fix beim Anlegen (7.2) → kleiner Dialog
     // (Mono-/Stereo-Anzahl), dann Node mit der gewählten Config materialisieren

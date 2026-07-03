@@ -127,6 +127,60 @@ set(CONDUIT_CPP_SOURCES
     Source/Modules/AirwindowsDensityModule.cpp
     Source/Modules/AirwindowsSlewModule.cpp
     Source/Modules/AirwindowsSpiralModule.cpp
+    Source/Modules/AirwindowsAir4Module.cpp
+    Source/Modules/AirwindowsCansModule.cpp
+    Source/Modules/AirwindowsCansAWModule.cpp
+    Source/Modules/AirwindowsConsole0BussModule.cpp
+    Source/Modules/AirwindowsConsole0ChannelModule.cpp
+    Source/Modules/AirwindowsConsoleLABussModule.cpp
+    Source/Modules/AirwindowsConsoleMCBussModule.cpp
+    Source/Modules/AirwindowsDeBessModule.cpp
+    Source/Modules/AirwindowsDeBezModule.cpp
+    Source/Modules/AirwindowsDeRez3Module.cpp
+    Source/Modules/AirwindowsDigitalBlackModule.cpp
+    Source/Modules/AirwindowsDiscontapeityModule.cpp
+    Source/Modules/AirwindowsDistance3Module.cpp
+    Source/Modules/AirwindowsDubSub2Module.cpp
+    Source/Modules/AirwindowsDubly3Module.cpp
+    Source/Modules/AirwindowsFatEQModule.cpp
+    Source/Modules/AirwindowsFlutter2Module.cpp
+    Source/Modules/AirwindowsGatelopeModule.cpp
+    Source/Modules/AirwindowsGlitchShifterModule.cpp
+    Source/Modules/AirwindowsHypersoftModule.cpp
+    Source/Modules/AirwindowsInflamerModule.cpp
+    Source/Modules/AirwindowsIsolator3Module.cpp
+    Source/Modules/AirwindowsMackityModule.cpp
+    Source/Modules/AirwindowsOneCornerClipModule.cpp
+    Source/Modules/AirwindowsParametricModule.cpp
+    Source/Modules/AirwindowsPearEQModule.cpp
+    Source/Modules/AirwindowsPockey2Module.cpp
+    Source/Modules/AirwindowsPointyGuitarModule.cpp
+    Source/Modules/AirwindowsPop2Module.cpp
+    Source/Modules/AirwindowsSilkenModule.cpp
+    Source/Modules/AirwindowsSingleEndedTriodeModule.cpp
+    Source/Modules/AirwindowsSmoothModule.cpp
+    Source/Modules/AirwindowsSmoothEQ3Module.cpp
+    Source/Modules/AirwindowsSoftGateModule.cpp
+    Source/Modules/AirwindowsStoneFireCompModule.cpp
+    Source/Modules/AirwindowsStonefireModule.cpp
+    Source/Modules/AirwindowsSweetenModule.cpp
+    Source/Modules/AirwindowsTakeCareModule.cpp
+    Source/Modules/AirwindowsTapeDelay2Module.cpp
+    Source/Modules/AirwindowsTapeDustModule.cpp
+    Source/Modules/AirwindowsTapeHack2Module.cpp
+    Source/Modules/AirwindowsToneSlantModule.cpp
+    Source/Modules/AirwindowsTremoSquareModule.cpp
+    Source/Modules/AirwindowsTrianglizerModule.cpp
+    Source/Modules/AirwindowsTube2Module.cpp
+    Source/Modules/AirwindowsVibratoModule.cpp
+    Source/Modules/AirwindowsWeightModule.cpp
+    Source/Modules/AirwindowsWiderModule.cpp
+    Source/Modules/AirwindowsChamberModule.cpp
+    Source/Modules/AirwindowsGalacticModule.cpp
+    Source/Modules/AirwindowsVerbTinyModule.cpp
+    Source/Modules/AirwindowsKBeyondModule.cpp
+    Source/Modules/AirwindowsKCathedral5Module.cpp
+    Source/Modules/AirwindowsKWoodRoomModule.cpp
     Source/Modules/AttenuatorModule.cpp
     Source/Modules/CaptureTapModule.cpp
     Source/Modules/LfoModule.cpp
@@ -216,6 +270,60 @@ target_sources(Conduit PRIVATE
     Source/Modules/AirwindowsDensityModule.h
     Source/Modules/AirwindowsSlewModule.h
     Source/Modules/AirwindowsSpiralModule.h
+    Source/Modules/AirwindowsAir4Module.h
+    Source/Modules/AirwindowsCansModule.h
+    Source/Modules/AirwindowsCansAWModule.h
+    Source/Modules/AirwindowsConsole0BussModule.h
+    Source/Modules/AirwindowsConsole0ChannelModule.h
+    Source/Modules/AirwindowsConsoleLABussModule.h
+    Source/Modules/AirwindowsConsoleMCBussModule.h
+    Source/Modules/AirwindowsDeBessModule.h
+    Source/Modules/AirwindowsDeBezModule.h
+    Source/Modules/AirwindowsDeRez3Module.h
+    Source/Modules/AirwindowsDigitalBlackModule.h
+    Source/Modules/AirwindowsDiscontapeityModule.h
+    Source/Modules/AirwindowsDistance3Module.h
+    Source/Modules/AirwindowsDubSub2Module.h
+    Source/Modules/AirwindowsDubly3Module.h
+    Source/Modules/AirwindowsFatEQModule.h
+    Source/Modules/AirwindowsFlutter2Module.h
+    Source/Modules/AirwindowsGatelopeModule.h
+    Source/Modules/AirwindowsGlitchShifterModule.h
+    Source/Modules/AirwindowsHypersoftModule.h
+    Source/Modules/AirwindowsInflamerModule.h
+    Source/Modules/AirwindowsIsolator3Module.h
+    Source/Modules/AirwindowsMackityModule.h
+    Source/Modules/AirwindowsOneCornerClipModule.h
+    Source/Modules/AirwindowsParametricModule.h
+    Source/Modules/AirwindowsPearEQModule.h
+    Source/Modules/AirwindowsPockey2Module.h
+    Source/Modules/AirwindowsPointyGuitarModule.h
+    Source/Modules/AirwindowsPop2Module.h
+    Source/Modules/AirwindowsSilkenModule.h
+    Source/Modules/AirwindowsSingleEndedTriodeModule.h
+    Source/Modules/AirwindowsSmoothModule.h
+    Source/Modules/AirwindowsSmoothEQ3Module.h
+    Source/Modules/AirwindowsSoftGateModule.h
+    Source/Modules/AirwindowsStoneFireCompModule.h
+    Source/Modules/AirwindowsStonefireModule.h
+    Source/Modules/AirwindowsSweetenModule.h
+    Source/Modules/AirwindowsTakeCareModule.h
+    Source/Modules/AirwindowsTapeDelay2Module.h
+    Source/Modules/AirwindowsTapeDustModule.h
+    Source/Modules/AirwindowsTapeHack2Module.h
+    Source/Modules/AirwindowsToneSlantModule.h
+    Source/Modules/AirwindowsTremoSquareModule.h
+    Source/Modules/AirwindowsTrianglizerModule.h
+    Source/Modules/AirwindowsTube2Module.h
+    Source/Modules/AirwindowsVibratoModule.h
+    Source/Modules/AirwindowsWeightModule.h
+    Source/Modules/AirwindowsWiderModule.h
+    Source/Modules/AirwindowsChamberModule.h
+    Source/Modules/AirwindowsGalacticModule.h
+    Source/Modules/AirwindowsVerbTinyModule.h
+    Source/Modules/AirwindowsKBeyondModule.h
+    Source/Modules/AirwindowsKCathedral5Module.h
+    Source/Modules/AirwindowsKWoodRoomModule.h
     Source/Modules/AttenuatorModule.h
     Source/Modules/CaptureTapModule.h
     Source/Modules/LfoModule.h
@@ -409,6 +517,60 @@ if(CONDUIT_BUILD_TESTS)
         Source/Modules/AirwindowsDensityModule.cpp
         Source/Modules/AirwindowsSlewModule.cpp
         Source/Modules/AirwindowsSpiralModule.cpp
+        Source/Modules/AirwindowsAir4Module.cpp
+        Source/Modules/AirwindowsCansModule.cpp
+        Source/Modules/AirwindowsCansAWModule.cpp
+        Source/Modules/AirwindowsConsole0BussModule.cpp
+        Source/Modules/AirwindowsConsole0ChannelModule.cpp
+        Source/Modules/AirwindowsConsoleLABussModule.cpp
+        Source/Modules/AirwindowsConsoleMCBussModule.cpp
+        Source/Modules/AirwindowsDeBessModule.cpp
+        Source/Modules/AirwindowsDeBezModule.cpp
+        Source/Modules/AirwindowsDeRez3Module.cpp
+        Source/Modules/AirwindowsDigitalBlackModule.cpp
+        Source/Modules/AirwindowsDiscontapeityModule.cpp
+        Source/Modules/AirwindowsDistance3Module.cpp
+        Source/Modules/AirwindowsDubSub2Module.cpp
+        Source/Modules/AirwindowsDubly3Module.cpp
+        Source/Modules/AirwindowsFatEQModule.cpp
+        Source/Modules/AirwindowsFlutter2Module.cpp
+        Source/Modules/AirwindowsGatelopeModule.cpp
+        Source/Modules/AirwindowsGlitchShifterModule.cpp
+        Source/Modules/AirwindowsHypersoftModule.cpp
+        Source/Modules/AirwindowsInflamerModule.cpp
+        Source/Modules/AirwindowsIsolator3Module.cpp
+        Source/Modules/AirwindowsMackityModule.cpp
+        Source/Modules/AirwindowsOneCornerClipModule.cpp
+        Source/Modules/AirwindowsParametricModule.cpp
+        Source/Modules/AirwindowsPearEQModule.cpp
+        Source/Modules/AirwindowsPockey2Module.cpp
+        Source/Modules/AirwindowsPointyGuitarModule.cpp
+        Source/Modules/AirwindowsPop2Module.cpp
+        Source/Modules/AirwindowsSilkenModule.cpp
+        Source/Modules/AirwindowsSingleEndedTriodeModule.cpp
+        Source/Modules/AirwindowsSmoothModule.cpp
+        Source/Modules/AirwindowsSmoothEQ3Module.cpp
+        Source/Modules/AirwindowsSoftGateModule.cpp
+        Source/Modules/AirwindowsStoneFireCompModule.cpp
+        Source/Modules/AirwindowsStonefireModule.cpp
+        Source/Modules/AirwindowsSweetenModule.cpp
+        Source/Modules/AirwindowsTakeCareModule.cpp
+        Source/Modules/AirwindowsTapeDelay2Module.cpp
+        Source/Modules/AirwindowsTapeDustModule.cpp
+        Source/Modules/AirwindowsTapeHack2Module.cpp
+        Source/Modules/AirwindowsToneSlantModule.cpp
+        Source/Modules/AirwindowsTremoSquareModule.cpp
+        Source/Modules/AirwindowsTrianglizerModule.cpp
+        Source/Modules/AirwindowsTube2Module.cpp
+        Source/Modules/AirwindowsVibratoModule.cpp
+        Source/Modules/AirwindowsWeightModule.cpp
+        Source/Modules/AirwindowsWiderModule.cpp
+        Source/Modules/AirwindowsChamberModule.cpp
+        Source/Modules/AirwindowsGalacticModule.cpp
+        Source/Modules/AirwindowsVerbTinyModule.cpp
+        Source/Modules/AirwindowsKBeyondModule.cpp
+        Source/Modules/AirwindowsKCathedral5Module.cpp
+        Source/Modules/AirwindowsKWoodRoomModule.cpp
         Source/Modules/AttenuatorModule.cpp
         Source/Modules/CaptureTapModule.cpp
         Source/Modules/LfoModule.cpp

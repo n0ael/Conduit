@@ -16,6 +16,82 @@
 
 ## Aktueller Meilenstein (Juli 2026 — in Arbeit)
 
+**Airwindows-Massen-Port: 54 neue FX-Module (alle Airwindows-Consolidated-Favoriten des Users):**
+
+- **Ausgangslage:** User hat in Ableton Airwindows Consolidated durchgeschaut und 53
+  Plugins als Favoriten markiert (Screenshot der Favoritenliste); Auftrag: alle als
+  eigenständige Conduit-Module portieren, autonom über Nacht, lokale Commits ohne Push.
+- **Umsetzung:** 6 parallele Batch-Agenten (je 8 Plugins) für die "einfachen" Effekte
+  (EQ/Dynamics/Lo-Fi/Sättigung/Effects) + 2 parallele Agenten für die 4 größten
+  Reverbs (VerbTiny/kWoodRoom, kBeyond/kCathedral5) + Chamber/Galactic selbst portiert
+  (RT-Safety der Reverb-Delaybuffer vorab geprüft: alle bereits im Original fest
+  dimensionierte C-Arrays, kein `new`/`malloc` im Verarbeitungspfad nötig). Quelle:
+  `plugins/LinuxVST/src/<Name>/` (github.com/airwindows/airwindows, MIT), per `curl`
+  verifiziert. Muster: `AirwindowsProcessorModule` (bestehender generischer Chassis-
+  Wrapper) + je Plugin ein dünner `Airwindows<Name>Module` (~10 Zeilen) + Eintrag in
+  `AirwindowsRegistry`/`ModuleFactory`/Browser/CMakeLists.
+- **Zentrale Integration:** Registry/CMakeLists (2 Ebenen)/ModuleFactory/EngineEditor-
+  Browser per Skript verdrahtet (54× Include+Eintrag je Datei), dünne Wrapper-Module
+  generiert, ein neuer generischer Registry-Sweep-Test (`AirwindowsModuleTests.cpp`)
+  ersetzt 54× Copy-Paste-Testboilerplate (iteriert `getRegisteredPlugins()`, wrappt
+  jeden Eintrag chassis-konform, sweept alle DSP-Parameter NaN/Inf-frei).
+- **Gefundene und dokumentierte Abweichungen vom 1:1-Port** (`PORTING_NOTES.md`):
+  Off-by-one-Array-Fix (FatEQ/Isolator3/Pop2/Silken, Original-Bug, geclampter Index
+  erreichte nie den Rand außerhalb Conduit-Zielraten), UB-Fix bei `derez==0` (kBeyond,
+  `(int)+inf`-Konvertierung), `rand()`-im-DSP-Pfad-Fix (TapeDust, echter CLAUDE.md-
+  3.1-Verstoß im Original, durch fpd-Xorshift ersetzt), zwei bewusst NICHT reparierte
+  Original-Eigenheiten (kCathedral5 Kanaltausch, kWoodRoom Doppel-Increment — beide
+  identisch in beiden Original-Funktionen verifiziert, also echtes Original-Verhalten).
+- **Live-Test-Fund (User, GlitchShifter): Knacksen bei Tighten/Note/Trim → Kern
+  bewusst umgebaut (User-Freigabe „komplett offen für tiefgreifende Änderungen"):**
+  Vier punktuelle Fixes (Registry-Reset entfernt, Position umskaliert, gcount-
+  Modulo-Wrap statt Hart-Reset, 16-Sample-Declick) reduzierten das Knacksen nur.
+  Diagnose: (a) jeder Splice ist im Original ein harter Lese-Sprung mit Ein-Sample-
+  Blend — knackst zunehmend mit Note/Trim-Auslenkung; (b) Tighten ändert die Ring-
+  Geometrie bei offenem Ausgang — prinzipbedingt nicht klickfrei flickbar. Umbau
+  (Original-Splice-AUSWAHL per Zero-Cross-Matching unverändert): **Dual-Tap-
+  Crossfade** (zwei Lese-Taps, Splice-Trigger mit Vorlauf, alter Tap spielt beim
+  Überblenden weiter, xfade-Inversion hält Swaps stetig, Fade `clamp(width/2,16,512)`)
+  + **geduckter Geometrie-Wechsel** (Wet ~1,3 ms auf 0 → width/gcount/Taps tauschen
+  → ~5 ms wieder hoch; aus Klicks werden kurze Wet-Dips). Bei neutralem Note/Trim
+  entstehen keine Splices mehr (klickfrei per Konstruktion). Doku: PORTING_NOTES.md
+  + Header-Kommentar GlitchShifter.h.
+- **GlitchShifter-Feinschliff über WAV-Klick-Analyse (messbasiert statt hörbasiert):**
+  User nahm Conduit-Captures auf (Capture-Tap!), ein Node-Detektor-Skript fand
+  Sample-Diskontinuitäten mit Zeitstempel/Kontext, ein neuer In-Test-Klick-Audit
+  (Sinus + automatisierte Regler-Sweeps + Debug-Getter-Zustandslog) machte die
+  Ursachen reproduzierbar: mid-fade Tap-Teleports (Fix: Splice-Gate auf
+  abgeschlossenen Crossfade), Kernel-Vorauslesen am Schreibkopf (Fix:
+  3-Sample-Korridor), nie mehr beschriebener Slot 0 (Fix: Original-Wrap),
+  Epochen-Narben nach Geometrie-Wechseln (Fix: Taps auf frische Position +
+  Registry-Reset im stummen Duck + Duck-Hold) und Feedback-DC-Lock durch
+  unbegrenzte Extrapolation (Fix: Clamp auf ±24-Bit-Skala). Messwerte:
+  Capture 1 = 669 Klick-Events (Sprünge bis 0.40), Capture 2 nach Fixes =
+  53 Events (großteils Synth-Attacks des Testmaterials, Rest ≤ 0.098), Audit
+  intern 0.26 → 0.048 (= inhärente Kernel-Textur des Originals). **User-Abnahme:
+  „gut genug", Klick-Audit + Feedback-Regression bleiben als Dauertests.**
+- **Verifikation:** Hauptsuite (`ConduitTests`) Debug + ASan grün (286 Testfälle /
+  11855 Assertions, inkl. generischem Registry-Sweep über alle 57 Airwindows-Module).
+  DSP-Level-DoD-Suite (`ConduitAirwindowsTests`, separates Target) läuft — Ergebnis
+  wird nach Abschluss hier nachgetragen. App (Debug) gebaut und manuell getestet.
+- **Abschluss:** Alle Suiten grün (Debug + ASan, inkl. vollständiger DoD-Läufe
+  aller 57 Ports), User-Abnahme erteilt, Commit + Push auf master (User-Freigabe
+  03.07.2026 nachmittags — ersetzt die nächtliche „nur lokal"-Vorgabe).
+
+**Nächster geplanter Meilenstein: Fader↔Button-Modus pro Parameter (Dev-Modus, User-Idee 03.07.2026):**
+
+- Im Dev-Modus soll sich jede dsp-Parameter-Spalte von Fader auf benannte
+  Preset-Wert-Buttons umschalten lassen: max. 5 Buttons pro Reihe, danach
+  automatisch zweite Reihe (Limit z.B. 10); Button = benennbarer Wert-Snapshot
+  („aktuellen Wert als Button speichern", Umbenennen per Doppelklick).
+- Architektur-Mapping (Muster CLAUDE.md 4.6, wie userMin/userMax/curve):
+  neue per-Parameter-Patch-Properties `uiMode` ("fader"|"buttons") +
+  Snapshot-Liste (Name+Wert); Buttons schreiben denselben Wert über denselben
+  undo-fähigen Pfad wie der Fader — OSC/CV/Control-Links unverändert;
+  `ModuleUiDefaults` nimmt Button-Sets pro factoryId mit („als Standard").
+- Motivation u.a. GlitchShifter/Tighten: ein Button-Sprung = EIN
+  Geometrie-Wechsel (ein kurzer Wet-Dip) statt Dutzender beim Fader-Sweep.
+
 **FX-Chassis-Standard für alle Audio-FX-Module (Plan: 7 Meilensteine M1–M7) — M1–M6 abgeschlossen:**
 
 Ziel des Gesamtvorhabens (User-Plan 03.07.): jedes FX-Modul bekommt einheitlich

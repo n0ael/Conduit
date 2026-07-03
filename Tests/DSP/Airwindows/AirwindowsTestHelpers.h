@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <catch2/catch_message.hpp>
@@ -64,17 +65,23 @@ inline bool allFiniteAndNormal (const std::vector<float>& buffer)
 // DoD-Test 1: Stille rein (Dither off, Defaults) → Stille raus.
 // Toleranz 1e-6 (−120 dBFS): der Denormal-Guard der Originale injiziert
 // fpd * 1.18e-17 (max. ~5e-8) — bewusst kein exakter Null-Vergleich.
+//
+// Plugin-Instanzen werden hier IMMER per make_unique (Heap) angelegt, nie auf
+// dem Stack: manche Ports (z.B. GlitchShifter mit ~2 MB Ringpuffer-Membern)
+// sprengen sonst den Standard-Thread-Stack (SIGSEGV) — die echte App legt
+// jedes Airwindows-Plugin ohnehin über ModuleFactory::make_unique auf dem
+// Heap an, der Test bildet damit den echten Lebenszyklus ab.
 template <typename PluginType>
 void runNullTest()
 {
-    PluginType plugin;
-    plugin.prepare (48000.0);
-    REQUIRE (! plugin.isDitherEnabled()); // Default OFF (CLAUDE.local.md)
+    auto plugin = std::make_unique<PluginType>();
+    plugin->prepare (48000.0);
+    REQUIRE (! plugin->isDitherEnabled()); // Default OFF (CLAUDE.local.md)
 
     const std::vector<float> silence (4096, 0.0f);
     std::vector<float> outL (silence.size(), 1.0f), outR (silence.size(), 1.0f);
 
-    processInBlocks (plugin, silence, silence, outL, outR, 64);
+    processInBlocks (*plugin, silence, silence, outL, outR, 64);
 
     REQUIRE (maxAbs (outL) < 1.0e-6f);
     REQUIRE (maxAbs (outR) < 1.0e-6f);
@@ -87,10 +94,10 @@ void runBlockSizeInvariance()
 {
     auto renderWithBlockSize = [] (int blockSize, std::vector<float>& outL, std::vector<float>& outR)
     {
-        PluginType plugin;
-        plugin.prepare (48000.0);
-        for (int i = 0; i < plugin.getNumParameters(); ++i)
-            plugin.setParameter (i, 0.7f); // von den Defaults wegbewegen
+        auto plugin = std::make_unique<PluginType>();
+        plugin->prepare (48000.0);
+        for (int i = 0; i < plugin->getNumParameters(); ++i)
+            plugin->setParameter (i, 0.7f); // von den Defaults wegbewegen
 
         std::vector<float> inL (4096), inR (4096);
         fillNoise (inL, 0xC0FFEE01u);
@@ -98,7 +105,7 @@ void runBlockSizeInvariance()
 
         outL.assign (inL.size(), 0.0f);
         outR.assign (inR.size(), 0.0f);
-        processInBlocks (plugin, inL, inR, outL, outR, blockSize);
+        processInBlocks (*plugin, inL, inR, outL, outR, blockSize);
     };
 
     std::vector<float> smallL, smallR, largeL, largeR;
@@ -123,7 +130,7 @@ void runParameterSweep()
     fillNoise (inR, 0x5EED0002u);
     std::vector<float> outL (inL.size()), outR (inR.size());
 
-    const int numParams = PluginType().getNumParameters();
+    const int numParams = std::make_unique<PluginType>()->getNumParameters();
     int combos = 1;
     for (int i = 0; i < numParams; ++i)
         combos *= numValues;
@@ -132,18 +139,18 @@ void runParameterSweep()
     {
         for (int combo = 0; combo < combos; ++combo)
         {
-            PluginType plugin;
-            plugin.prepare (48000.0);
-            plugin.setDitherEnabled (ditherPass == 1);
+            auto plugin = std::make_unique<PluginType>();
+            plugin->prepare (48000.0);
+            plugin->setDitherEnabled (ditherPass == 1);
 
             int digits = combo;
             for (int i = 0; i < numParams; ++i)
             {
-                plugin.setParameter (i, sweepValues[digits % numValues]);
+                plugin->setParameter (i, sweepValues[digits % numValues]);
                 digits /= numValues;
             }
 
-            processInBlocks (plugin, inL, inR, outL, outR, 512);
+            processInBlocks (*plugin, inL, inR, outL, outR, 512);
 
             CAPTURE (combo, ditherPass);
             REQUIRE (allFiniteAndNormal (outL));
