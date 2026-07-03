@@ -154,6 +154,33 @@ TEST_CASE ("TransportBar: Skala-Combos schreiben die Root-Properties", "[transpo
     REQUIRE (rig.bar.getPlusTile().isEnabled());
 }
 
+TEST_CASE ("TransportBar: Skala-Toggle schaltet chromatisch <-> letzte Skala", "[transport][ui]")
+{
+    TransportBarRig rig;   // Start: chromatic → Toggle-LED aus
+
+    auto& toggle = rig.bar.getScaleToggleTile();
+    REQUIRE_FALSE (toggle.isActive());
+
+    // Einschalten ohne vorherige Auswahl: Default-Skala (minor)
+    toggle.onClick();
+    REQUIRE (rig.root.getProperty (conduit::id::scaleType).toString() == "minor");
+    REQUIRE (toggle.isActive());
+
+    // Ausschalten → chromatisch (= keine Quantisierung)
+    toggle.onClick();
+    REQUIRE (rig.root.getProperty (conduit::id::scaleType).toString() == "chromatic");
+    REQUIRE_FALSE (toggle.isActive());
+
+    // Skala manuell wählen → Toggle-LED an, Toggle merkt sich die Wahl
+    rig.root.setProperty (conduit::id::scaleType, "pentatonic", nullptr);
+    // (Combo-Weg wäre UI-identisch — Property direkt, dann Toggle-Roundtrip)
+    toggle.onClick();   // pentatonic → aus
+    REQUIRE (rig.root.getProperty (conduit::id::scaleType).toString() == "chromatic");
+    toggle.onClick();   // wieder an → zuletzt gewählte Skala
+    REQUIRE (rig.root.getProperty (conduit::id::scaleType).toString() == "pentatonic");
+    REQUIRE (toggle.isActive());
+}
+
 TEST_CASE ("TransportBar: formatPosition — Ableton-Zählweise Takt. Beat. Sechzehntel",
            "[transport][ui]")
 {

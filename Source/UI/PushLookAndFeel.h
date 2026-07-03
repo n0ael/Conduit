@@ -98,8 +98,17 @@ public:
     // über ihre LnF-Fonts. Alle Overrides skalieren das V4-Ergebnis.
     juce::Font getLabelFont (juce::Label& label) override;
     juce::Font getTextButtonFont (juce::TextButton& button, int buttonHeight) override;
-    juce::Font getComboBoxFont (juce::ComboBox& box) override;
     juce::Font getPopupMenuFont() override;
+
+    /** ComboBoxen im Kachel-Stil (Header-Skala, CurveEditor): Schrift wie
+        die TextTiles (Jost 13 × fontScale) statt der größeren V4-Font. */
+    juce::Font getComboBoxFont (juce::ComboBox& box) override;
+
+    /** Kachel-Optik wie die Push-Tiles (Ableton-Look der Skala-Gruppe):
+        dunkle Fläche, 4-px-Radius, dezente Kontur, kleiner ▾ rechts. */
+    void drawComboBox (juce::Graphics& g, int width, int height, bool isButtonDown,
+                       int buttonX, int buttonY, int buttonW, int buttonH,
+                       juce::ComboBox& box) override;
 
     /** ToggleButtons haben in LookAndFeel_V4 eine HARTKODIERTE Schriftgröße
         (kein Font-Hook) — V4-Zeichnung nachgebaut, Font × fontScale. */

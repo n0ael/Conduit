@@ -9,6 +9,7 @@
 #include "Core/TransportSettings.h"
 #include "ModuleBrowser.h"
 #include "PushTiles.h"
+#include "Util/ScaleQuantizer.h"
 
 namespace conduit
 {
@@ -123,6 +124,7 @@ public:
     void setDevPanelOpen (bool isOpen);
 
     [[nodiscard]] push::TextTile& getDevTile() noexcept { return devTile; }
+    [[nodiscard]] push::IconTile& getScaleToggleTile() noexcept { return scaleToggleTile; }
 
 private:
     void openBrowser();
@@ -163,8 +165,13 @@ private:
     push::TextTile saveTile { "Save" };
     push::IconTile gearTile { push::Icon::gear, "settings" };
     push::TextTile devTile  { "Dev", push::colours::ledOrange };  // nur im Dev Mode
+
+    // Skala-Gruppe im Ableton-Look: [♯-Toggle][Root][Skala] bündig — der
+    // Toggle schaltet chromatic (= aus) ↔ letzte gewählte Skala
+    push::IconTile scaleToggleTile { push::Icon::sharp, "scaleToggle", push::colours::ledWhite };
     juce::ComboBox rootCombo;
     juce::ComboBox scaleCombo;
+    ScaleType lastNonChromaticScale = ScaleType::minor;   // transient (Session-Sitzung)
 
     juce::Label warningLabel;
 

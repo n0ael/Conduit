@@ -181,7 +181,7 @@ TransportBar::TransportBar (juce::ValueTree rootTree, LinkClock& linkClockToUse,
     devTile.onClick = [this] { if (onToggleDevPanel != nullptr) onToggleDevPanel(); };
     addChildComponent (devTile);   // Sichtbarkeit setzt der Editor
 
-    // -- Globale Session-Skala (Schema 6.2) — Code aus der alten Toolbar ------
+    // -- Globale Session-Skala (Schema 6.2) — Ableton-Look: [♯][Root][Skala] --
     {
         const char* noteNames[] = { "C", "C#", "D", "D#", "E", "F",
                                     "F#", "G", "G#", "A", "A#", "B" };
@@ -195,15 +195,46 @@ TransportBar::TransportBar (juce::ValueTree rootTree, LinkClock& linkClockToUse,
 
         rootCombo.setSelectedId (juce::jlimit (0, 11,
             (int) rootState.getProperty (id::scaleRoot, 0)) + 1, juce::dontSendNotification);
-        scaleCombo.setSelectedId (static_cast<int> (scaleTypeFromString (
-            rootState.getProperty (id::scaleType).toString())) + 1, juce::dontSendNotification);
+
+        const auto initialScale = scaleTypeFromString (
+            rootState.getProperty (id::scaleType).toString());
+        scaleCombo.setSelectedId (static_cast<int> (initialScale) + 1, juce::dontSendNotification);
+
+        if (initialScale != ScaleType::chromatic)
+            lastNonChromaticScale = initialScale;
+
+        scaleToggleTile.setActive (initialScale != ScaleType::chromatic);
 
         rootCombo.onChange = [this]
         { rootState.setProperty (id::scaleRoot, rootCombo.getSelectedId() - 1, nullptr); };
         scaleCombo.onChange = [this]
         {
-            rootState.setProperty (id::scaleType,
-                toString (static_cast<ScaleType> (scaleCombo.getSelectedId() - 1)), nullptr);
+            const auto chosen = static_cast<ScaleType> (scaleCombo.getSelectedId() - 1);
+            rootState.setProperty (id::scaleType, toString (chosen), nullptr);
+
+            if (chosen != ScaleType::chromatic)
+                lastNonChromaticScale = chosen;
+
+            scaleToggleTile.setActive (chosen != ScaleType::chromatic);
+        };
+
+        // ♯-Toggle wie Abletons Scale-Button: aus = chromatisch (keine
+        // Quantisierung), an = zurück zur zuletzt gewählten Skala
+        scaleToggleTile.setTooltip (juce::String::fromUTF8 (
+            "Session-Skala an/aus (aus = chromatisch)"));
+        scaleToggleTile.onClick = [this]
+        {
+            const auto current = scaleTypeFromString (
+                rootState.getProperty (id::scaleType).toString());
+
+            if (current != ScaleType::chromatic)
+                lastNonChromaticScale = current;
+
+            const auto target = current == ScaleType::chromatic ? lastNonChromaticScale
+                                                                : ScaleType::chromatic;
+            rootState.setProperty (id::scaleType, toString (target), nullptr);
+            scaleCombo.setSelectedId (static_cast<int> (target) + 1, juce::dontSendNotification);
+            scaleToggleTile.setActive (target != ScaleType::chromatic);
         };
     }
 
@@ -214,7 +245,8 @@ TransportBar::TransportBar (juce::ValueTree rootTree, LinkClock& linkClockToUse,
              &playTile, &tapeTile, &captureTile, &fixedLengthTile, &automateTile,
              &tapTile, &setTile, &nudgeDownTile, &nudgeUpTile,
              &metronomeTile, &tempoTile, &positionTile, &swingTile, &linkTile,
-             &plusTile, &undoTile, &saveTile, &gearTile, &rootCombo, &scaleCombo,
+             &plusTile, &undoTile, &saveTile, &gearTile,
+             &scaleToggleTile, &rootCombo, &scaleCombo,
              &warningLabel })
         addAndMakeVisible (component);
 
@@ -476,9 +508,11 @@ void TransportBar::resized()
     placeLeft (swingTile,    62);
     placeLeft (linkTile,     78, 14);
 
-    // Rechts von außen nach innen: Skala, Aktionen, Pages
-    placeRight (scaleCombo, 104);
-    placeRight (rootCombo,   56, 14);
+    // Rechts von außen nach innen: Skala-Gruppe (Ableton-Look: [♯][Root]
+    // [Skala] bündig mit 2px-Fugen), Aktionen, Pages
+    placeRight (scaleCombo, 88, 2);
+    placeRight (rootCombo,  46, 2);
+    placeRight (scaleToggleTile, 28, 14);
 
     placeRight (gearTile, tile);
 

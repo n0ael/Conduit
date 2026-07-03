@@ -221,6 +221,21 @@ juce::Path curveSweep()
     return p;
 }
 
+juce::Path sharpSign()
+{
+    // ♯ — zwei leicht geneigte Vertikalen, zwei steigende Querbalken
+    juce::Path p;
+    p.startNewSubPath (0.40f, 0.10f);
+    p.lineTo (0.34f, 0.90f);
+    p.startNewSubPath (0.66f, 0.10f);
+    p.lineTo (0.60f, 0.90f);
+    p.startNewSubPath (0.14f, 0.42f);
+    p.lineTo (0.86f, 0.32f);
+    p.startNewSubPath (0.14f, 0.70f);
+    p.lineTo (0.86f, 0.60f);
+    return p;
+}
+
 juce::Path gridLoop()
 {
     // Ω-Schleife: großer Bogen mit zwei Füßchen
@@ -269,6 +284,7 @@ juce::Path strokeGeometry (Icon icon)
         case Icon::valueButtons: return valueButtonsGrid();
         case Icon::fader:        return faderTrack();
         case Icon::curve:        return curveSweep();
+        case Icon::sharp:        return sharpSign();
     }
 
     jassertfalse;
@@ -301,6 +317,7 @@ juce::Path fillGeometry (Icon icon)
         case Icon::eyeOff:
         case Icon::valueButtons:
         case Icon::curve:
+        case Icon::sharp:
             return {};
     }
 

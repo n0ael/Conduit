@@ -1,6 +1,7 @@
 #include "PushLookAndFeel.h"
 
 #include "BinaryData.h"
+#include "PushIcons.h"
 
 namespace conduit::push
 {
@@ -207,10 +208,27 @@ juce::Font PushLookAndFeel::getTextButtonFont (juce::TextButton& button, int but
     return base.withHeight (base.getHeight() * getFontScale());
 }
 
-juce::Font PushLookAndFeel::getComboBoxFont (juce::ComboBox& box)
+juce::Font PushLookAndFeel::getComboBoxFont (juce::ComboBox&)
 {
-    const auto base = juce::LookAndFeel_V4::getComboBoxFont (box);
-    return base.withHeight (base.getHeight() * getFontScale());
+    return getJost (13.0f);   // wie die TextTiles — getJost skaliert mit fontScale
+}
+
+void PushLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool,
+                                    int, int, int, int, juce::ComboBox& box)
+{
+    const auto bounds = juce::Rectangle<float> ((float) width, (float) height).reduced (0.5f);
+
+    g.setColour (colours::tile);
+    g.fillRoundedRectangle (bounds, 4.0f);
+    g.setColour (colours::outline);
+    g.drawRoundedRectangle (bounds, 4.0f, 1.0f);
+
+    // Kleiner ▾ rechts (Vektor, PushIcons) — dezent wie die Link-Kachel
+    const auto arrowArea = juce::Rectangle<float> ((float) width - 16.0f,
+                                                   (float) height * 0.5f - 4.0f,
+                                                   10.0f, 8.0f);
+    draw (g, Icon::chevronDown, arrowArea,
+          box.isEnabled() ? colours::textDim : colours::textDim.withAlpha (0.5f));
 }
 
 juce::Font PushLookAndFeel::getPopupMenuFont()
