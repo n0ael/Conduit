@@ -88,6 +88,37 @@ juce::String ChassisSchema::curveToString (const BezierCurve& curve)
          + juce::String (curve.x2, 3) + " " + juce::String (curve.y2, 3);
 }
 
+std::optional<ChassisSchema::LinkResponse> ChassisSchema::parseLinkResponse (const juce::String& text)
+{
+    auto tokens = juce::StringArray::fromTokens (text, " ", {});
+    tokens.removeEmptyStrings();
+
+    if (tokens.size() != 4 && tokens.size() != 6)
+        return std::nullopt;
+
+    const auto clamped = [&tokens] (int index)
+    {
+        return juce::jlimit (0.0f, 1.0f, tokens[index].getFloatValue());
+    };
+
+    LinkResponse response;
+    response.curve = { clamped (0), clamped (1), clamped (2), clamped (3) };
+
+    if (tokens.size() == 6)
+    {
+        response.startY = clamped (4);
+        response.endY   = clamped (5);
+    }
+
+    return response;
+}
+
+juce::String ChassisSchema::linkResponseToString (const LinkResponse& response)
+{
+    return curveToString (response.curve) + " "
+         + juce::String (response.startY, 3) + " " + juce::String (response.endY, 3);
+}
+
 float ChassisSchema::evaluateCurve (const BezierCurve& curve, float position) noexcept
 {
     const auto p = juce::jlimit (0.0f, 1.0f, position);

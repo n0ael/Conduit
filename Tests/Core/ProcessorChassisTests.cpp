@@ -394,22 +394,42 @@ TEST_CASE ("FX-Chassis: Control-Link moduliert das Ziel aus der Stufe-1-Quelle",
     {
         module.setParameterLink ("beta", "alpha", -1.0f);
 
-        const auto curve = conduit::ChassisSchema::parseCurve ("0.9 0.1 0.9 0.4");
-        REQUIRE (curve.has_value());
-        module.setParameterLinkCurve ("beta", curve);
+        const auto response = conduit::ChassisSchema::parseLinkResponse ("0.9 0.1 0.9 0.4");
+        REQUIRE (response.has_value());
+        module.setParameterLinkCurve ("beta", response);
         REQUIRE (module.hasParameterLinkCurve ("beta"));
 
         buffer.clear();
         module.processBlock (buffer, midi);
 
-        // srcNorm 0.5 → durch die Kurve geformt, dann Richtungs-Modell
-        const auto shaped = conduit::ChassisSchema::evaluateCurve (*curve, 0.5f);
+        // srcNorm 0.5 → durch die Response geformt, dann Richtungs-Modell
+        const auto shaped = conduit::ChassisSchema::evaluateLinkResponse (*response, 0.5f);
         REQUIRE (module.lastBeta == Approx (juce::jlimit (0.0f, 1.0f, 0.8f - shaped)));
 
         // Kurve entfernen → wieder linear
         module.setParameterLinkCurve ("beta", std::nullopt);
         module.processBlock (buffer, midi);
         REQUIRE (module.lastBeta == Approx (0.3f));
+    }
+
+    SECTION ("FALLENDE Link-Response dreht die Richtung in der Kurve (Auto-Gain)")
+    {
+        // Response 1→0 bei positivem Amount: Quelle LEISE = volle Modulation,
+        // Quelle LAUT = keine — Richtung kommt aus den Response-Endpunkten
+        module.setParameterLink ("beta", "alpha", 1.0f);
+        module.setParameterLinkCurve ("beta",
+            conduit::ChassisSchema::parseLinkResponse ("0.25 0.25 0.75 0.75 1 0"));
+
+        buffer.clear();
+        module.processBlock (buffer, midi);
+
+        // srcNorm 0.5 → shaped = 1 − 0.5 = 0.5 → beta = clamp(0.8 + 0.5) = 1.0
+        REQUIRE (module.lastBeta == Approx (1.0f));
+
+        // Quelle auf Maximum → shaped 0 → keine Modulation mehr
+        module.getParameterTarget ("alpha")->store (1.0f, std::memory_order_relaxed);
+        module.processBlock (buffer, midi);
+        REQUIRE (module.lastBeta == Approx (0.8f));
     }
 
     SECTION ("Link-Tiefe skaliert mit der User-Range des Ziels")
@@ -857,6 +877,38 @@ TEST_CASE ("Dev-Modus: setParameterLinkCurve validiert, synct live und ist undo-
     // Ungültig: unlesbarer String, nicht-dsp-Parameter
     REQUIRE_FALSE (rig.manager.setParameterLinkCurve (rig.uuid(), "density", "kaputt"));
     REQUIRE_FALSE (rig.manager.setParameterLinkCurve (rig.uuid(), "input_gain", "0.5 0.5 0.5 0.5"));
+
+    // 6-Token-Format (Response mit Start/Ende, auch fallend) ist gültig
+    REQUIRE (rig.manager.setParameterLinkCurve (rig.uuid(), "density",
+                                                "0.25 0.25 0.75 0.75 1 0"));
+    REQUIRE (module->hasParameterLinkCurve ("density"));
+}
+
+TEST_CASE ("ChassisSchema::parseLinkResponse: 4- und 6-Token-Format, fallend erlaubt", "[chassis][link]")
+{
+    using S = conduit::ChassisSchema;
+
+    // Altbestand (4 Tokens): Start 0 → Ende 1
+    const auto legacy = S::parseLinkResponse ("0.9 0.1 0.9 0.4");
+    REQUIRE (legacy.has_value());
+    REQUIRE (legacy->startY == Approx (0.0f));
+    REQUIRE (legacy->endY   == Approx (1.0f));
+
+    // 6 Tokens: fallende Response, Roundtrip über linkResponseToString
+    const auto falling = S::parseLinkResponse ("0.25 0.25 0.75 0.75 1 0");
+    REQUIRE (falling.has_value());
+    REQUIRE (falling->startY == Approx (1.0f));
+    REQUIRE (falling->endY   == Approx (0.0f));
+    REQUIRE (S::evaluateLinkResponse (*falling, 0.0f) == Approx (1.0f).margin (0.002));
+    REQUIRE (S::evaluateLinkResponse (*falling, 1.0f) == Approx (0.0f).margin (0.002));
+    REQUIRE (S::evaluateLinkResponse (*falling, 0.5f) == Approx (0.5f).margin (0.002));
+
+    const auto roundtrip = S::parseLinkResponse (S::linkResponseToString (*falling));
+    REQUIRE (roundtrip.has_value());
+    REQUIRE (roundtrip->startY == Approx (1.0f).margin (0.001));
+
+    REQUIRE_FALSE (S::parseLinkResponse ("0.1 0.2 0.3").has_value());   // 3 Tokens
+    REQUIRE_FALSE (S::parseLinkResponse ("").has_value());
 }
 
 TEST_CASE ("ChassisSchema::cvChannelForParam ignoriert uiHidden (festes Layout)", "[chassis][devmode]")

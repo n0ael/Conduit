@@ -290,7 +290,7 @@ bool GraphManager::setParameterLinkCurve (const juce::String& nodeUuid, const ju
 
     if (! param.isValid()
         || ChassisSchema::roleOf (param) != juce::String (ChassisSchema::roleDsp)
-        || (curveText.isNotEmpty() && ! ChassisSchema::parseCurve (curveText).has_value()))
+        || (curveText.isNotEmpty() && ! ChassisSchema::parseLinkResponse (curveText).has_value()))
         return false;
 
     undoManager.beginNewTransaction ("Link-Kurve ändern");
@@ -782,7 +782,7 @@ void GraphManager::syncParameterLink (const juce::ValueTree& parameterTree,
 
     processor.setParameterLinkCurve (
         paramId,
-        ChassisSchema::parseCurve (parameterTree.getProperty (id::paramLinkCurve).toString()));
+        ChassisSchema::parseLinkResponse (parameterTree.getProperty (id::paramLinkCurve).toString()));
 }
 
 void GraphManager::syncParameterUserRange (const juce::ValueTree& parameterTree,

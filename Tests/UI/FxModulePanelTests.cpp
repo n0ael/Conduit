@@ -484,6 +484,15 @@ TEST_CASE ("CurveEditor: Range-Endpunkte sind draggbar, Tabs schalten Fader/Link
     REQUIRE (linkCurveText.isNotEmpty());
     REQUIRE (faderCurveText == "unberuehrt");
 
+    // Link-Endpunkte: fallende Response (Start 1 → Ende 0) direkt in der
+    // Kurve — Quelle hoch, Ziel runter (User-Wunsch Auto-Gain)
+    editor.setLinkEndpoint (false, 1.0f);
+    editor.setLinkEndpoint (true, 0.0f);
+    const auto response = conduit::ChassisSchema::parseLinkResponse (linkCurveText);
+    REQUIRE (response.has_value());
+    REQUIRE (response->startY == Approx (1.0f));
+    REQUIRE (response->endY   == Approx (0.0f));
+
     editor.setActiveTab (conduit::CurveEditor::Tab::fader);
     editor.setHandle (0, 0.1f, 0.9f);
     REQUIRE (faderCurveText != "unberuehrt");

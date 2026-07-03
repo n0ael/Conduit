@@ -65,6 +65,11 @@ public:
         Maus; committet via onRangeChanged (abgelehnt = keine Änderung). */
     void dragEndpointToValue (bool maxEndpoint, double value);
 
+    /** Link-Tab: Start-/Endwert der Response setzen (0..1) — fallende
+        Responses (Ende < Start) drehen die Richtung direkt in der Kurve
+        (User-Wunsch 07/2026). Committet via onLinkCurveChanged. */
+    void setLinkEndpoint (bool endPoint, float y);
+
     /** Reset der Kurve des aktiven Tabs auf linear. */
     void resetToLinear();
 
@@ -105,6 +110,7 @@ private:
     void updateTabButtons();
 
     CurveState faderCurve, linkCurve;
+    float linkStartY = 0.0f, linkEndY = 1.0f;   // Response-Endpunkte (Link-Tab)
     Tab activeTab = Tab::fader;
     int draggedHandle = -1;
 

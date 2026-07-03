@@ -165,11 +165,12 @@ public:
         Quelle oder −1. */
     [[nodiscard]] int getParameterLinkSourceIndex (const juce::String& dspParamId) const noexcept;
 
-    /** [Message Thread] Response-Kurve des Control-Links (4.6): formt die
-        normalisierte Quelle vor der Modulation (z.B. Gain-Matching) —
-        nullopt = linear. */
+    /** [Message Thread] Response des Control-Links (4.6): formt die
+        normalisierte Quelle vor der Modulation (z.B. Gain-Matching);
+        Start-/Endwert erlauben FALLENDE Responses (Richtung in der Kurve).
+        nullopt = linear steigend. */
     void setParameterLinkCurve (const juce::String& targetParamId,
-                                std::optional<ChassisSchema::BezierCurve> curve) noexcept;
+                                std::optional<ChassisSchema::LinkResponse> response) noexcept;
 
     [[nodiscard]] bool hasParameterLinkCurve (const juce::String& dspParamId) const noexcept;
 
@@ -217,7 +218,8 @@ private:
     std::array<std::atomic<float>, maxDspParameters> linkAmount {};
     std::array<std::atomic<bool>,  maxDspParameters> linkCurveOn {};
     std::array<std::atomic<float>, maxDspParameters> linkCurveX1 {}, linkCurveY1 {},
-                                                     linkCurveX2 {}, linkCurveY2 {};
+                                                     linkCurveX2 {}, linkCurveY2 {},
+                                                     linkCurveStartY {}, linkCurveEndY {};
     std::atomic<float> inputGainDb  { static_cast<float> (ChassisSchema::gainDefaultDb) };
     std::atomic<float> outputGainDb { static_cast<float> (ChassisSchema::gainDefaultDb) };
 

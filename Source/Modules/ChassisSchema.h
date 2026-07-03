@@ -139,6 +139,33 @@ struct ChassisSchema
     [[nodiscard]] static float curvePositionForValue (const BezierCurve& curve, float normValue) noexcept;
 
     //==========================================================================
+    /** Response des Control-Links (4.6): Bezier-FORM plus frei setzbarem
+        Start-/Endwert — damit kann die Response auch FALLEN (Quelle hoch →
+        Ziel runter, User-Wunsch 07/2026: Richtung direkt in der Kurve).
+        shaped = startY + bezier(srcNorm)·(endY − startY). */
+    struct LinkResponse
+    {
+        BezierCurve curve;
+        float startY = 0.0f;
+        float endY   = 1.0f;
+    };
+
+    /** "x1 y1 x2 y2" (Altbestand, Start 0 → Ende 1) oder
+        "x1 y1 x2 y2 startY endY" — alle Werte auf [0,1] geclamped.
+        nullopt bei leerem/unlesbarem String (= linear steigend). */
+    [[nodiscard]] static std::optional<LinkResponse> parseLinkResponse (const juce::String& text);
+
+    [[nodiscard]] static juce::String linkResponseToString (const LinkResponse& response);
+
+    /** Quelle (0..1) → geformte Modulation (0..1, ggf. fallend). */
+    [[nodiscard]] static float evaluateLinkResponse (const LinkResponse& response,
+                                                     float srcNorm) noexcept
+    {
+        return response.startY + evaluateCurve (response.curve, srcNorm)
+                                     * (response.endY - response.startY);
+    }
+
+    //==========================================================================
     /** Migration eines Processor-Nodes auf das Chassis-Schema (idempotent,
         Message Thread, vom GraphManager::normalizeNode aufgerufen):
 

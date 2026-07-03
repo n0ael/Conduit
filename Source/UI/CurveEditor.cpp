@@ -35,8 +35,12 @@ CurveEditor::CurveEditor (const juce::String& initialCurve, double userMin, doub
     if (const auto parsed = ChassisSchema::parseCurve (initialCurve))
         faderCurve = { *parsed, false };
 
-    if (const auto parsed = ChassisSchema::parseCurve (initialLinkCurve))
-        linkCurve = { *parsed, false };
+    if (const auto parsed = ChassisSchema::parseLinkResponse (initialLinkCurve))
+    {
+        linkCurve  = { parsed->curve, false };
+        linkStartY = parsed->startY;
+        linkEndY   = parsed->endY;
+    }
 
     // Tab-Umschalter: Link nur wählbar, wenn eine Quelle gesetzt ist
     faderTabButton.onClick = [this] { setActiveTab (Tab::fader); };
@@ -189,18 +193,31 @@ void CurveEditor::commitLink()
 void CurveEditor::notifyCurveChange()
 {
     const auto& state = activeCurve();
-    const auto text = state.isLinear ? juce::String()
-                                     : ChassisSchema::curveToString (state.curve);
 
     if (activeTab == Tab::link)
     {
         if (onLinkCurveChanged != nullptr)
-            onLinkCurveChanged (text);
+            onLinkCurveChanged (state.isLinear
+                ? juce::String()
+                : ChassisSchema::linkResponseToString ({ state.curve, linkStartY, linkEndY }));
     }
     else if (onCurveChanged != nullptr)
     {
-        onCurveChanged (text);
+        onCurveChanged (state.isLinear ? juce::String()
+                                       : ChassisSchema::curveToString (state.curve));
     }
+}
+
+void CurveEditor::setLinkEndpoint (bool endPoint, float y)
+{
+    (endPoint ? linkEndY : linkStartY) = juce::jlimit (0.0f, 1.0f, y);
+    linkCurve.isLinear = false;
+
+    const auto previousTab = activeTab;
+    activeTab = Tab::link;   // Commit gehört zur Link-Response
+    repaint();
+    notifyCurveChange();
+    activeTab = previousTab;
 }
 
 void CurveEditor::setHandle (int handleIndex, float x, float y)
@@ -222,6 +239,13 @@ void CurveEditor::resetToLinear()
     auto& state = activeCurve();
     state.curve = { 0.25f, 0.25f, 0.75f, 0.75f };
     state.isLinear = true;
+
+    if (activeTab == Tab::link)
+    {
+        linkStartY = 0.0f;
+        linkEndY   = 1.0f;
+    }
+
     repaint();
     notifyCurveChange();
 }
@@ -254,20 +278,25 @@ juce::Point<float> CurveEditor::handlePosition (int handleIndex) const
 {
     const auto area = plotArea();
 
-    // Range-Endpunkte (nur Fader-Tab): (0, userMin) und (1, userMax)
+    // Endpunkte: Fader-Tab = userMin/userMax; Link-Tab = Response-Start/-Ende
     if (handleIndex == 2)
-        return { area.getX(), yForValue (currentMin) };
+        return activeTab == Tab::link
+             ? juce::Point<float> { area.getX(), area.getBottom() - linkStartY * area.getHeight() }
+             : juce::Point<float> { area.getX(), yForValue (currentMin) };
 
     if (handleIndex == 3)
-        return { area.getRight(), yForValue (currentMax) };
+        return activeTab == Tab::link
+             ? juce::Point<float> { area.getRight(), area.getBottom() - linkEndY * area.getHeight() }
+             : juce::Point<float> { area.getRight(), yForValue (currentMax) };
 
     const auto& state = activeCurve();
     const auto hx = handleIndex == 0 ? state.curve.x1 : state.curve.x2;
     const auto hy = handleIndex == 0 ? state.curve.y1 : state.curve.y2;
 
+    // Link-Tab: Kontrollpunkt lebt im Start/Ende-Fenster der Response
     if (activeTab == Tab::link)
         return { area.getX() + hx * area.getWidth(),
-                 area.getBottom() - hy * area.getHeight() };
+                 area.getBottom() - (linkStartY + hy * (linkEndY - linkStartY)) * area.getHeight() };
 
     // Fader-Tab: Kontrollpunkt lebt im User-Range-Fenster
     return { area.getX() + hx * area.getWidth(),
@@ -291,23 +320,30 @@ void CurveEditor::paint (juce::Graphics& g)
 
     if (activeTab == Tab::link)
     {
-        // Link-Ansicht: reine 0..1-Response (Quelle → Modulationsform)
+        // Link-Ansicht: 0..1-Response (Quelle → Modulationsform) — Start/
+        // Ende draggbar, fallende Responses drehen die Richtung
         g.setColour (push::colours::outline);
         g.drawLine (area.getX(), area.getBottom(), area.getRight(), area.getY(), 1.0f);
 
+        const ChassisSchema::LinkResponse response { state.curve, linkStartY, linkEndY };
+
         juce::Path path;
         path.startNewSubPath (area.getX(), area.getBottom()
-                                               - ChassisSchema::evaluateCurve (state.curve, 0.0f) * area.getHeight());
+                                               - ChassisSchema::evaluateLinkResponse (response, 0.0f) * area.getHeight());
 
         for (int i = 1; i <= 48; ++i)
         {
             const auto p = static_cast<float> (i) / 48.0f;
             path.lineTo (area.getX() + p * area.getWidth(),
-                         area.getBottom() - ChassisSchema::evaluateCurve (state.curve, p) * area.getHeight());
+                         area.getBottom() - ChassisSchema::evaluateLinkResponse (response, p) * area.getHeight());
         }
 
         g.setColour (curveColour);
         g.strokePath (path, juce::PathStrokeType (2.0f));
+
+        g.setColour (push::colours::textDim.withAlpha (0.5f));
+        g.drawLine ({ handlePosition (2), handlePosition (0) }, 1.0f);
+        g.drawLine ({ handlePosition (3), handlePosition (1) }, 1.0f);
 
         for (int handle = 0; handle < 2; ++handle)
         {
@@ -315,6 +351,16 @@ void CurveEditor::paint (juce::Graphics& g)
             g.setColour (push::colours::ledWhite);
             g.fillEllipse (centre.x - handleRadius, centre.y - handleRadius,
                            handleRadius * 2.0f, handleRadius * 2.0f);
+        }
+
+        for (int handle = 2; handle <= 3; ++handle)
+        {
+            const auto centre = handlePosition (handle);
+            g.setColour (push::colours::ledOrange);
+            g.fillEllipse (centre.x - endpointRadius, centre.y - endpointRadius,
+                           endpointRadius * 2.0f, endpointRadius * 2.0f);
+            g.setColour (juce::Colour (0xff1b1e22));
+            g.fillEllipse (centre.x - 2.5f, centre.y - 2.5f, 5.0f, 5.0f);
         }
 
         return;
@@ -396,10 +442,8 @@ void CurveEditor::mouseDown (const juce::MouseEvent& event)
 {
     draggedHandle = -1;
 
-    // Range-Endpunkte nur im Fader-Tab; Endpunkte gewinnen bei Überlappung
-    const auto lastHandle = activeTab == Tab::fader ? 3 : 1;
-
-    for (int handle = lastHandle; handle >= 0; --handle)
+    // Endpunkte (2/3) gewinnen bei Überlappung mit den Kontrollpunkten
+    for (int handle = 3; handle >= 0; --handle)
         if (handlePosition (handle).getDistanceFrom (event.position) <= handleHitZone)
         {
             draggedHandle = handle;
@@ -417,10 +461,15 @@ void CurveEditor::mouseDrag (const juce::MouseEvent& event)
 
     const auto area = plotArea();
 
-    // Range-Endpunkte: vertikal ziehen setzt userMin/userMax (Fader-Tab)
+    // Endpunkte: Fader-Tab = userMin/userMax, Link-Tab = Response-Start/-Ende
     if (draggedHandle >= 2)
     {
-        dragEndpointToValue (draggedHandle == 3, valueForY (event.position.y));
+        if (activeTab == Tab::link)
+            setLinkEndpoint (draggedHandle == 3,
+                             (area.getBottom() - event.position.y) / area.getHeight());
+        else
+            dragEndpointToValue (draggedHandle == 3, valueForY (event.position.y));
+
         return;
     }
 
@@ -428,8 +477,11 @@ void CurveEditor::mouseDrag (const juce::MouseEvent& event)
 
     if (activeTab == Tab::link)
     {
+        // Kontrollpunkt-y im Start/Ende-Fenster der Response normalisieren
+        const auto yNorm = (area.getBottom() - event.position.y) / area.getHeight();
+        const auto span  = linkEndY - linkStartY;
         setHandle (draggedHandle, x,
-                   (area.getBottom() - event.position.y) / area.getHeight());
+                   std::abs (span) > 1.0e-4f ? (yNorm - linkStartY) / span : 0.5f);
         return;
     }
 

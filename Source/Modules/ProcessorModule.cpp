@@ -160,22 +160,24 @@ void ProcessorModule::setParameterLink (const juce::String& targetParamId,
 }
 
 void ProcessorModule::setParameterLinkCurve (const juce::String& targetParamId,
-                                             std::optional<ChassisSchema::BezierCurve> curve) noexcept
+                                             std::optional<ChassisSchema::LinkResponse> response) noexcept
 {
     for (size_t i = 0; i < dspParams.size(); ++i)
     {
         if (targetParamId != dspParams[i].id)
             continue;
 
-        if (curve.has_value())
+        if (response.has_value())
         {
-            linkCurveX1[i].store (curve->x1, std::memory_order_relaxed);
-            linkCurveY1[i].store (curve->y1, std::memory_order_relaxed);
-            linkCurveX2[i].store (curve->x2, std::memory_order_relaxed);
-            linkCurveY2[i].store (curve->y2, std::memory_order_relaxed);
+            linkCurveX1[i].store (response->curve.x1, std::memory_order_relaxed);
+            linkCurveY1[i].store (response->curve.y1, std::memory_order_relaxed);
+            linkCurveX2[i].store (response->curve.x2, std::memory_order_relaxed);
+            linkCurveY2[i].store (response->curve.y2, std::memory_order_relaxed);
+            linkCurveStartY[i].store (response->startY, std::memory_order_relaxed);
+            linkCurveEndY[i].store (response->endY, std::memory_order_relaxed);
         }
 
-        linkCurveOn[i].store (curve.has_value(), std::memory_order_relaxed);
+        linkCurveOn[i].store (response.has_value(), std::memory_order_relaxed);
         return;
     }
 }
@@ -343,17 +345,20 @@ void ProcessorModule::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
                                ? juce::jlimit (0.0f, 1.0f, (stage1[sourceIndex] - srcMin) / srcSpan)
                                : 0.0f;
 
-        // Optionale Link-Response-Kurve (z.B. Gain-Matching): formt die
-        // normalisierte Quelle — pure Bezier-Auswertung, alloc-/lock-frei
+        // Optionale Link-Response (z.B. Gain-Matching): formt die
+        // normalisierte Quelle — Start/Ende erlauben fallende Responses.
+        // Pure Bezier-Auswertung, alloc-/lock-frei.
         if (linkCurveOn[index].load (std::memory_order_relaxed))
         {
-            const ChassisSchema::BezierCurve curve {
-                linkCurveX1[index].load (std::memory_order_relaxed),
-                linkCurveY1[index].load (std::memory_order_relaxed),
-                linkCurveX2[index].load (std::memory_order_relaxed),
-                linkCurveY2[index].load (std::memory_order_relaxed)
+            const ChassisSchema::LinkResponse response {
+                { linkCurveX1[index].load (std::memory_order_relaxed),
+                  linkCurveY1[index].load (std::memory_order_relaxed),
+                  linkCurveX2[index].load (std::memory_order_relaxed),
+                  linkCurveY2[index].load (std::memory_order_relaxed) },
+                linkCurveStartY[index].load (std::memory_order_relaxed),
+                linkCurveEndY[index].load (std::memory_order_relaxed)
             };
-            srcNorm = ChassisSchema::evaluateCurve (curve, srcNorm);
+            srcNorm = ChassisSchema::evaluateLinkResponse (response, srcNorm);
         }
 
         effective[index] = ChassisSchema::computeEffective (
