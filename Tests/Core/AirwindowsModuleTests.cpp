@@ -39,7 +39,7 @@ void fillWithRamp (juce::AudioBuffer<float>& buffer, float start)
 
 } // namespace
 
-[[nodiscard]] juce::StringArray dspParameterIdsOf (const juce::ValueTree& nodeTree)
+[[nodiscard]] static juce::StringArray dspParameterIdsOf (const juce::ValueTree& nodeTree)
 {
     juce::StringArray ids;
     const auto parameters = nodeTree.getChildWithName (conduit::id::parameters);
