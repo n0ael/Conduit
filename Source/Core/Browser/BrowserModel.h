@@ -24,11 +24,16 @@ namespace conduit
     nie in Presets und nie in der Undo-Historie (alle setProperty mit
     nullptr-UndoManager).
 
-    Informationsarchitektur (fix): PROJEKTE · AUDIO (Loops/One-Shots/
-    Captures) · MODULE (CV/Control · AudioFX, Kategorien aus den
-    ModuleDescriptors). Maximal zwei Navigationsebenen, dann flache Liste.
+    Informationsarchitektur (fix, maximal zwei Navigationsebenen):
 
-    Nur Message Thread.
+      Übersicht ─ PROJEKTE ── flache Liste (M6)
+                ─ AUDIO ──── Loops / One-Shots / Captures ── flache Liste (M6)
+                ─ MODULE ─── [CV/Control- und AudioFX-Header mit ein-
+                              gerückten Kategorien] ── flache Modulliste
+
+    MODULE-Kategorien kommen aus den ModuleDescriptors (Kategorie taucht
+    automatisch auf, sobald ein Modul sie trägt); Reihenfolge = kanonische
+    Liste, Unbekanntes alphabetisch dahinter. Nur Message Thread.
 */
 class BrowserModel final
 {
@@ -42,8 +47,8 @@ public:
         enum class Kind
         {
             section,    // PROJEKTE / AUDIO / MODULE          (navigiert)
-            branch,     // CV/Control / AudioFX                (navigiert, ab M2)
-            category,   // z.B. "Reverb/Delay"                 (navigiert, ab M2)
+            branch,     // CV/Control / AudioFX — Abschnitts-Header (nicht klickbar)
+            category,   // z.B. "Reverb/Delay" oder "Loops"    (navigiert)
             module,     // Modul-Eintrag, id = factoryKey      (Aktion, ab M3)
             file,       // Projekt-/Audio-Datei                (Aktion, ab M6)
             action,     // z.B. "Preset laden…"                (Aktion)
@@ -53,7 +58,8 @@ public:
         Kind kind = Kind::hint;
         Icon icon = Icon::none;
         juce::String label;
-        juce::String id;      // Section-/Branch-Name, Kategorie oder factoryKey
+        juce::String id;      // Section-Name, "branch:Kategorie" oder factoryKey
+        int indent = 0;       // eingerückte Ebene (Kategorien unter Ast-Headern)
     };
 
     BrowserModel (ModuleFactory& factoryToUse, BrowserContextProvider& contextToUse);
@@ -66,13 +72,14 @@ public:
 
     void openSection (BrowserContextProvider::Section section);
 
+    /** Eine Ebene hoch (Kategorie → Bereich → Übersicht). */
     void goBack();
     [[nodiscard]] bool canGoBack() const;
 
-    /** Kopfzeile: "Browser" (Übersicht) bzw. Pfad "MODULE". */
+    /** Kopfzeile: "Browser" · "MODULE" · "MODULE ▸ AudioFX ▸ Utility" … */
     [[nodiscard]] juce::String breadcrumbText() const;
 
-    /** Klick auf Zeile index: Navigations-Zeilen (section/branch/category)
+    /** Klick auf Zeile index: Navigations-Zeilen (section/category)
         verarbeitet das Modell und liefert true; alles andere false —
         der Aufrufer (Panel) behandelt Aktions-Zeilen über seine Hooks. */
     bool activateRow (int index);
@@ -89,8 +96,18 @@ private:
     void handleContextChanged();
     void rebuildRows();
 
+    void buildOverviewRows();
+    void buildModulesRootRows();
+    void buildModuleListRows (const juce::String& branchKey,
+                              const juce::String& category);
+    void buildAudioRootRows();
+
+    /** Kategorien eines Astes in kanonischer Reihenfolge (Rest alphabetisch). */
+    [[nodiscard]] juce::StringArray categoriesFor (ModuleDescriptor::Branch branch) const;
+
     [[nodiscard]] juce::String currentSectionName() const;
-    void setCurrentSection (const juce::String& sectionName);
+    [[nodiscard]] juce::String currentCategoryId() const;   // "branch:Kategorie" | Audio-Unterbereich
+    void setNavigation (const juce::String& sectionName, const juce::String& categoryId);
 
     ModuleFactory& factory;
     BrowserContextProvider& context;

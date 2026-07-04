@@ -73,3 +73,59 @@ TEST_CASE ("Browser-Panel: Öffnen navigiert zum Startbereich der Page", "[brows
     REQUIRE (rig.model.breadcrumbText() == "Browser");
     REQUIRE_FALSE (rig.panel.getBackTile().isVisible());
 }
+
+TEST_CASE ("Browser-Panel: Kategorie-Tap steigt ab, Modul-Tap selektiert",
+           "[browser][ui]")
+{
+    PanelRig rig;
+    rig.model.openSection (conduit::BrowserContextProvider::Section::modules);
+
+    // Erste Kategorie unter dem CV/Control-Header antippen (Zeile 1)
+    REQUIRE (rig.model.rows()[1].kind == conduit::BrowserModel::Row::Kind::category);
+    const auto categoryLabel = rig.model.rows()[1].label;
+    rig.panel.activateRowForTest (1);
+
+    REQUIRE (rig.model.breadcrumbText().endsWith (categoryLabel));
+    REQUIRE (rig.model.rows().front().kind
+                 == conduit::BrowserModel::Row::Kind::module);
+
+    // Modul-Tap: Navigation bleibt stehen, Zeile wird selektiert (M3 lädt)
+    rig.panel.activateRowForTest (0);
+    REQUIRE (rig.model.rows().front().kind
+                 == conduit::BrowserModel::Row::Kind::module);
+    REQUIRE (rig.panel.getListBox().getSelectedRow() == 0);
+}
+
+TEST_CASE ("Browser-Panel: virtualisierte Zeilen — Komponenten nur für den Viewport",
+           "[browser][ui]")
+{
+    PanelRig rig;
+    rig.model.openSection (conduit::BrowserContextProvider::Section::modules);
+
+    // In die größte Kategorie absteigen (Distortion/Saturation, 13 Module)
+    const auto& rows = rig.model.rows();
+    for (int i = 0; i < (int) rows.size(); ++i)
+    {
+        if (rows[(size_t) i].label == "Distortion/Saturation")
+        {
+            rig.panel.activateRowForTest (i);
+            break;
+        }
+    }
+
+    const auto numRows = (int) rig.model.rows().size();
+    REQUIRE (numRows >= 13);
+
+    // Panel klein machen: nur ein Ausschnitt passt — die ListBox hält
+    // höchstens eine Bildschirmseite an Row-Komponenten (+ Puffer)
+    rig.panel.setSize (conduit::BrowserPanel::dockWidth, 300);
+    rig.panel.getListBox().updateContent();
+
+    int liveRows = 0;
+    for (int i = 0; i < numRows; ++i)
+        if (rig.panel.getListBox().getComponentForRowNumber (i) != nullptr)
+            ++liveRows;
+
+    REQUIRE (liveRows > 0);
+    REQUIRE (liveRows < numRows);   // nie alle Einträge als Komponenten
+}

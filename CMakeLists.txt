@@ -193,6 +193,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Modules/ScopeModule.cpp
     Source/Modules/StepSequencerModule.cpp
     Source/UI/AudioSettingsComponent.cpp
+    Source/UI/Browser/BrowserListRow.cpp
     Source/UI/Browser/BrowserPanel.cpp
     Source/UI/CaptureAllButton.cpp
     Source/UI/CapturePanel.cpp
@@ -344,6 +345,7 @@ target_sources(Conduit PRIVATE
     Source/Modules/StepSequencerModule.h
     Source/UI/AnimatedValue.h
     Source/UI/AudioSettingsComponent.h
+    Source/UI/Browser/BrowserListRow.h
     Source/UI/Browser/BrowserPanel.h
     Source/UI/CaptureAllButton.h
     Source/UI/CapturePanel.h
@@ -611,6 +613,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Modules/ScopeModule.cpp
         Source/Modules/StepSequencerModule.cpp
         Source/UI/AudioSettingsComponent.cpp
+        Source/UI/Browser/BrowserListRow.cpp
         Source/UI/Browser/BrowserPanel.cpp
         Source/UI/CaptureAllButton.cpp
         Source/UI/CapturePanel.cpp

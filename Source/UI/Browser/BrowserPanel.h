@@ -16,8 +16,9 @@ namespace conduit
     via bounds.removeFromRight (currentDockWidth()).
 
     Aufbau (oben → unten): Breadcrumb-Header (Zurück-Pfeil + Pfad, 44 px) ·
-    virtualisierte Liste (juce::ListBox, 44-px-Zeilen) · [Suchfeld folgt
-    in M4, TouchKeyboard in M5].
+    virtualisierte Liste (juce::ListBox mit wiederverwendeten
+    BrowserListRow-Komponenten, 44-px-Zeilen) · [Suchfeld folgt in M4,
+    TouchKeyboard in M5].
 
     Das Panel kennt weder GraphManager noch Engine — Navigation macht das
     BrowserModel, Aktions-Zeilen laufen über die std::function-Hooks
@@ -58,13 +59,18 @@ public:
     [[nodiscard]] juce::ListBox& getListBox() noexcept { return list; }
     [[nodiscard]] push::IconTile& getBackTile() noexcept { return backTile; }
 
-private:
-    // ListBoxModel
-    int getNumRows() override;
-    void paintListBoxItem (int rowNumber, juce::Graphics& g,
-                           int width, int height, bool rowIsSelected) override;
-    void listBoxItemClicked (int row, const juce::MouseEvent& event) override;
+    /** Test-Seam: Tap auf Zeile index (derselbe Pfad wie die Row-Geste). */
+    void activateRowForTest (int rowIndex) { handleRowActivated (rowIndex); }
 
+private:
+    // ListBoxModel — Zeilen sind Komponenten (refreshComponentForRow),
+    // paintListBoxItem bleibt bewusst leer
+    int getNumRows() override;
+    void paintListBoxItem (int, juce::Graphics&, int, int, bool) override {}
+    juce::Component* refreshComponentForRow (int rowNumber, bool isRowSelected,
+                                             juce::Component* existingComponentToUpdate) override;
+
+    void handleRowActivated (int rowIndex);
     void refreshFromModel();
     void updateHeader();
 

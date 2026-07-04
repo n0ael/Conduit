@@ -53,15 +53,117 @@ TEST_CASE ("Browser-Modell: Startbereich + Zurück-Navigation", "[browser]")
     REQUIRE (rig.model.breadcrumbText() == "MODULE");
     REQUIRE (rig.model.canGoBack());
 
-    // MODULE-Wurzel: die beiden Äste
-    REQUIRE (rig.model.rows().size() == 2);
+    // MODULE-Wurzel: beide Ast-Header mit eingerückten Kategorien
     REQUIRE (hasRowWithLabel (rig.model.rows(), "CV/Control"));
     REQUIRE (hasRowWithLabel (rig.model.rows(), "AudioFX"));
+    REQUIRE (hasRowWithLabel (rig.model.rows(), "Dynamics"));
+    REQUIRE (hasRowWithLabel (rig.model.rows(), "Reverb/Delay"));
 
     // Zurück-Pfeil führt zur Bereichsübersicht
     rig.model.goBack();
     REQUIRE (rig.model.breadcrumbText() == "Browser");
     REQUIRE_FALSE (rig.model.canGoBack());
+}
+
+TEST_CASE ("Browser-Modell: maximal zwei Ebenen bis zur flachen Modulliste",
+           "[browser]")
+{
+    ModelRig rig;
+    rig.model.openSection (Section::modules);
+
+    // Ast-Header sind reine Beschriftung (nicht klickbar), Kategorien
+    // eingerückt darunter (indent 1)
+    const auto& rootRows = rig.model.rows();
+    REQUIRE (rootRows[0].kind == Row::Kind::branch);
+    REQUIRE (rootRows[0].indent == 0);
+    REQUIRE (rootRows[1].kind == Row::Kind::category);
+    REQUIRE (rootRows[1].indent == 1);
+    REQUIRE_FALSE (rig.model.activateRow (0));   // Header konsumiert nicht
+
+    // Kategorie anklicken → flache Modulliste + voller Breadcrumb
+    const auto findRow = [&rig] (const juce::String& label)
+    {
+        const auto& rows = rig.model.rows();
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (rows[(size_t) i].label == label)
+                return i;
+        return -1;
+    };
+
+    REQUIRE (rig.model.activateRow (findRow ("Reverb/Delay")));
+    REQUIRE (rig.model.breadcrumbText()
+                 == juce::String::fromUTF8 ("MODULE \xe2\x96\xb8 AudioFX \xe2\x96\xb8 Reverb/Delay"));
+
+    for (const auto& row : rig.model.rows())
+    {
+        REQUIRE (row.kind == Row::Kind::module);
+        REQUIRE (row.id.startsWith ("airwindows_"));
+    }
+    REQUIRE (hasRowWithLabel (rig.model.rows(), "Chamber"));
+    REQUIRE (hasRowWithLabel (rig.model.rows(), "TapeDelay2"));
+
+    // goBack-Kette: Modulliste → MODULE-Wurzel → Übersicht
+    rig.model.goBack();
+    REQUIRE (rig.model.breadcrumbText() == "MODULE");
+    rig.model.goBack();
+    REQUIRE (rig.model.breadcrumbText() == "Browser");
+}
+
+TEST_CASE ("Browser-Modell: Kategorien decken alle Module ab (kein Verwaister)",
+           "[browser]")
+{
+    ModelRig rig;
+    rig.model.openSection (Section::modules);
+
+    // Alle Kategorien der MODULE-Wurzel ablaufen und Module einsammeln
+    juce::StringArray seen;
+    const auto rootRows = rig.model.rows();   // Kopie (Navigation ändert rows)
+
+    for (const auto& rootRow : rootRows)
+    {
+        if (rootRow.kind != Row::Kind::category)
+            continue;
+
+        rig.model.openSection (Section::modules);
+        const auto& current = rig.model.rows();
+        for (int i = 0; i < (int) current.size(); ++i)
+        {
+            if (current[(size_t) i].id == rootRow.id)
+            {
+                REQUIRE (rig.model.activateRow (i));
+                break;
+            }
+        }
+
+        for (const auto& moduleRow : rig.model.rows())
+        {
+            REQUIRE (moduleRow.kind == Row::Kind::module);   // keine leere Kategorie
+            seen.addIfNotAlreadyThere (moduleRow.id);
+        }
+    }
+
+    // Jeder Factory-Eintrag taucht in genau seiner Kategorie auf
+    conduit::ModuleFactory factory;
+    conduit::registerDefaultModules (factory);
+    REQUIRE (seen.size() == (int) factory.getDescriptors().size());
+}
+
+TEST_CASE ("Browser-Modell: AUDIO-Unterbereiche als Navigationsebene", "[browser]")
+{
+    ModelRig rig;
+    rig.model.openSection (Section::audio);
+
+    REQUIRE (rig.model.rows().size() == 3);
+    REQUIRE (hasRowWithLabel (rig.model.rows(), "Loops"));
+    REQUIRE (hasRowWithLabel (rig.model.rows(), "One-Shots"));
+    REQUIRE (hasRowWithLabel (rig.model.rows(), "Captures"));
+
+    REQUIRE (rig.model.activateRow (0));   // Loops
+    REQUIRE (rig.model.breadcrumbText()
+                 == juce::String::fromUTF8 ("AUDIO \xe2\x96\xb8 Loops"));
+
+    rig.model.goBack();
+    REQUIRE (rig.model.breadcrumbText() == "AUDIO");
 }
 
 TEST_CASE ("Browser-Modell: Klick auf Bereichs-Zeile navigiert", "[browser]")

@@ -47,7 +47,23 @@ Verzeichnisse unter Dokumente/Conduit (+ Captures aus CaptureSettings).
   Looper-Kontext ohne MODULE). **Smoke-Automation-Notiz:** UI läuft mit
   uiScale 1.1 — Klick-Koordinaten = logische Koordinate × (ClientRect-
   Breite/1480).
-- **Offen:** M2 Virtualisierung/Unterkategorien → M3 Tap+Drag (dann
+- **M2 (Virtualisierung + Navigation):** volle Zwei-Ebenen-Navigation im
+  BrowserModel — MODULE-Wurzel zeigt beide Äste als nicht-klickbare
+  Abschnitts-Header (Versalien, dim) mit EINGERÜCKTEN Kategorie-Zeilen
+  darunter („Unterkategorien als eingerückte Ebene, kein tiefer Baum"),
+  Kategorie-Tap → flache Modulliste; Breadcrumb „MODULE ▸ AudioFX ▸ …"
+  mit Zurück-Kette (Kategorie → Wurzel → Übersicht). Kategorie-Ordnung
+  kanonisch (kCv-/kFxCategoryOrder), Unbekanntes alphabetisch dahinter —
+  neue Kategorien erscheinen automatisch. Kategorien nur pro Ast eindeutig
+  → Row-Id "branch:Kategorie" (Utility existiert in beiden). AUDIO-Wurzel
+  zeigt Loops/One-Shots/Captures als Navigationsebene (Daten M6).
+  `BrowserListRow` (wiederverwendete Komponente via refreshComponentForRow
+  — nie eine Komponente pro Eintrag, Test deckt ab dass nur der Viewport
+  lebt), Tap-Schwelle 8 px (mouseUp mit getDistanceFromDragStart —
+  Flick-Scroll via ScrollOnDragMode bleibt frei), Modul-Tap selektiert
+  (Akzentbalken; Laden folgt M3). 5 neue Tests (373/20453, Debug + ASan);
+  Smoke: docs/smoke/browser_m2_*.png.
+- **Offen:** M3 Tap+Drag (dann
   „+"-Entfernung + Interim-„Preset laden…"-Row in PROJEKTE) → M4 Suche →
   M5 TouchKeyboard (UiSettings::softKeyboardEnabled, Linux an/Desktop aus)
   → M6 PROJEKTE/AUDIO-Daten + Abschlussbericht.

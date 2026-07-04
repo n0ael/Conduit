@@ -1,5 +1,6 @@
 #include "BrowserPanel.h"
 
+#include "UI/Browser/BrowserListRow.h"
 #include "UI/PushIcons.h"
 #include "UI/PushLookAndFeel.h"
 
@@ -9,28 +10,13 @@ namespace conduit
 namespace
 {
     constexpr int slideMs = 180;
-
-    /** Core-Icon-Referenz → Push-Icon (das Modell kennt keine UI-Header). */
-    push::Icon toPushIcon (BrowserModel::Icon icon)
-    {
-        switch (icon)
-        {
-            case BrowserModel::Icon::projects:  return push::Icon::browserProjects;
-            case BrowserModel::Icon::audio:     return push::Icon::browserAudio;
-            case BrowserModel::Icon::cvControl: return push::Icon::browserCvControl;
-            case BrowserModel::Icon::audioFx:   return push::Icon::browserAudioFx;
-            case BrowserModel::Icon::none:      break;
-        }
-
-        return push::Icon::browserPanel;  // unbenutzt (none zeichnet nichts)
-    }
 } // namespace
 
 //==============================================================================
 BrowserPanel::BrowserPanel (BrowserModel& modelToUse)
     : model (modelToUse)
 {
-    backTile.setTooltip (juce::String::fromUTF8 ("Zurück zur Bereichsübersicht"));
+    backTile.setTooltip (juce::String::fromUTF8 ("Zurück"));
     backTile.onClick = [this] { model.goBack(); };
     addChildComponent (backTile);   // sichtbar nur wenn canGoBack()
 
@@ -121,61 +107,43 @@ int BrowserPanel::getNumRows()
     return (int) model.rows().size();
 }
 
-void BrowserPanel::paintListBoxItem (int rowNumber, juce::Graphics& g,
-                                     int width, int height, bool rowIsSelected)
+juce::Component* BrowserPanel::refreshComponentForRow (int rowNumber, bool isRowSelected,
+                                                       juce::Component* existingComponentToUpdate)
 {
     const auto& rows = model.rows();
 
     if (rowNumber < 0 || rowNumber >= (int) rows.size())
-        return;
-
-    const auto& row = rows[(size_t) rowNumber];
-    const auto isHint = row.kind == BrowserModel::Row::Kind::hint;
-
-    if (rowIsSelected && ! isHint)
     {
-        g.setColour (push::colours::tileActive);
-        g.fillRect (0, 0, width, height);
-
-        // EIN Akzent: schmaler Selektionsbalken links (Ableton-Look)
-        g.setColour (push::colours::ledOrange);
-        g.fillRect (0, 0, 3, height);
+        delete existingComponentToUpdate;
+        return nullptr;
     }
 
-    // Icon links im 24-px-Raster
-    auto area = juce::Rectangle<int> (0, 0, width, height).reduced (12, 0);
+    auto* row = dynamic_cast<BrowserListRow*> (existingComponentToUpdate);
 
-    const auto iconBox = area.removeFromLeft (24).withSizeKeepingCentre (24, 24);
-    if (row.icon != BrowserModel::Icon::none)
-        push::draw (g, toPushIcon (row.icon), iconBox.toFloat().reduced (1.0f),
-                    isHint ? push::colours::textDim : push::colours::text);
-
-    area.removeFromLeft (10);
-
-    // Navigierbare Zeilen zeigen ein PERMANENTES ▸ (keine Hover-Affordance)
-    const auto navigates = row.kind == BrowserModel::Row::Kind::section
-                        || row.kind == BrowserModel::Row::Kind::branch
-                        || row.kind == BrowserModel::Row::Kind::category;
-    if (navigates)
+    if (row == nullptr)
     {
-        const auto chevron = area.removeFromRight (16);
-        juce::Path arrow;
-        arrow.addTriangle (0.0f, -5.0f, 0.0f, 5.0f, 5.5f, 0.0f);
-        g.setColour (push::colours::textDim);
-        g.fillPath (arrow, juce::AffineTransform::translation (
-                               (float) chevron.getX() + 4.0f,
-                               (float) chevron.getCentreY()));
+        delete existingComponentToUpdate;
+        row = new BrowserListRow();
+        row->onActivated = [this] (int index) { handleRowActivated (index); };
     }
 
-    g.setColour (isHint ? push::colours::textDim : push::colours::text);
-    g.setFont (push::scaledFont (16.0f));
-    // Nie horizontal stauchen (User-Regel 07/2026) — kürzen statt quetschen
-    g.drawText (row.label, area, juce::Justification::centredLeft, true);
+    row->update (rows[(size_t) rowNumber], rowNumber, isRowSelected);
+    return row;
 }
 
-void BrowserPanel::listBoxItemClicked (int row, const juce::MouseEvent&)
+void BrowserPanel::handleRowActivated (int rowIndex)
 {
-    model.activateRow (row);
+    // Navigations-Zeilen konsumiert das Modell (Liste baut sich neu auf)
+    if (model.activateRow (rowIndex))
+        return;
+
+    const auto& rows = model.rows();
+    if (rowIndex < 0 || rowIndex >= (int) rows.size())
+        return;
+
+    // Modul-Zeilen: visuelle Selektion; Tap-to-Load folgt in M3
+    if (rows[(size_t) rowIndex].kind == BrowserModel::Row::Kind::module)
+        list.selectRow (rowIndex);
 }
 
 //==============================================================================
