@@ -166,6 +166,20 @@ Daten (Scanner, mtime-Cache, Session-Load mit Bestätigung). Das alte
 Browser-Tests; Gesamtbestand 393 Cases / 20684 Assertions, Debug + ASan
 grün; Smokes in docs/smoke/browser_m*.png.
 
+**CI-Nachlauf (04.07.2026, gemergt + gepusht, 3 Runden bis grün):**
+(1) Clang `-Wmissing-field-initializers`: das M4-Row-Feld `secondary`
+fehlte in 14 Aggregat-Initialisierungen (MSVC /W4 meldet das nicht).
+(2) TSan: Teardown-Race im Test-QueueDispatcher → fn()-Lambda hält den
+Queue-Zustand als shared_ptr. (3) **Echter Produktcode-Fund** (TSan UND
+ASan-Linux; unter Windows nie getroffen, Linux-Scheduling deckte es
+auf): die Pool-Jobs von Suchindex/Scanner lasen `this->dispatcher` bzw.
+Cache/FormatManager — stirbt das Model vor dem ThreadPool (auch beim
+Editor-Teardown möglich!), ist das ein Use-after-free. **Regel daraus:
+Pool-Jobs dereferenzieren `this` NIE** — Dispatcher als Kopie capturen,
+Job-Ressourcen hinter EINEM shared_ptr, `this` nur als Wert ins innere
+(MT-)Lambda und erst nach dem Alive-Check nutzen. Grün mit 4f646cd
+(tsan 11m13s, asan-linux 13m53s).
+
 **Offen / bewusst nicht drin:** kein Audio-Vorhören (braucht
 Audition-Routing), keine Modul-Live-Preview, kein Mixer-/Remote-/
 Settings-Content im Browser (Nicht-Ziele der Iteration); Browser-
