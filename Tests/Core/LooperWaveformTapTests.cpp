@@ -80,7 +80,7 @@ struct WaveformRig
             {
                 const auto value = amplitude * static_cast<float> (
                     std::sin (juce::MathConstants<double>::twoPi * freqHz
-                              * (sinePhaseSamples + i) / testSampleRate));
+                              * static_cast<double> (sinePhaseSamples + i) / testSampleRate));
                 buffer.setSample (0, i, value);
                 buffer.setSample (1, i, value);
             }
