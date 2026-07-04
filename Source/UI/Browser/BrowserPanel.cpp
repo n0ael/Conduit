@@ -269,7 +269,21 @@ void BrowserPanel::handleRowActivated (int rowIndex)
     }
 
     if (row.kind == BrowserModel::Row::Kind::action && onAction != nullptr)
+    {
         onAction (row.id);
+        return;
+    }
+
+    if (row.kind == BrowserModel::Row::Kind::file)
+    {
+        list.selectRow (rowIndex);
+
+        // Projekt-Tap lädt (mit Bestätigung im Editor); Audio-Dateien
+        // haben bewusst keine Aktion (kein Vorhören — Non-Goal M6)
+        if (row.id.startsWith ("project:") && onLoadProject != nullptr)
+            onLoadProject (juce::File (row.id.fromFirstOccurrenceOf ("project:",
+                                                                     false, false)));
+    }
 }
 
 //==============================================================================

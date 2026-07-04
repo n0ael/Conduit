@@ -22,6 +22,15 @@ struct RegisteredFactory
 
 struct ModelRig
 {
+    ModelRig()
+    {
+        // Hermetisch: nie das echte Dokumente/Conduit des Users scannen —
+        // Default sind nicht existierende Verzeichnisse (leere Listen);
+        // Datei-Tests injizieren eigene Temp-Ordner
+        model.directoriesProvider = []
+        { return conduit::BrowserModel::Directories {}; };
+    }
+
     /** Wartet auf den async Index-Build (Dispatcher-Queue pumpen). */
     bool waitForSearchRows (const juce::String& needle)
     {
@@ -333,4 +342,88 @@ TEST_CASE ("Modul-Descriptors: Airwindows-Wrapper spiegeln die Registry",
         REQUIRE (descriptor.category == juce::String (entry.category));
         REQUIRE (! descriptor.tags.isEmpty());
     }
+}
+
+//==============================================================================
+TEST_CASE ("Browser-Modell: PROJEKTE + Captures listen echte Dateien (M6)",
+           "[browser][files]")
+{
+    ModelRig rig;
+
+    // Temp-Verzeichnisse als injizierte Datenquelle
+    const auto base = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("ConduitModelFileTests")
+                          .getChildFile (juce::Uuid().toString());
+    const auto projectsDir = base.getChildFile ("Projekte");
+    const auto capturesDir = base.getChildFile ("Captures");
+    projectsDir.createDirectory();
+    capturesDir.createDirectory();
+    projectsDir.getChildFile ("mein_set.conduit").replaceWithText ("<CONDUIT/>");
+
+    rig.model.directoriesProvider = [projectsDir, capturesDir]
+    {
+        return conduit::BrowserModel::Directories { projectsDir, {}, {}, capturesDir };
+    };
+
+    // PROJEKTE betreten -> Scan laeuft im Pool, Ergebnis nach dem Pumpen
+    rig.model.openSection (Section::projects);
+    REQUIRE (rig.dispatcher.pumpUntil ([&rig]
+    {
+        const auto& rows = rig.model.rows();
+        return rows.size() >= 2 && rows[1].kind == Row::Kind::file;
+    }));
+
+    // Zeile 0 = "Preset laden..."-Aktion, danach die Session-Datei
+    REQUIRE (rig.model.rows()[0].kind == Row::Kind::action);
+    const auto& fileRow = rig.model.rows()[1];
+    REQUIRE (fileRow.label == "mein_set");
+    REQUIRE (fileRow.id.startsWith ("project:"));
+    REQUIRE (fileRow.id.endsWith ("mein_set.conduit"));
+    REQUIRE (fileRow.secondary.isNotEmpty());   // Aenderungsdatum
+
+    // Leerer Captures-Ordner -> sauberer Hinweis (kein Crash, keine Fantasie)
+    rig.model.openSection (Section::audio);
+    REQUIRE (rig.model.activateRow (2));        // Captures
+    REQUIRE (rig.dispatcher.pumpUntil ([&rig]
+    {
+        const auto& rows = rig.model.rows();
+        return rows.size() == 1 && rows[0].kind == Row::Kind::hint
+               && rows[0].label == "Keine Dateien";
+    }));
+
+    base.deleteRecursively();
+}
+
+TEST_CASE ("Browser-Modell: Suche findet gescannte Projekt-Dateien (M6)",
+           "[browser][files][search]")
+{
+    ModelRig rig;
+
+    const auto base = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("ConduitModelFileSearch")
+                          .getChildFile (juce::Uuid().toString());
+    base.createDirectory();
+    base.getChildFile ("drone_jam.conduit").replaceWithText ("<CONDUIT/>");
+
+    rig.model.directoriesProvider = [base]
+    { return conduit::BrowserModel::Directories { base, {}, {}, {} }; };
+
+    // Scan anstossen (PROJEKTE betreten) und Ergebnis abwarten
+    rig.model.openSection (Section::projects);
+    REQUIRE (rig.dispatcher.pumpUntil ([&rig]
+    {
+        const auto& rows = rig.model.rows();
+        return rows.size() >= 2 && rows[1].kind == Row::Kind::file;
+    }));
+
+    // Suche ueber den Datei-Namen — Treffer ist die Projekt-Zeile
+    rig.model.setSearchText ("drone");
+    REQUIRE (rig.dispatcher.pumpUntil ([&rig]
+    {
+        const auto& rows = rig.model.rows();
+        return ! rows.empty() && rows.front().kind == Row::Kind::file;
+    }));
+    REQUIRE (rig.model.rows().front().id.startsWith ("project:"));
+
+    base.deleteRecursively();
 }

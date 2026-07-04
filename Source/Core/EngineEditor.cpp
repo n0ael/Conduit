@@ -1,5 +1,6 @@
 #include "EngineEditor.h"
 
+#include "Browser/BrowserPaths.h"
 #include "EngineProcessor.h"
 #include "Modules/LinkAudioSendModule.h"
 #include "UI/LinkSendCreateDialog.h"
@@ -114,12 +115,47 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
         jassertquiet (created.isValid());
     };
 
-    // Interim bis M6: PROJEKTE-Zeile "Preset laden…" (Save bleibt auf der
-    // Save-Kachel)
+    // PROJEKTE-Zeile "Preset laden…" (Datei-Dialog für beliebige Pfade;
+    // Save bleibt auf der Save-Kachel)
     browserPanel.onAction = [this] (const juce::String& actionId)
     {
         if (actionId == "load_preset")
             launchPresetChooser (false);
+    };
+
+    // Datei-Bereiche (M6): Verzeichnisse — Captures aus den CaptureSettings
+    browserModel.directoriesProvider = [this]
+    {
+        return BrowserModel::Directories {
+            browser_paths::projectsDirectory(),
+            browser_paths::loopsDirectory(),
+            browser_paths::oneShotsDirectory(),
+            engine.getCaptureSettings().getExportDirectory()
+        };
+    };
+
+    // Session-Load mit Bestätigung: es gibt (noch) keinen Dirty-Flag —
+    // deshalb IMMER fragen, der aktuelle Patch wird ersetzt (undo-fähig)
+    browserPanel.onLoadProject = [this] (const juce::File& projectFile)
+    {
+        juce::AlertWindow::showOkCancelBox (
+            juce::MessageBoxIconType::QuestionIcon,
+            "Session laden",
+            juce::String::fromUTF8 ("\xe2\x80\x9e") + projectFile.getFileNameWithoutExtension()
+                + juce::String::fromUTF8 ("\xe2\x80\x9c laden? Der aktuelle Patch wird ersetzt."),
+            "Laden", "Abbrechen", this,
+            juce::ModalCallbackFunction::create ([this, projectFile] (int result)
+            {
+                if (result == 0)
+                    return;   // abgebrochen
+
+                const auto loadResult = engine.loadPreset (projectFile);
+
+                if (loadResult.failed())
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Session laden", loadResult.getErrorMessage());
+            }));
     };
 
     // Looper-Quellen (Master + Hardware-Paare + Taps): Auswahl armt den
@@ -431,9 +467,15 @@ void EngineEditor::launchPresetChooser (bool saving)
                                    : engine.loadPreset (file);
 
         if (result.failed())
+        {
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
                                                     saving ? "Preset speichern" : "Preset laden",
                                                     result.getErrorMessage());
+            return;
+        }
+
+        if (saving)
+            browserModel.refreshFiles();   // PROJEKTE-Liste kennt den neuen Stand
     });
 }
 

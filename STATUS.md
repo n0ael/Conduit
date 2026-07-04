@@ -125,8 +125,66 @@ Verzeichnisse unter Dokumente/Conduit (+ Captures aus CaptureSettings).
   Screen-Tasten → Treffer, Ziffernreihe). Smoke-Hinweis: das Setting
   wurde über eine gesicherte Ui.settings injiziert und danach
   wiederhergestellt.
-- **Offen:**
-  M6 PROJEKTE/AUDIO-Daten + Abschlussbericht.
+- **M6 (PROJEKTE + AUDIO Datenanbindung):** `BrowserPaths` (Dokumente/
+  Conduit + /Loops + /One-Shots, bei Bedarf angelegt — DIE Stelle bis es
+  Settings gibt) + `BrowserFileScanner`: Verzeichnis-Scan auf dem
+  geteilten Pool, Audio-Metadaten HEADER-only (AudioFormatManager nur im
+  Job), **mtime-Cache** überspringt unveränderte Dateien beim Rescan
+  (getMetadataReadCount als Testbeleg), Generation-Zähler PRO scanId +
+  Alive-Flag (Muster Suchindex, derselbe Dispatcher-Seam). Model:
+  `Directories`-Provider (Editor injiziert Captures aus den
+  CaptureSettings), Scan beim Betreten eines Dateibereichs
+  (setNavigation) + `refreshFiles()` nach Preset-Save; PROJEKTE = Action
+  „Preset laden…" (Datei-Dialog) + *.conduit-Liste (Datum als
+  Sekundärspalte), AUDIO-Unterbereiche = WAV/AIFF/FLAC/OGG/MP3 mit
+  „M:SS · 48k / 24 Bit / st"; leere Ordner → „Keine Sessions/Dateien",
+  laufender Erst-Scan → „Scanne …". Gescannte Dateien sind
+  MIT-DURCHSUCHBAR (searchableFiles → Index-Rebuild nach jedem Scan).
+  Projekt-Tap → `onLoadProject` → Editor fragt IMMER async
+  (AlertWindow::showOkCancelBox — es gibt keinen Dirty-Flag; Laden ist
+  eh undo-fähig) → loadPreset; Audio-Tap = nur Selektion (kein Vorhören,
+  Non-Goal). Test-Regel: Rigs injizieren einen LEEREN directoriesProvider
+  (nie das echte Dokumente/Conduit scannen). 6 neue Tests (393/20684,
+  Debug + ASan); Smoke: browser_m6_*.png — echte Captures-Takes mit
+  Dauer/Format (.asd gefiltert), dev.conduit mit Datum, Bestätigungs-
+  dialog.
+
+---
+
+### Browser-Panel — ABSCHLUSSBERICHT (M1–M6 fertig, 04.07.2026)
+
+**Fertig** (Branch `feature/browser-panel`, 6 Commits, je Build+Tests+
+ASan+Smoke): rechts angedocktes touch-first Browser-Panel mit
+Kontext-Filterung (MODULE nur Device-Page, Startbereich pro Page zentral
+im BrowserContextProvider), Zwei-Ebenen-Navigation mit Breadcrumb,
+virtualisierter Liste (ListBox + BrowserListRow, 44-px-Raster),
+Tap-to-Load + Drag-to-Graph (undo-fähig, Link-Send-Dialog), Suche
+(Hintergrund-Index, Debounce, Empty-State), TouchKeyboard
+(softKeyboardEnabled: Linux an/Desktop aus), PROJEKTE/AUDIO mit echten
+Daten (Scanner, mtime-Cache, Session-Load mit Bestätigung). Das alte
+„+" (ModuleBrowser-CallOutBox) ist vollständig ersetzt. 46 neue
+Browser-Tests; Gesamtbestand 393 Cases / 20684 Assertions, Debug + ASan
+grün; Smokes in docs/smoke/browser_m*.png.
+
+**Offen / bewusst nicht drin:** kein Audio-Vorhören (braucht
+Audition-Routing), keine Modul-Live-Preview, kein Mixer-/Remote-/
+Settings-Content im Browser (Nicht-Ziele der Iteration); Browser-
+Verzeichnisse noch nicht als Settings editierbar (BrowserPaths ist die
+eine Stelle); Icons sind selbst erstellte Platzhalter (Assets/
+svg-browser-icons/, Austausch designseitig); Startbereich-pro-Page-
+Mapping entscheidet der User, wenn Mixer/Grid/Clip-Pages real werden;
+TSan läuft wie immer erst in der CI (Linux) — Dispatcher/Pool-Pfade
+sind dafür gebaut, aber lokal ungeprüft.
+
+**Empfohlene nächste Schritte:** (1) Audio-Vorhören (Audition-Bus nach
+dem GraphFader, Tap auf Audio-Zeile spielt ab); (2) statische
+Modul-Preview-Kacheln (Beschreibung/Parameter im Panel statt sofortigem
+Laden); (3) Live-Preview-Graph (isolierter Preview-AudioProcessorGraph);
+(4) Browser-Verzeichnisse in die Settings; (5) Drag-Autopan (beim Drag
+an den Panel-Rand die Seite wechseln); (6) Touchscreen-Feldtest der
+Gesten-Schwellen (Tap 8 px / Flick / horizontaler Drag) auf der LinkBox.
+
+---
 
 ---
 

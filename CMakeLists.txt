@@ -115,6 +115,8 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/UiSettings.cpp
     Source/Core/Browser/BrowserContextProvider.cpp
     Source/Core/Browser/BrowserModel.cpp
+    Source/Core/Browser/BrowserFileScanner.cpp
+    Source/Core/Browser/BrowserPaths.cpp
     Source/Core/Browser/BrowserSearchIndex.cpp
     Source/Core/Capture/BufferPool.cpp
     Source/Core/Capture/CaptureChannel.cpp
@@ -255,6 +257,8 @@ target_sources(Conduit PRIVATE
     Source/Core/TransportSettings.h
     Source/Core/Browser/BrowserContextProvider.h
     Source/Core/Browser/BrowserModel.h
+    Source/Core/Browser/BrowserFileScanner.h
+    Source/Core/Browser/BrowserPaths.h
     Source/Core/Browser/BrowserSearchIndex.h
     Source/Core/Capture/BufferPool.h
     Source/Core/Capture/CaptureChannel.h
@@ -460,6 +464,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/AudioDeviceControllerTests.cpp
         Tests/Core/Browser/BrowserContextProviderTests.cpp
         Tests/Core/Browser/BrowserModelTests.cpp
+        Tests/Core/Browser/BrowserFileScannerTests.cpp
         Tests/Core/Browser/BrowserSearchIndexTests.cpp
         Tests/Core/CallbackTimingMonitorTests.cpp
         Tests/Core/CaptureBufferTests.cpp
@@ -540,7 +545,9 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/UiSettings.cpp
         Source/Core/Browser/BrowserContextProvider.cpp
         Source/Core/Browser/BrowserModel.cpp
-        Source/Core/Browser/BrowserSearchIndex.cpp
+        Source/Core/Browser/BrowserFileScanner.cpp
+    Source/Core/Browser/BrowserPaths.cpp
+    Source/Core/Browser/BrowserSearchIndex.cpp
         Source/Core/Capture/BufferPool.cpp
         Source/Core/Capture/CaptureChannel.cpp
         Source/Core/Capture/CaptureService.cpp

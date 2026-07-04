@@ -75,6 +75,10 @@ public:
     /** Tap auf eine Aktions-Zeile (z.B. "load_preset"). */
     std::function<void (const juce::String& actionId)> onAction;
 
+    /** Tap auf eine Projekt-Zeile (M6) — der Editor bestätigt async
+        (AlertWindow) und lädt dann via EngineProcessor::loadPreset. */
+    std::function<void (const juce::File& projectFile)> onLoadProject;
+
     //==========================================================================
     void paint (juce::Graphics& g) override;
     void resized() override;

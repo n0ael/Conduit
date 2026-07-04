@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "Core/Browser/BrowserModel.h"
+#include "../Core/Browser/TestDispatcher.h"
 #include "../Core/TestSettingsFolder.h"
 #include "UI/Browser/BrowserPanel.h"
 
@@ -26,6 +27,10 @@ struct PanelRig
 {
     PanelRig()
     {
+        // Hermetisch: nie das echte Dokumente/Conduit scannen (M6)
+        model.directoriesProvider = []
+        { return conduit::BrowserModel::Directories {}; };
+
         panel.setSize (conduit::BrowserPanel::dockWidth, 600);
     }
 
@@ -36,7 +41,8 @@ struct PanelRig
     conduit::ModuleFactory& factory = registered.factory;
     conduit::BrowserContextProvider context;
     juce::ThreadPool worker { juce::ThreadPoolOptions{}.withNumberOfThreads (1) };
-    conduit::BrowserModel model { factory, context, worker };
+    conduit::test::QueueDispatcher dispatcher;
+    conduit::BrowserModel model { factory, context, worker, dispatcher.fn() };
     conduit::BrowserPanel panel { model, uiSettings };
 };
 } // namespace
@@ -234,4 +240,37 @@ TEST_CASE ("Browser-Panel: Keyboard tippt ins Suchfeld, Panel-Schliessen raeumt 
     rig.panel.setKeyboardVisible (true, false);
     rig.panel.setOpen (false);
     REQUIRE_FALSE (rig.panel.isKeyboardVisible());
+}
+
+//==============================================================================
+TEST_CASE ("Browser-Panel: Projekt-Tap feuert onLoadProject mit der Datei (M6)",
+           "[browser][ui][files]")
+{
+    PanelRig rig;
+
+    const auto base = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                          .getChildFile ("ConduitPanelFileTests")
+                          .getChildFile (juce::Uuid().toString());
+    base.createDirectory();
+    const auto sessionFile = base.getChildFile ("live_set.conduit");
+    sessionFile.replaceWithText ("<CONDUIT/>");
+
+    rig.model.directoriesProvider = [base]
+    { return conduit::BrowserModel::Directories { base, {}, {}, {} }; };
+
+    juce::File loaded;
+    rig.panel.onLoadProject = [&loaded] (const juce::File& file) { loaded = file; };
+
+    // PROJEKTE oeffnen; der Scan-Job laeuft im Pool — Ergebnis pumpen
+    rig.model.openSection (conduit::BrowserContextProvider::Section::projects);
+
+    REQUIRE (rig.dispatcher.pumpUntil ([&rig]
+    {
+        return rig.model.rows().size() >= 2
+               && rig.model.rows()[1].kind == conduit::BrowserModel::Row::Kind::file;
+    }));
+    rig.panel.activateRowForTest (1);
+    REQUIRE (loaded == sessionFile);
+
+    base.deleteRecursively();
 }

@@ -5,7 +5,10 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <map>
+
 #include "BrowserContextProvider.h"
+#include "BrowserFileScanner.h"
 #include "BrowserSearchIndex.h"
 #include "Modules/ModuleFactory.h"
 
@@ -92,6 +95,23 @@ public:
     bool activateRow (int rowIndex);
 
     //==========================================================================
+    // Dateibereiche (M6): PROJEKTE (*.conduit) + AUDIO (Loops/One-Shots/
+    // Captures) — Scans laufen auf dem Worker-Pool, die UI blockiert nie
+
+    struct Directories
+    {
+        juce::File projects, loops, oneShots, captures;
+    };
+
+    /** Der Editor injiziert die Verzeichnisse (Captures kommt aus den
+        CaptureSettings); Default = BrowserPaths ohne Captures. Wird bei
+        JEDEM Scan frisch abgefragt (Export-Ordner kann wechseln). */
+    std::function<Directories()> directoriesProvider;
+
+    /** Aktiven Dateibereich neu scannen (z.B. nach Preset-Save). */
+    void refreshFiles();
+
+    //==========================================================================
     // Suche (M4) — Debouncing macht das Panel (~120 ms)
 
     /** Nicht-leerer Text schaltet in den Suchmodus (flache Trefferliste
@@ -119,6 +139,14 @@ private:
     void buildModuleListRows (const juce::String& branchKey,
                               const juce::String& category);
     void buildAudioRootRows();
+    void buildFileSectionRows (const juce::String& sectionKey);
+
+    /** Dateibereichs-Schlüssel der aktuellen Navigation ("projects",
+        "loops", "oneshots", "captures") — leer, wenn keiner aktiv. */
+    [[nodiscard]] juce::String activeFileSectionKey() const;
+    void triggerScan (const juce::String& sectionKey);
+    void handleScanComplete (const juce::String& sectionKey,
+                             std::vector<BrowserFileScanner::Entry> entries);
 
     /** Kategorien eines Astes in kanonischer Reihenfolge (Rest alphabetisch). */
     [[nodiscard]] juce::StringArray categoriesFor (ModuleDescriptor::Branch branch) const;
@@ -130,8 +158,12 @@ private:
     ModuleFactory& factory;
     BrowserContextProvider& context;
     BrowserSearchIndex index;
+    BrowserFileScanner scanner;
 
     std::vector<Row> visibleRows;
+
+    std::map<juce::String, std::vector<Row>> fileRowsBySection;   // scanId → Rows
+    std::map<juce::String, Row> searchableFiles;                  // itemId → Row (Suche)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BrowserModel)
 };

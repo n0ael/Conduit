@@ -1,5 +1,7 @@
 #include "BrowserModel.h"
 
+#include "BrowserPaths.h"
+
 namespace conduit
 {
 
@@ -69,7 +71,8 @@ BrowserModel::BrowserModel (ModuleFactory& factoryToUse,
                             juce::ThreadPool& workerToUse,
                             BrowserSearchIndex::Dispatcher dispatcherToUse)
     : factory (factoryToUse), context (contextToUse),
-      index (workerToUse, std::move (dispatcherToUse))
+      index (workerToUse, dispatcherToUse),
+      scanner (workerToUse, std::move (dispatcherToUse))
 {
     context.onContextChanged = [this] { handleContextChanged(); };
 
@@ -79,6 +82,10 @@ BrowserModel::BrowserModel (ModuleFactory& factoryToUse,
         if (isSearching())
             rebuildRows();
     };
+
+    scanner.onScanComplete = [this] (const juce::String& scanId,
+                                     std::vector<BrowserFileScanner::Entry> entries)
+    { handleScanComplete (scanId, std::move (entries)); };
 
     rebuildIndexAsync();
     rebuildRows();
@@ -92,6 +99,12 @@ void BrowserModel::rebuildIndexAsync()
         sources.push_back ({ descriptor.id, descriptor.displayName,
                              descriptor.category,
                              descriptor.tags.joinIntoString (" ") });
+
+    // Gescannte Dateien sind mit-durchsuchbar (M6)
+    for (const auto& [itemId, row] : searchableFiles)
+        sources.push_back ({ itemId, row.label,
+                             itemId.startsWith ("project:") ? "Projekt" : "Audio",
+                             {} });
 
     index.rebuildAsync (std::move (sources));
 }
@@ -239,20 +252,30 @@ juce::String BrowserModel::getSearchText() const
 
 void BrowserModel::buildSearchRows()
 {
-    // Flache Trefferliste über die sichtbaren Bereiche — M4: Module
-    // (nur wenn MODULE im Kontext sichtbar ist), M6 ergänzt Dateien
-    if (context.isSectionVisible (BrowserContextProvider::Section::modules))
-    {
-        for (const auto& itemId : index.query (getSearchText()))
-        {
-            const auto descriptor = factory.getDescriptor (itemId);
-            if (descriptor.id.isEmpty())
-                continue;
+    // Flache Trefferliste über die sichtbaren Bereiche: Module (nur im
+    // Device-Kontext) + gescannte Projekt-/Audio-Dateien (global)
+    const auto modulesVisible
+        = context.isSectionVisible (BrowserContextProvider::Section::modules);
 
-            visibleRows.push_back ({ Row::Kind::module, Icon::none,
-                                     descriptor.displayName, descriptor.id, 0,
-                                     descriptor.category });
+    for (const auto& itemId : index.query (getSearchText()))
+    {
+        if (const auto fileHit = searchableFiles.find (itemId);
+            fileHit != searchableFiles.end())
+        {
+            visibleRows.push_back (fileHit->second);
+            continue;
         }
+
+        if (! modulesVisible)
+            continue;
+
+        const auto descriptor = factory.getDescriptor (itemId);
+        if (descriptor.id.isEmpty())
+            continue;
+
+        visibleRows.push_back ({ Row::Kind::module, Icon::none,
+                                 descriptor.displayName, descriptor.id, 0,
+                                 descriptor.category });
     }
 
     if (visibleRows.empty())
@@ -278,20 +301,8 @@ void BrowserModel::rebuildRows()
                              category.fromFirstOccurrenceOf (":", false, false));
     else if (section == sectionAudio && category.isEmpty())
         buildAudioRootRows();
-    else if (section == sectionProjects)
-    {
-        // Interim bis M6 (Session-Liste): Preset-Load bleibt erreichbar,
-        // seit die alte „+"-CallOutBox weg ist (M3)
-        visibleRows.push_back ({ Row::Kind::action, Icon::none,
-                                 juce::String::fromUTF8 ("Preset laden…"),
-                                 "load_preset", 0 });
-        visibleRows.push_back ({ Row::Kind::hint, Icon::none,
-                                 juce::String::fromUTF8 ("Session-Liste folgt …"), {}, 0 });
-    }
     else
-        // AUDIO-Unterbereiche: Datenanbindung folgt in M6
-        visibleRows.push_back ({ Row::Kind::hint, Icon::none,
-                                 juce::String::fromUTF8 ("Inhalte folgen …"), {}, 0 });
+        buildFileSectionRows (activeFileSectionKey());
 
     if (onRowsChanged != nullptr)
         onRowsChanged();
@@ -353,6 +364,128 @@ void BrowserModel::buildAudioRootRows()
     visibleRows.push_back ({ Row::Kind::category, Icon::none, "Captures", "captures", 0 });
 }
 
+void BrowserModel::buildFileSectionRows (const juce::String& sectionKey)
+{
+    if (sectionKey.isEmpty())
+        return;
+
+    // PROJEKTE behält den Datei-Dialog als Weg zu beliebigen Pfaden
+    if (sectionKey == "projects")
+        visibleRows.push_back ({ Row::Kind::action, Icon::none,
+                                 juce::String::fromUTF8 ("Preset laden…"),
+                                 "load_preset", 0 });
+
+    const auto scanned = fileRowsBySection.find (sectionKey);
+
+    if (scanned == fileRowsBySection.end())
+    {
+        visibleRows.push_back ({ Row::Kind::hint, Icon::none,
+                                 juce::String::fromUTF8 ("Scanne …"), {}, 0 });
+        return;
+    }
+
+    if (scanned->second.empty())
+    {
+        visibleRows.push_back ({ Row::Kind::hint, Icon::none,
+                                 sectionKey == "projects" ? "Keine Sessions"
+                                                          : "Keine Dateien", {}, 0 });
+        return;
+    }
+
+    for (const auto& row : scanned->second)
+        visibleRows.push_back (row);
+}
+
+juce::String BrowserModel::activeFileSectionKey() const
+{
+    if (isSearching())
+        return {};
+
+    const auto section = currentSectionName();
+
+    if (section == sectionProjects)
+        return "projects";
+
+    if (section == sectionAudio)
+        return currentCategoryId();   // "loops" | "oneshots" | "captures" | ""
+
+    return {};
+}
+
+void BrowserModel::triggerScan (const juce::String& sectionKey)
+{
+    if (sectionKey.isEmpty())
+        return;
+
+    const auto directories = directoriesProvider != nullptr
+                           ? directoriesProvider()
+                           : Directories { browser_paths::projectsDirectory(),
+                                           browser_paths::loopsDirectory(),
+                                           browser_paths::oneShotsDirectory(), {} };
+
+    constexpr auto audioWildcard = "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3";
+
+    if (sectionKey == "projects")
+        scanner.scanAsync (sectionKey, directories.projects, "*.conduit", false);
+    else if (sectionKey == "loops")
+        scanner.scanAsync (sectionKey, directories.loops, audioWildcard, true);
+    else if (sectionKey == "oneshots")
+        scanner.scanAsync (sectionKey, directories.oneShots, audioWildcard, true);
+    else if (sectionKey == "captures")
+        scanner.scanAsync (sectionKey, directories.captures, audioWildcard, true);
+}
+
+void BrowserModel::handleScanComplete (const juce::String& sectionKey,
+                                       std::vector<BrowserFileScanner::Entry> entries)
+{
+    const auto isProjects = sectionKey == "projects";
+    const auto idPrefix   = isProjects ? "project:" : "audio:";
+
+    std::vector<Row> rows;
+    rows.reserve (entries.size());
+
+    for (const auto& entry : entries)
+    {
+        Row row;
+        row.kind  = Row::Kind::file;
+        row.label = entry.name;
+        row.id    = idPrefix + entry.file.getFullPathName();
+
+        if (isProjects)
+            row.secondary = juce::Time (entry.modTimeMs).formatted ("%d.%m.%y");
+        else
+        {
+            const auto totalSeconds = juce::roundToInt (entry.durationSeconds);
+            row.secondary = juce::String (totalSeconds / 60) + ":"
+                          + juce::String (totalSeconds % 60).paddedLeft ('0', 2);
+            if (entry.formatSummary.isNotEmpty())
+                row.secondary << juce::String::fromUTF8 (" \xc2\xb7 ")   // ·
+                              << entry.formatSummary;
+        }
+
+        rows.push_back (std::move (row));
+    }
+
+    fileRowsBySection[sectionKey] = std::move (rows);
+
+    // Suchindex kennt die Dateien mit — die Map wird komplett aus den
+    // Scan-Ergebnissen neu aufgebaut (verschwundene Dateien fallen raus)
+    searchableFiles.clear();
+    for (const auto& [key, sectionRows] : fileRowsBySection)
+        for (const auto& row : sectionRows)
+            searchableFiles[row.id] = row;
+
+    rebuildIndexAsync();
+
+    if (activeFileSectionKey() == sectionKey || isSearching())
+        rebuildRows();
+}
+
+void BrowserModel::refreshFiles()
+{
+    triggerScan (activeFileSectionKey());
+}
+
 juce::StringArray BrowserModel::categoriesFor (ModuleDescriptor::Branch branch) const
 {
     juce::StringArray present;
@@ -398,6 +531,10 @@ void BrowserModel::setNavigation (const juce::String& sectionName,
     state.setProperty (propSection, sectionName, nullptr);
     state.setProperty (propCategory, categoryIdToUse, nullptr);
     rebuildRows();
+
+    // Dateibereich betreten → frisch scannen (mtime-Cache macht Rescans
+    // billig; bis das Ergebnis einläuft, zeigen die letzten Rows/„Scanne …")
+    triggerScan (activeFileSectionKey());
 }
 
 } // namespace conduit
