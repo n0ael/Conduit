@@ -312,13 +312,13 @@ void BrowserModel::buildOverviewRows()
 {
     // Die sichtbaren Hauptbereiche in fixer Reihenfolge
     visibleRows.push_back ({ Row::Kind::section, Icon::projects,
-                             "PROJEKTE", sectionProjects, 0 });
+                             "PROJEKTE", sectionProjects, 0, {} });
     visibleRows.push_back ({ Row::Kind::section, Icon::audio,
-                             "AUDIO", sectionAudio, 0 });
+                             "AUDIO", sectionAudio, 0, {} });
 
     if (context.isSectionVisible (BrowserContextProvider::Section::modules))
         visibleRows.push_back ({ Row::Kind::section, Icon::none,
-                                 "MODULE", sectionModules, 0 });
+                                 "MODULE", sectionModules, 0, {} });
 }
 
 void BrowserModel::buildModulesRootRows()
@@ -329,11 +329,11 @@ void BrowserModel::buildModulesRootRows()
     {
         const auto branchKey = branchKeyFor (branch);
         visibleRows.push_back ({ Row::Kind::branch, icon,
-                                 branchDisplayName (branchKey), branchKey, 0 });
+                                 branchDisplayName (branchKey), branchKey, 0, {} });
 
         for (const auto& category : categoriesFor (branch))
             visibleRows.push_back ({ Row::Kind::category, Icon::none, category,
-                                     categoryId (branchKey, category), 1 });
+                                     categoryId (branchKey, category), 1, {} });
     };
 
     addBranch (ModuleDescriptor::Branch::cvControl, Icon::cvControl);
@@ -350,18 +350,18 @@ void BrowserModel::buildModuleListRows (const juce::String& branchKey,
     for (const auto& descriptor : factory.getDescriptors())
         if (descriptor.branch == branch && descriptor.category == category)
             visibleRows.push_back ({ Row::Kind::module, Icon::none,
-                                     descriptor.displayName, descriptor.id, 0 });
+                                     descriptor.displayName, descriptor.id, 0, {} });
 
     if (visibleRows.empty())
         visibleRows.push_back ({ Row::Kind::hint, Icon::none,
-                                 "Keine Module in dieser Kategorie", {}, 0 });
+                                 "Keine Module in dieser Kategorie", {}, 0, {} });
 }
 
 void BrowserModel::buildAudioRootRows()
 {
-    visibleRows.push_back ({ Row::Kind::category, Icon::none, "Loops", "loops", 0 });
-    visibleRows.push_back ({ Row::Kind::category, Icon::none, "One-Shots", "oneshots", 0 });
-    visibleRows.push_back ({ Row::Kind::category, Icon::none, "Captures", "captures", 0 });
+    visibleRows.push_back ({ Row::Kind::category, Icon::none, "Loops", "loops", 0, {} });
+    visibleRows.push_back ({ Row::Kind::category, Icon::none, "One-Shots", "oneshots", 0, {} });
+    visibleRows.push_back ({ Row::Kind::category, Icon::none, "Captures", "captures", 0, {} });
 }
 
 void BrowserModel::buildFileSectionRows (const juce::String& sectionKey)
@@ -373,14 +373,14 @@ void BrowserModel::buildFileSectionRows (const juce::String& sectionKey)
     if (sectionKey == "projects")
         visibleRows.push_back ({ Row::Kind::action, Icon::none,
                                  juce::String::fromUTF8 ("Preset laden…"),
-                                 "load_preset", 0 });
+                                 "load_preset", 0, {} });
 
     const auto scanned = fileRowsBySection.find (sectionKey);
 
     if (scanned == fileRowsBySection.end())
     {
         visibleRows.push_back ({ Row::Kind::hint, Icon::none,
-                                 juce::String::fromUTF8 ("Scanne …"), {}, 0 });
+                                 juce::String::fromUTF8 ("Scanne …"), {}, 0, {} });
         return;
     }
 
@@ -388,7 +388,7 @@ void BrowserModel::buildFileSectionRows (const juce::String& sectionKey)
     {
         visibleRows.push_back ({ Row::Kind::hint, Icon::none,
                                  sectionKey == "projects" ? "Keine Sessions"
-                                                          : "Keine Dateien", {}, 0 });
+                                                          : "Keine Dateien", {}, 0, {} });
         return;
     }
 
