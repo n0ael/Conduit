@@ -1,7 +1,7 @@
 # Conduit Alpha — Projektstatus
 
 > Letzte Aktualisierung: 2026-07-04 | wird nach jedem Meilenstein gepflegt
-> Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit_Alpha_v2
+> Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
 ## Fundament (steht komplett)
 

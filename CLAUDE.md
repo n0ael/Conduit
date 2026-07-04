@@ -1,6 +1,13 @@
 # Conduit Alpha v3 — Claude Code Anweisungen
 > C++20 + JUCE 8+  |  Modulares Audio/CV-Instrument  |  Stand: Juli 2026
 
+> Repo: github.com/n0ael/Conduit — umbenannt von `Conduit_Alpha_v2`
+> (Juli 2026). Referenzen auf 'Conduit_Alpha_v2', 'alpha v2' oder
+> alte Remote-URLs in Commits, Kommentaren oder externen Notizen
+> bezeichnen dieses Projekt. Aktueller Stand: Alpha v3.
+> Versionsangaben 'v2.x' in der Roadmap sind Feature-Meilensteine,
+> keine Repo-Namen.
+
 ---
 
 ## 1. Rolle & Kontext
@@ -35,7 +42,10 @@ Denke in Architektur und Modulen, bevor du Code schreibst. Liefere Code-Snippets
 // - RT-inkompatible Kernel-Calls (PREEMPT_RT)
 
 // PFLICHT:
-// - juce::AbstractFifo oder std::atomic<> für Parameter-Updates
+// - SpscQueue (Source/Util/SpscQueue.h) oder std::atomic<> für
+//   Parameter-Updates
+// - juce::AbstractFifo NICHT verwenden — SpscQueue ist der einzige
+//   Inter-Thread-Queue-Baustein (Catch2-getestet, TSan-abgedeckt)
 // - SPSC-Ringbuffer zwischen UI-Thread und Audio-Thread
 
 // PFLICHT (Ergänzung):
@@ -837,4 +847,23 @@ cmake --preset tsan && cmake --build --preset tsan   # TSan (Clang) — NUR Linu
 
 ---
 
-*Conduit Alpha v3 — Claude Code Instructions v4.3  |  Juli 2026*
+## 14. ADRs (Architecture Decision Records)
+
+### ADR: SpscQueue als einziger Inter-Thread-Queue-Baustein + Repo-Rename-Klarstellung
+
+- **(a) AbstractFifo-Restbestand entfernt:** §3.1 nannte noch
+  `juce::AbstractFifo` als Option für Parameter-Updates — ein Restbestand
+  aus frühen Dokumentversionen. Die Codebase nutzt durchgängig `SpscQueue`
+  (`Source/Util/SpscQueue.h`, Catch2-getestet, TSan-abgedeckt); es gibt
+  0 AbstractFifo-Vorkommen im Code. §3.1 schreibt SpscQueue jetzt als
+  einzigen Inter-Thread-Queue-Baustein vor.
+- **(b) Repo-Umbenennung dokumentiert:** `Conduit_Alpha_v2` →
+  `github.com/n0ael/Conduit` (Juli 2026). Der Hinweisblock unter dem
+  Dokumenttitel verhindert Verwechslung alter Referenzen (Commits,
+  Kommentare, externe Notizen) mit einem anderen Projekt; Roadmap-Angaben
+  „v2.x" bleiben Feature-Meilensteine, keine Repo-Namen.
+- Kein Code betroffen — reine Dokumentationsentscheidung.
+
+---
+
+*Conduit Alpha v3 — Claude Code Instructions v4.4  |  Juli 2026*
