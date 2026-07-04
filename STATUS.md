@@ -16,6 +16,44 @@
 
 ## Aktueller Meilenstein (Juli 2026 — in Arbeit)
 
+**Looper-Knackser-Diagnose + Snap-Declick — FERTIG, Ohr-Abnahme bestanden (04.07.2026):**
+
+- **Symptom (User):** seltene Knackser, am deutlichsten beim Looper-Playback;
+  auch (seltener) in der Link-Audio-Übertragung und beim Direkt-Monitoring.
+- **Diagnose per Parallel-Aufnahme** (Ableton nimmt gleichzeitig den Link-Audio-Kanal
+  UND das Analog-Kabel vom Conduit-Out auf; Analyse-Skripte: Diff-Detektor,
+  isolierte Sprünge, Loop-Lag-Tracker — Muster im Session-Scratchpad):
+  Take 2 zeigte im Looper-Playback harte 1-Sample-Splices (0,15er-Diffs), NICHT
+  loop-periodisch, Input-Spur sauber → Playback-seitig. Loop-Lag-Tracking: 18 s
+  perfekte Wiederholung, dann dauerhaft springende Loop-Phase → die Beat-Messung
+  (Takt-Anker) sprang wiederholt > 0,15 Beats, und der Playhead-**Snap splicte
+  designbedingt OHNE Fade**. Wurzel: die Beat-Achse (Link-Wall-Clock) rutschte
+  gegen die Sample-Achse (Link-Grid-Re-Syncs bei Peer-Flapping und/oder
+  Callback-/USB-Aussetzer — Rechner hatte nachweislich Konnektivitäts-Events).
+  Der frühere Link-Aufnahme-Klick (12-Sample-Einfügung, Timeline intakt) passt
+  ins selbe Bild (beat-alignierter Link-Empfang springt mit).
+- **Fix (LooperEngine):** Snap erst nach `snapConfirmBlocks` (2) Blöcken bestätigt
+  (Einzelblock-Ausreißer slewt); dann **Duck-Declick**: 5-ms-Rampe auf 0, Playhead
+  springt UNTER der Stille, Rampe zurück — ~20-ms-Dip statt Klick. Kurze
+  Wall-Clock-Spikes an Taktgrenzen braucht das gar nicht: der Offset-Clamp der
+  BarSampleAnchors begrenzt Anker-Fehler auf ≤ 1 Block (Test bestätigt: kein Snap).
+  **Diagnose-Zähler** `snapCount` → Looper-Statuszeile („spielt: N Bars · M
+  Re-Syncs"): häuft sich M, wackelt die Achse — Problem liegt VOR dem Looper.
+- **Tests:** Grid-Shift-Repro (+0,3 Beats → genau 1 klickfreier Re-Sync,
+  maxDelta < 0,02 statt Splice ~1,0), Spike-Absorption (0 Snaps), bestehende
+  Jitter-/Wrap-/Re-Commit-Tests unverändert grün. 347 Fälle / 19533 Assertions,
+  Debug + ASan.
+- **Feldbefund (Ohr-Abnahme, 04.07.2026):** die Achsen-Rutscher waren
+  Callback-Underruns durch zu ambitionierten Buffer — **32 Samples überforderten
+  den PC**, mit 64 besser, mit **128 perfekt** (Re-Sync-Zähler bestätigte den
+  Zusammenhang: genau das Diagnose-Szenario, für das er gebaut wurde). Konsequenz:
+  `computeWarning`-Fenster jetzt **64–256 Samples** (darunter Deadline-Risiko,
+  darüber spürbare Latenz), Erststart-Default 48 kHz / **128** statt 32
+  (AudioDeviceController + Tests + CLAUDE.md 3.2 nachgezogen). Der Snap-Declick
+  bleibt wichtig: Re-Syncs durch Link-Peer-Flapping/USB gibt es auch ohne
+  Underruns — jetzt als ~20-ms-Dip statt Klick. Nächste Diagnose-Stufe (bei
+  Bedarf): XRun-/Callback-Timing-Zähler in der App.
+
 **Looper Spektrum-View — FERTIG (04.07.2026, Bausteine S1–S2):**
 
 - **Konzept:** der Waveform-Strip der Looper-Page schaltet per Spectrum-Kachel

@@ -36,16 +36,19 @@ AudioDeviceController::~AudioDeviceController()
 //==============================================================================
 juce::String AudioDeviceController::computeWarning (double sampleRate, int bufferSize)
 {
-    // Latenz-Ziele (CLAUDE.md 3.2): 48 kHz / 32 Samples, Fallback 44.1 kHz / 64
+    // Latenz-Ziele (CLAUDE.md 3.2): 48/44.1 kHz, Buffer 64–256 Samples.
+    // Feld-Lektion 04.07.2026: 32 Samples rissen Callback-Deadlines
+    // (Beat-Achsen-Rutscher → Looper-Re-Syncs) — unter 64 warnt die UI
+    // deshalb genauso wie über 256 (spürbare Latenz).
     const bool rateOk   = juce::approximatelyEqual (sampleRate, 48000.0)
                        || juce::approximatelyEqual (sampleRate, 44100.0);
-    const bool bufferOk = bufferSize <= 64;
+    const bool bufferOk = bufferSize >= 64 && bufferSize <= 256;
 
     if (rateOk && bufferOk)
         return {};
 
     return juce::String (sampleRate, 0) + " Hz / "
-               + juce::String (bufferSize) + " Samples (Ziel: 48000 Hz / 32)";
+               + juce::String (bufferSize) + " Samples (Ziel: 48000 Hz / 64-256)";
 }
 
 //==============================================================================
@@ -55,7 +58,8 @@ void AudioDeviceController::initialise (EngineProcessor& engineToUse)
     engine = &engineToUse;
 
     // Persistenz: gespeicherten Device-Zustand wiederherstellen. Nur beim
-    // Erststart (kein gespeicherter Zustand) forcieren wir 48k/32.
+    // Erststart (kein gespeicherter Zustand) forcieren wir 48k/128 —
+    // die Mitte des warnungsfreien Buffer-Fensters (computeWarning).
     std::unique_ptr<juce::XmlElement> savedState;
     if (auto* file = applicationProperties.getUserSettings())
         savedState = file->getXmlValue (deviceStateKey);
@@ -75,7 +79,7 @@ void AudioDeviceController::initialise (EngineProcessor& engineToUse)
 
         auto setup = deviceManager.getAudioDeviceSetup();
         setup.sampleRate = 48000.0;
-        setup.bufferSize = 32;
+        setup.bufferSize = 128;
         deviceManager.setAudioDeviceSetup (setup, true);
 
         juce::ignoreUnused (initError);

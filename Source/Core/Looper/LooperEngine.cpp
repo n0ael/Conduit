@@ -22,10 +22,14 @@ void LooperEngine::prepare (double sampleRate)
 
     committedBars.store (0, std::memory_order_relaxed);
     stopRequested.store (false, std::memory_order_relaxed);
+    snapCount.store (0, std::memory_order_relaxed);
 
     // Audio steht (prepareToPlay) — der SampleClock-Reset invalidiert die
-    // Beat-Basis, der Playhead snappt im ersten Block neu
+    // Beat-Basis, der Playhead setzt im ersten Block neu auf
     playheadValid = false;
+    snapPendingCount = 0;
+    snapDucking = false;
+    duckGain = 1.0f;
 }
 
 //==============================================================================
@@ -244,10 +248,35 @@ void LooperEngine::process (juce::AudioBuffer<float>& buffer, int numOutputChann
                                * beatsPerSample;
     }
 
-    if (! playheadValid || std::abs (measuredBeat - playheadBeat) > snapThresholdBeats)
+    if (! playheadValid)
     {
+        // Erster Block (prepare): noch nichts hörbar — direkt aufsetzen
         playheadBeat  = measuredBeat;
         playheadValid = true;
+        snapPendingCount = 0;
+        snapDucking = false;
+        duckGain = 1.0f;
+    }
+    else if (std::abs (measuredBeat - playheadBeat) > snapThresholdBeats)
+    {
+        // Snap-Kandidat: erst nach snapConfirmBlocks Blöcken glauben
+        // (Einzelblock-Ausreißer slewen), dann Duck-Declick einleiten
+        if (++snapPendingCount >= snapConfirmBlocks)
+            snapDucking = true;
+    }
+    else
+    {
+        snapPendingCount = 0;
+    }
+
+    // Duck bei Stille angekommen → Playhead UNTER der Stille umsetzen
+    // (der Sprung selbst ist damit unhörbar), Rampe kehrt zurück
+    if (snapDucking && duckGain <= 0.0f)
+    {
+        playheadBeat = measuredBeat;
+        snapDucking = false;
+        snapPendingCount = 0;
+        snapCount.fetch_add (1, std::memory_order_relaxed);
     }
 
     // Slew-limitierte Korrektur: der Lesekopf bleibt sample-kontinuierlich,
@@ -272,6 +301,13 @@ void LooperEngine::process (juce::AudioBuffer<float>& buffer, int numOutputChann
                ? buffer.getWritePointer (channelA + 1) : nullptr;
 
     const auto gainStep = 1.0f / static_cast<float> (juce::jmax (1, crossfadeSamples));
+
+    // Duck-Rampe des Blocks (Snap-Declick): linear innerhalb des Blocks,
+    // Zustandswechsel nur an Blockgrenzen (der Sprung passiert oben)
+    const auto duckStartGain = duckGain;
+    const auto duckStep = (snapDucking ? -1.0f : 1.0f) * gainStep;
+    duckGain = juce::jlimit (0.0f, 1.0f,
+                             duckGain + duckStep * static_cast<float> (numSamples));
 
     for (auto& voice : voices)
     {
@@ -309,9 +345,12 @@ void LooperEngine::process (juce::AudioBuffer<float>& buffer, int numOutputChann
             if (outA == nullptr)
                 continue;
 
-            outA[i] += renderVoiceSample (voice, 0, position) * voice.gain;
+            const auto duck = juce::jlimit (0.0f, 1.0f,
+                                            duckStartGain + duckStep * static_cast<float> (i));
+
+            outA[i] += renderVoiceSample (voice, 0, position) * voice.gain * duck;
             if (outB != nullptr)
-                outB[i] += renderVoiceSample (voice, 1, position) * voice.gain;
+                outB[i] += renderVoiceSample (voice, 1, position) * voice.gain * duck;
         }
 
         if (fading && voice.gain <= 0.0f)

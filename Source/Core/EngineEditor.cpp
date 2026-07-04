@@ -613,8 +613,16 @@ void EngineEditor::timerCallback()
         if (playing)
         {
             const auto bars = looper.getLoopBars();
-            looperPage.setStatus ("spielt: " + juce::String (bars)
-                                  + (bars == 1 ? " Bar" : " Bars"));
+            auto looperStatus = "spielt: " + juce::String (bars)
+                              + (bars == 1 ? " Bar" : " Bars");
+
+            // Diagnose: Playhead-Re-Syncs (Duck-Snaps) — häufen sie sich,
+            // wackelt die Link-Achse oder der Audio-Callback (Engine-Doku)
+            if (const auto snaps = looper.getSnapCount(); snaps > 0)
+                looperStatus << juce::String::fromUTF8 (" · ") << juce::String (snaps)
+                             << (snaps == 1 ? " Re-Sync" : " Re-Syncs");
+
+            looperPage.setStatus (looperStatus);
         }
         else
         {

@@ -52,7 +52,7 @@ Denke in Architektur und Modulen, bevor du Code schreibst. Liefere Code-Snippets
 
 | Parameter | Zielwert | Fallback |
 |---|---|---|
-| Buffer Size | 32 Samples | 64 Samples |
+| Buffer Size | 128 Samples (warnfrei 64–256) | — |
 | Sample Rate | 48 000 Hz | 44 100 Hz |
 | Audio-Callback RTL | < 2 ms intern | — |
 | Glass-to-Sound | < 10 ms gesamt | — |
@@ -599,7 +599,7 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
 ### 9.1 macOS CoreAudio
 
 - `juce_add_gui_app` mit `BUNDLE_ID` und `JUCE_USE_CORE_AUDIO=1`
-- `AudioDeviceManager.setAudioDeviceSetup()` — sampleRate 48000, bufferSize 32
+- `AudioDeviceManager.setAudioDeviceSetup()` — sampleRate 48000, bufferSize 128
 - Tatsächliche Buffer-Size nach Setup abfragen — Hardware kann Minimum erzwingen
 - `initAudio()` reagiert defensiv auf abweichende Werte, kein Crash,
   Abweichung in ValueTree-Property `audioSetupWarning` speichern
@@ -673,7 +673,12 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
     NIE direkt als Lese-Basis nutzen (hörbare Körnung). LooperEngine führt
     einen sample-kontinuierlichen Playhead: Messung aus SampleClock +
     jüngstem Takt-Anker, Korrektur slew-limitiert (0.2 % Varispeed), Snap
-    nur bei echten Beat-Sprüngen.
+    nur bei echten Beat-Sprüngen — und NIE hart (Feld-Lektion 04.07.2026:
+    Link-Grid-Re-Syncs ließen die Messung pro Takt springen, jeder rohe
+    Snap war ein Splice-Klick): Snap erst nach snapConfirmBlocks Blöcken,
+    dann Duck-Declick (5-ms-Rampe auf 0 → Sprung unter Stille → zurück);
+    snapCount als Diagnose in der Looper-Statuszeile („N Re-Syncs" —
+    häuft er sich, wackelt Link-Achse oder Audio-Callback).
   - **Spektrum-View:** der Strip schaltet per Spectrum-Kachel (persistiert
     als looperSpectrum, TransportSettings) auf ein Spektrogramm um —
     zweiter always-on Tap-Pfad (FFT 2048/Hann, 64 Log-Bänder via

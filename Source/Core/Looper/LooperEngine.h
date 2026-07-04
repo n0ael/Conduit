@@ -52,8 +52,20 @@ namespace conduit
     der SampleClock abgeleitet: Beat des jüngsten Takt-Ankers +
     (blockStartSample − Anker-Sample)·beatsPerSample — dieselben Anker,
     die den Loop geschnitten haben, die Phase ist damit per Konstruktion
-    deckungsgleich mit dem Schnitt. Sprünge > snapThresholdBeats
-    (Peer-Join, Transport-Remap) snappen sofort.
+    deckungsgleich mit dem Schnitt.
+
+    Snap mit Declick (Feld-Lektion 04.07.2026): Mess-Sprünge >
+    snapThresholdBeats (Link-Grid-Re-Sync bei Peer-Flapping, Transport-
+    Remap, Callback-Aussetzer — die Beat-Achse läuft in Echtzeit weiter,
+    die Sample-Achse nicht) wurden anfangs HART gesnappt: jeder Re-Sync
+    war ein voller Splice-Klick im Loop (Parallel-Aufnahme-Diagnose,
+    mehrere Snaps pro Takt über Minuten). Jetzt: der Sprung muss
+    snapConfirmBlocks Blöcke BESTEHEN (Einzelblock-Ausreißer der Messung
+    slewen stattdessen), dann duckt eine 5-ms-Rampe die Voices auf 0, der
+    Playhead springt UNTER der Stille auf die Messung, die Rampe kehrt
+    zurück — ein ~20-ms-Dip statt Knacks. snapCount zählt Re-Syncs als
+    Diagnose (Editor-Statuszeile): häuft er sich, wackelt die Link-Achse
+    oder der Audio-Callback — das Problem liegt dann VOR dem Looper.
 
     Wrap-Crossfade: bar-geschnittenes Material aus kontinuierlichem Spiel
     ist am Wrap diskontinuierlich. Die letzten crossfadeSamples der Loop-
@@ -89,9 +101,15 @@ public:
         (≤ ~200 ppm) mit 10× Reserve). */
     static constexpr double maxSlewRatio = 0.002;
 
-    /** Mess-Sprünge oberhalb dieser Schwelle snappen den Playhead sofort
-        (Peer-Join/Transport-Remap) statt minutenlang zu schleifen. */
+    /** Mess-Sprünge oberhalb dieser Schwelle snappen den Playhead
+        (Peer-Join/Transport-Remap) statt minutenlang zu schleifen —
+        klickfrei über den Duck-Declick (Klassendoku). */
     static constexpr double snapThresholdBeats = 0.15;
+
+    /** So viele Blöcke muss ein Mess-Sprung bestehen, bevor gesnappt wird
+        — Einzelblock-Ausreißer (verirrter Anker, Messungs-Glitch) werden
+        stattdessen vom Slew absorbiert. */
+    static constexpr int snapConfirmBlocks = 2;
 
     LooperEngine() = default;
 
@@ -138,6 +156,14 @@ public:
         return isPlaying() ? committedBars.load (std::memory_order_relaxed) : 0;
     }
 
+    /** Diagnose: Anzahl der Playhead-Re-Syncs (Duck-Snaps) seit prepare —
+        häuft sich der Zähler, wackelt die Beat-Achse gegen die Sample-Achse
+        (Link-Peer-Flapping/Callback-Aussetzer, Klassendoku). */
+    [[nodiscard]] std::uint32_t getSnapCount() const noexcept
+    {
+        return snapCount.load (std::memory_order_relaxed);
+    }
+
 private:
     enum class VoiceState : int { free = 0, filling, pendingActivate, active, fadingOut };
 
@@ -176,10 +202,17 @@ private:
     double playheadBeat  = 0.0;
     bool   playheadValid = false;
 
+    // Nur Audio Thread: Snap-Declick (Klassendoku) — Duck-Rampe über
+    // crossfadeSamples, Sprung erst bei Stille am Blockanfang
+    int   snapPendingCount = 0;
+    bool  snapDucking = false;
+    float duckGain = 1.0f;
+
     // Message → Audio
     std::atomic<int>  anchor { 0 };
     std::atomic<bool> stopRequested { false };
     std::atomic<int>  committedBars { 0 };
+    std::atomic<std::uint32_t> snapCount { 0 };  // Audio → UI (Diagnose)
 
     // Nur Message Thread (prepare)
     double preparedSampleRate = 0.0;

@@ -84,7 +84,7 @@ struct EngineRig
 
             conduit::ClockState clock;
             clock.bpm = bpm;
-            clock.beatAtBlockStart = beat + nextClockJitterBeats();
+            clock.beatAtBlockStart = beat + beatAxisOffset + nextClockJitterBeats();
             clock.sampleRate = testSampleRate;
 
             anchors.process (clock, blockStart, blockSize);
@@ -119,9 +119,31 @@ struct EngineRig
     juce::AudioBuffer<float> output { 2, blockSize };
     double beat = 0.0;
     double bpm = 120.0;
+    double beatAxisOffset = 0.0;   // Link-Grid-Shift-Simulation (Re-Sync)
     double clockJitterBeats = 0.0;
     std::uint32_t jitterState = 0x9e3779b9u;
     std::function<float (std::uint64_t)> signal;
+};
+
+/** Blockweises Stetigkeits-Monitoring des Looper-Outputs (Kanal 0):
+    größter Sample-zu-Sample-Sprung inklusive Blockgrenzen. */
+struct ContinuityMonitor
+{
+    void observe (const juce::AudioBuffer<float>& output, int numSamples)
+    {
+        const auto* data = output.getReadPointer (0);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            if (hasPrevious)
+                maxDelta = juce::jmax (maxDelta, std::abs (data[i] - previous));
+            previous = data[i];
+            hasPrevious = true;
+        }
+    }
+
+    float maxDelta = 0.0f;
+    float previous = 0.0f;
+    bool hasPrevious = false;
 };
 
 } // namespace
@@ -326,6 +348,93 @@ TEST_CASE ("LooperEngine: Anker-Routing — OOB-Paar schreibt nicht, Rückkehr s
     rig.feedBlocks (1);
     REQUIRE (std::abs (rig.output.getSample (0, 100) - 0.4f) < 1.0e-3f);
     REQUIRE (std::abs (rig.output.getSample (1, 100) - 0.4f) < 1.0e-3f);
+}
+
+TEST_CASE ("LooperEngine: Beat-Achsen-Sprung (Link-Re-Sync) re-synct klickfrei", "[looper]")
+{
+    EngineRig rig;
+
+    // 100-Hz-Sinus: 96 000 Samples/Takt = exakt 200 Perioden → der Loop
+    // wrappt nahtlos, jede Diskontinuität stammt vom Playback selbst.
+    // Feld-Befund 04.07.2026 (Parallel-Aufnahme): Link-Grid-Re-Syncs
+    // ließen die Anker-Messung pro Takt springen — jeder Snap war ein
+    // voller Splice-Klick im Loop.
+    rig.signal = [] (std::uint64_t pos)
+    {
+        return 0.5f * static_cast<float> (
+            std::sin (juce::MathConstants<double>::twoPi
+                      * static_cast<double> (pos) / 480.0));
+    };
+
+    rig.feedBars (2.5);
+    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
+    rig.feedBlocks (2);  // Fade-In vorbei
+
+    // Grid-Shift: die Beat-Achse springt +0.3 Beats (Peer-Re-Sync) und
+    // BLEIBT dort — die nächste Taktgrenze ankert auf der neuen Achse,
+    // die Messung springt, der Playhead muss folgen
+    ContinuityMonitor monitor;
+    rig.beatAxisOffset = 0.3;
+
+    for (int block = 0; block < 3 * 200; ++block)   // 3 Takte überwachen
+    {
+        rig.feedBlocks (1);
+        monitor.observe (rig.output, blockSize);
+    }
+
+    // Sinus-Steigung ≈ 0.0065/Sample, Duck-Rampe ≤ 0.5/240 ≈ 0.0021 —
+    // ein harter Splice läge bei bis zu ~1.0
+    REQUIRE (monitor.maxDelta < 0.02f);
+
+    // Genau EIN Re-Sync (Duck-Snap), danach ist die neue Achse gelockt
+    REQUIRE (rig.engine.getSnapCount() == 1);
+    REQUIRE (rig.engine.isPlaying());
+    REQUIRE (rig.output.getMagnitude (0, blockSize) > 0.1f);  // Loop hörbar
+}
+
+TEST_CASE ("LooperEngine: kurzer Wall-Clock-Spike wird OHNE Re-Sync absorbiert", "[looper]")
+{
+    EngineRig rig;
+    rig.signal = [] (std::uint64_t pos)
+    {
+        return 0.5f * static_cast<float> (
+            std::sin (juce::MathConstants<double>::twoPi
+                      * static_cast<double> (pos) / 480.0));
+    };
+
+    rig.feedBars (2.5);
+    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
+    rig.feedBlocks (2);
+
+    // Bis kurz vor die nächste Taktgrenze laufen, dann GENAU die Grenz-
+    // Blöcke mit einem Wall-Clock-Spike (+0.25 Beats) ankern lassen.
+    // Erwartung: der Offset-Clamp der BarSampleAnchors begrenzt den
+    // Anker-Fehler auf ≤ 1 Block (~0.02 Beats) — der Slew trägt das
+    // lautlos ab, KEIN Re-Sync nötig (nur anhaltende Achsen-Shifts
+    // snappen, siehe Test oben).
+    const auto beatsPerBlock = (120.0 / (60.0 * testSampleRate)) * blockSize;
+    while (std::floor ((rig.beat + 2.0 * beatsPerBlock) / 4.0)
+               <= std::floor (rig.beat / 4.0))
+        rig.feedBlocks (1);
+
+    ContinuityMonitor monitor;
+    rig.beatAxisOffset = 0.25;
+    for (int block = 0; block < 2; ++block)   // Grenze ankert im Spike
+    {
+        rig.feedBlocks (1);
+        monitor.observe (rig.output, blockSize);
+    }
+    rig.beatAxisOffset = 0.0;
+
+    for (int block = 0; block < 3 * 200; ++block)
+    {
+        rig.feedBlocks (1);
+        monitor.observe (rig.output, blockSize);
+    }
+
+    REQUIRE (monitor.maxDelta < 0.02f);
+    REQUIRE (rig.engine.getSnapCount() == 0);   // absorbiert, nicht gesnappt
+    REQUIRE (rig.engine.isPlaying());
 }
 
 TEST_CASE ("LooperEngine: Fehlerfälle — Historie, Quelle, Länge", "[looper]")
