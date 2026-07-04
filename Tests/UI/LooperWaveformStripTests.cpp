@@ -62,3 +62,76 @@ TEST_CASE ("LooperWaveformStrip: Spalten-Aggregat über den Bin-History-Ring", "
         REQUIRE_FALSE (strip.aggregateColumn (0, 0.0, minValue, maxValue));
     }
 }
+
+//==============================================================================
+TEST_CASE ("LooperWaveformStrip: Spektrum-Ring-Image, Stale-Clear und View (S2)", "[looper][ui][spectrum]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    conduit::LooperWaveformStrip strip;
+    strip.setBounds (0, 0, 400, 160);
+
+    using Strip = conduit::LooperWaveformStrip;
+    using Column = conduit::LooperWaveformTap::SpectralColumn;
+    constexpr auto ring = Strip::spectrumRingColumns;
+
+    SECTION ("Spalte landet an der Ringposition, Pegel färbt heiß")
+    {
+        Column column;
+        column.index = 5;
+        column.bands[10] = 1.0f;   // volles Band → hellstes LUT-Ende
+        strip.ingestSpectrumForTest (column);
+
+        REQUIRE (strip.getSpectrumTagForTest (5) == 5);
+
+        const auto hot  = strip.getSpectrumPixelForTest (5, 10);
+        const auto cold = strip.getSpectrumPixelForTest (5, 40);   // Pegel 0
+        REQUIRE (hot.getPerceivedBrightness() > 0.7f);
+        REQUIRE (cold.getPerceivedBrightness() < 0.3f);
+        REQUIRE (hot != cold);
+
+        // Ring-Wrap: Index ring+5 überschreibt denselben Slot mit neuem Tag
+        Column wrapped;
+        wrapped.index = ring + 5;
+        strip.ingestSpectrumForTest (wrapped);
+        REQUIRE (strip.getSpectrumTagForTest (5) == ring + 5);
+        REQUIRE (strip.getSpectrumPixelForTest (5, 10)
+                 .getPerceivedBrightness() < 0.3f);  // Null-Spalte überschrieb
+    }
+
+    SECTION ("Stale-Clear schwärzt veraltete Slots im sichtbaren Fenster")
+    {
+        // Slot 5 trägt eine URALTE Spalte (Index 5); sichtbar wäre dort
+        // aber Index ring+5 → der Tag passt nicht und wird geräumt
+        Column stale;
+        stale.index = 5;
+        stale.bands[10] = 1.0f;
+        strip.ingestSpectrumForTest (stale);
+
+        // beatNow so, dass Index ring+5 im sichtbaren Fenster liegt
+        strip.setBeatNowForTest (static_cast<double> (ring + 6)
+                                 / conduit::looper::spectrumColumnsPerBeat);
+        strip.clearStaleSpectrumColumnsForTest();
+
+        REQUIRE (strip.getSpectrumTagForTest (5) == -1);
+        REQUIRE (strip.getSpectrumPixelForTest (5, 10).getPerceivedBrightness() < 0.3f);
+
+        // Passende Tags bleiben unangetastet
+        Column fresh;
+        fresh.index = ring + 5;
+        fresh.bands[10] = 1.0f;
+        strip.ingestSpectrumForTest (fresh);
+        strip.clearStaleSpectrumColumnsForTest();
+        REQUIRE (strip.getSpectrumTagForTest (5) == ring + 5);
+        REQUIRE (strip.getSpectrumPixelForTest (5, 10).getPerceivedBrightness() > 0.7f);
+    }
+
+    SECTION ("View-Umschaltung: default Wellenform, Setter wechselt")
+    {
+        REQUIRE (strip.getView() == Strip::View::waveform);
+        strip.setView (Strip::View::spectrum);
+        REQUIRE (strip.getView() == Strip::View::spectrum);
+        strip.setView (Strip::View::waveform);
+        REQUIRE (strip.getView() == Strip::View::waveform);
+    }
+}

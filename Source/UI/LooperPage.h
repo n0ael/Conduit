@@ -64,6 +64,14 @@ public:
         ist nur bei laufendem Loop enabled (Editor-Timer). */
     std::function<void()> onStop;
 
+    /** [Editor] Spektrum-View setzen (S2, persistierter looperSpectrum-
+        Zustand) — schaltet Strip-Ansicht und Kachel-LED, ohne Callback. */
+    void setSpectrumView (bool spectrum);
+
+    /** Klick auf die Spectrum-Kachel — der Editor persistiert den Zustand
+        (TransportSettings::setLooperSpectrumEnabled). */
+    std::function<void (bool spectrum)> onViewToggled;
+
     /** [Editor-Timer] Statuszeile (B5: „spielt: 4 Bars" etc.). */
     void setStatus (const juce::String& statusText);
 
@@ -75,6 +83,7 @@ public:
     [[nodiscard]] juce::ComboBox& getSourceCombo() noexcept { return sourceCombo; }
     [[nodiscard]] juce::ComboBox& getOutputCombo() noexcept { return outputCombo; }
     [[nodiscard]] push::TextTile& getStopTile() noexcept { return stopTile; }
+    [[nodiscard]] push::TextTile& getSpectrumTile() noexcept { return spectrumTile; }
     [[nodiscard]] LooperWaveformStrip& getStrip() noexcept { return strip; }
 
 private:
@@ -82,6 +91,7 @@ private:
     juce::ComboBox sourceCombo;
     juce::Label outputCaption;
     juce::ComboBox outputCombo;
+    push::TextTile spectrumTile { "Spectrum", push::colours::ledOrange };
     push::TextTile stopTile { "Stop", push::colours::ledRed };
     juce::Label statusLabel;
 

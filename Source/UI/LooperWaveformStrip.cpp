@@ -1,6 +1,7 @@
 #include "LooperWaveformStrip.h"
 
 #include <cmath>
+#include <memory>
 
 #include "Core/Looper/LooperMath.h"
 #include "PushLookAndFeel.h"
@@ -11,6 +12,40 @@ namespace conduit
 LooperWaveformStrip::LooperWaveformStrip()
 {
     setOpaque (false);
+
+    spectrumTags.fill (-1);
+
+    // Fire-Palette (Referenz: klassisches Spektrogramm): Schwarz →
+    // Tiefrot → Orange (Push-Capture-Familie) → Gelbweiß. Stille (Pegel 0)
+    // ist reines Schwarz — der Strip liegt auf schwarzem Grund (LCD-Optik,
+    // User-Wunsch 07/2026), leere Bereiche verschwinden darin.
+    struct Stop { float position; juce::Colour colour; };
+    const Stop stops[] = {
+        { 0.00f, juce::Colours::black },
+        { 0.35f, juce::Colour (0xff5a1600) },   // Tiefrot-Braun
+        { 0.65f, juce::Colour (0xffd35400) },   // Orange
+        { 0.85f, juce::Colour (0xffffa726) },   // Capture-Orange (ledOrange)
+        { 1.00f, juce::Colour (0xffffe9b8) },   // Gelbweiß
+    };
+
+    for (int i = 0; i < 256; ++i)
+    {
+        const auto level = static_cast<float> (i) / 255.0f;
+        auto colour = stops[0].colour;
+        for (std::size_t s = 0; s + 1 < std::size (stops); ++s)
+        {
+            if (level < stops[s].position || level > stops[s + 1].position)
+                continue;
+            const auto span = stops[s + 1].position - stops[s].position;
+            colour = stops[s].colour.interpolatedWith (
+                stops[s + 1].colour, span > 0.0f ? (level - stops[s].position) / span : 1.0f);
+        }
+        spectrumLut[static_cast<std::size_t> (i)] = colour;
+    }
+
+    // Ring-Image auf "Stille" initialisieren (LUT-Nullpunkt = Schwarz —
+    // Startup zeigt die ruhige LCD-Fläche)
+    spectrumImage.clear (spectrumImage.getBounds(), spectrumLut[0]);
 }
 
 //==============================================================================
@@ -20,6 +55,7 @@ void LooperWaveformStrip::tick()
         beatNow = getBeatNow();
 
     pullBins();
+    clearStaleSpectrumColumns();
     repaint();  // der Strip ist das animierte Element — jede VBlank gleitet
 }
 
@@ -31,6 +67,16 @@ void LooperWaveformStrip::pullBins()
     LooperWaveformTap::Bin bin;
     while (tap->pop (bin))
         store (bin);
+
+    LooperWaveformTap::SpectralColumn column;
+    if (tap->popSpectrum (column))
+    {
+        // Eine BitmapData-Sperre für den ganzen Batch (Backfill-Bursts)
+        juce::Image::BitmapData pixels { spectrumImage, juce::Image::BitmapData::writeOnly };
+        do
+            storeSpectrum (column, pixels);
+        while (tap->popSpectrum (column));
+    }
 }
 
 void LooperWaveformStrip::store (const LooperWaveformTap::Bin& bin)
@@ -40,6 +86,57 @@ void LooperWaveformStrip::store (const LooperWaveformTap::Bin& bin)
     entry.index    = bin.index;
     entry.minValue = bin.minValue;
     entry.maxValue = bin.maxValue;
+}
+
+void LooperWaveformStrip::storeSpectrum (const LooperWaveformTap::SpectralColumn& column,
+                                         juce::Image::BitmapData& pixels)
+{
+    const auto slot = static_cast<int> (
+        ((column.index % spectrumRingColumns) + spectrumRingColumns) % spectrumRingColumns);
+    spectrumTags[static_cast<std::size_t> (slot)] = column.index;
+
+    // Band 63 (hohe Frequenzen) liegt in Zeile 0 — Spektrogramm-Konvention
+    for (int band = 0; band < looper::spectrumBands; ++band)
+    {
+        const auto level = juce::jlimit (0.0f, 1.0f,
+                                         column.bands[static_cast<std::size_t> (band)]);
+        const auto lutIndex = static_cast<std::size_t> (
+            juce::roundToInt (level * 255.0f));
+        pixels.setPixelColour (slot, looper::spectrumBands - 1 - band,
+                               spectrumLut[lutIndex]);
+    }
+}
+
+void LooperWaveformStrip::clearStaleSpectrumColumns()
+{
+    // Sichtbares Fenster: die letzten 512 Spalten bis "jetzt". Trägt ein
+    // Ring-Slot NICHT die Spalte seines Fensters (Startup, Queue-Lücke,
+    // Daten älter als der Ring), wird er auf Stille geschwärzt — sonst
+    // erschiene dort Material von vor 64 Takten (Ring-Wrap).
+    const auto newest = static_cast<std::int64_t> (
+        std::floor (beatNow * looper::spectrumColumnsPerBeat));
+
+    std::unique_ptr<juce::Image::BitmapData> pixels;  // lazy — meist ist nichts stale
+
+    for (int offset = 0; offset < LooperWaveformTap::spectrumHistoryColumns; ++offset)
+    {
+        const auto index = newest - offset;
+        if (index < 0)
+            break;
+
+        const auto slot = static_cast<std::size_t> (index % spectrumRingColumns);
+        if (spectrumTags[slot] == index || spectrumTags[slot] == -1)
+            continue;
+
+        if (pixels == nullptr)
+            pixels = std::make_unique<juce::Image::BitmapData> (
+                spectrumImage, juce::Image::BitmapData::writeOnly);
+
+        for (int row = 0; row < looper::spectrumBands; ++row)
+            pixels->setPixelColour (static_cast<int> (slot), row, spectrumLut[0]);
+
+        spectrumTags[slot] = -1;
+    }
 }
 
 bool LooperWaveformStrip::aggregateColumn (int x, double beatAtRightEdge,
@@ -78,24 +175,10 @@ bool LooperWaveformStrip::aggregateColumn (int x, double beatAtRightEdge,
 }
 
 //==============================================================================
-void LooperWaveformStrip::paint (juce::Graphics& g)
+void LooperWaveformStrip::paintWaveform (juce::Graphics& g, juce::Rectangle<float> wave)
 {
-    const auto bounds = getLocalBounds().toFloat();
-    g.setColour (push::colours::tile);
-    g.fillRoundedRectangle (bounds, 6.0f);
-
-    const auto wave = bounds.withTrimmedBottom (labelRowHeight).reduced (0.0f, 4.0f);
     const auto midY = wave.getCentreY();
     const auto halfHeight = wave.getHeight() * 0.5f;
-
-    // Hover-Segment aufhellen (Klick-Ziel = Commit-Länge)
-    const auto segmentWidth = bounds.getWidth() / static_cast<float> (looper::numSegments);
-    if (hoveredSegment >= 0)
-    {
-        g.setColour (push::colours::text.withAlpha (0.06f));
-        g.fillRoundedRectangle (bounds.withX (bounds.getX() + segmentWidth * (float) hoveredSegment)
-                                      .withWidth (segmentWidth), 6.0f);
-    }
 
     // Wellenform: pro Pixelspalte das Min/Max-Aggregat der Bin-Historie
     g.setColour (push::colours::ledGreen);
@@ -108,6 +191,86 @@ void LooperWaveformStrip::paint (juce::Graphics& g)
         const auto top    = midY - juce::jlimit (0.0f, 1.0f,  maxValue) * halfHeight;
         const auto bottom = midY - juce::jlimit (-1.0f, 0.0f, minValue) * halfHeight;
         g.drawVerticalLine (x, top, juce::jmax (bottom, top + 1.0f));
+    }
+}
+
+void LooperWaveformStrip::paintSpectrum (juce::Graphics& g, juce::Rectangle<float> wave)
+{
+    // Pro Segment den Beat-Bereich [beatLo, beatHi) in Ring-Image-Spalten
+    // abbilden und als skalierten Blit ziehen. Ring-Wrap = zweiter Blit
+    // mit um die Ringbreite verschobener Quelle; alles außerhalb des
+    // Segment-Rechtecks schneidet der Clip weg (Klassendoku).
+    const auto columnsPerBeat = static_cast<double> (looper::spectrumColumnsPerBeat);
+    const auto scaleY = wave.getHeight() / static_cast<float> (looper::spectrumBands);
+    const auto segmentWidth = static_cast<float> (getWidth())
+                              / static_cast<float> (looper::numSegments);
+
+    g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality);
+
+    for (int segment = 0; segment < looper::numSegments; ++segment)
+    {
+        const auto beatHi = beatNow - looper::segmentRightEdgeBeats (segment);
+        const auto span   = looper::segmentSpanBeats (segment);
+        const auto beatLo = beatHi - span;
+
+        const auto colLo = beatLo * columnsPerBeat;
+        const auto colSpan = span * columnsPerBeat;
+        if (colSpan <= 0.0)
+            continue;
+
+        const auto pxPerColumn = static_cast<double> (segmentWidth) / colSpan;
+        const auto segX = static_cast<double> (segmentWidth) * segment;
+
+        // Quellposition im Ring (positiv gewrappt, Sub-Spalten-genau)
+        auto ringLo = std::fmod (colLo, static_cast<double> (spectrumRingColumns));
+        if (ringLo < 0.0)
+            ringLo += spectrumRingColumns;
+
+        juce::Graphics::ScopedSaveState clip (g);
+        g.reduceClipRegion (juce::Rectangle<float> (static_cast<float> (segX), wave.getY(),
+                                                    segmentWidth, wave.getHeight())
+                                .toNearestInt());
+
+        const auto drawPass = [&] (double imageColumnAtSegX)
+        {
+            g.drawImageTransformed (
+                spectrumImage,
+                juce::AffineTransform::translation (static_cast<float> (-imageColumnAtSegX), 0.0f)
+                    .scaled (static_cast<float> (pxPerColumn), scaleY)
+                    .translated (static_cast<float> (segX), wave.getY()));
+        };
+
+        drawPass (ringLo);
+        if (ringLo + colSpan > spectrumRingColumns)   // Wrap: zweiter Zug,
+            drawPass (ringLo - spectrumRingColumns);  // um die Ringbreite versetzt
+    }
+}
+
+//==============================================================================
+void LooperWaveformStrip::paint (juce::Graphics& g)
+{
+    const auto bounds = getLocalBounds().toFloat();
+
+    // Reines Schwarz statt Kachelgrau: Wellenform-Grün bzw. Fire-Palette
+    // auf schwarzem Grund wirken wie ein LCD-Display (User-Wunsch 07/2026)
+    g.setColour (juce::Colours::black);
+    g.fillRoundedRectangle (bounds, 6.0f);
+
+    const auto wave = bounds.withTrimmedBottom (labelRowHeight).reduced (0.0f, 4.0f);
+
+    // Hover-Segment aufhellen (Klick-Ziel = Commit-Länge)
+    const auto segmentWidth = bounds.getWidth() / static_cast<float> (looper::numSegments);
+
+    if (view == View::waveform)
+        paintWaveform (g, wave);
+    else
+        paintSpectrum (g, wave);
+
+    if (hoveredSegment >= 0)
+    {
+        g.setColour (push::colours::text.withAlpha (0.06f));
+        g.fillRoundedRectangle (bounds.withX (bounds.getX() + segmentWidth * (float) hoveredSegment)
+                                      .withWidth (segmentWidth), 6.0f);
     }
 
     // Segment-Grenzen + Labels ("8 Bars | 4 Bars | 2 Bars | 1 Bar")

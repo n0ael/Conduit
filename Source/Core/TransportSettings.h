@@ -79,6 +79,11 @@ public:
     [[nodiscard]] int getLooperAnchor() const noexcept { return looperAnchor; }
     void setLooperAnchor (int pairIndex);  // Clamp 0..31
 
+    /** Spektrum-View des Looper-Strips (S2): true = Spektrogramm statt
+        Wellenform (Spectrum-Kachel auf der Looper-Page). */
+    [[nodiscard]] bool isLooperSpectrumEnabled() const noexcept { return looperSpectrum; }
+    void setLooperSpectrumEnabled (bool enabled);
+
 private:
     void loadFromFile();
     void writeValue (const char* key, const juce::var& value);
@@ -96,6 +101,7 @@ private:
     int    metronomeAnchor  = 0;
     juce::String looperSource = "master";
     int    looperAnchor     = 0;
+    bool   looperSpectrum   = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransportSettings)
 };

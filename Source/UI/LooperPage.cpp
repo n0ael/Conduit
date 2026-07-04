@@ -41,6 +41,19 @@ LooperPage::LooperPage()
     };
     addAndMakeVisible (outputCombo);
 
+    // Spektrum-View (S2): Toggle Wellenform ↔ Spektrogramm, Zustand
+    // persistiert der Editor (TransportSettings::looperSpectrum)
+    spectrumTile.setTooltip (juce::String::fromUTF8 (
+        "Spektrogramm statt Wellenform (Fire-Palette, gleiche Segment-Klicks)"));
+    spectrumTile.onClick = [this]
+    {
+        const auto spectrum = ! spectrumTile.isActive();
+        setSpectrumView (spectrum);
+        if (onViewToggled != nullptr)
+            onViewToggled (spectrum);
+    };
+    addAndMakeVisible (spectrumTile);
+
     // Stop (B5): enabled nur bei laufendem Loop (Editor-Timer)
     stopTile.setEnabled (false);
     stopTile.setTooltip (juce::String::fromUTF8 ("Loop-Playback beenden (5-ms-Fade)"));
@@ -100,6 +113,13 @@ void LooperPage::setOutputPairs (const juce::StringArray& pairLabels, int select
             juce::dontSendNotification);
 }
 
+void LooperPage::setSpectrumView (bool spectrum)
+{
+    spectrumTile.setActive (spectrum);
+    strip.setView (spectrum ? LooperWaveformStrip::View::spectrum
+                            : LooperWaveformStrip::View::waveform);
+}
+
 void LooperPage::setStatus (const juce::String& statusText)
 {
     if (statusLabel.getText() != statusText)
@@ -123,6 +143,8 @@ void LooperPage::resized()
     header.removeFromLeft (12);
     outputCaption.setBounds (header.removeFromLeft (64));
     outputCombo.setBounds (header.removeFromLeft (220).reduced (0, 4));
+    header.removeFromLeft (12);
+    spectrumTile.setBounds (header.removeFromLeft (100));
     header.removeFromLeft (12);
     stopTile.setBounds (header.removeFromLeft (88));
 

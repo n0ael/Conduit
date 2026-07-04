@@ -289,10 +289,15 @@ TEST_CASE ("TransportSettings: Looper-Quelle und -Anker (B3) — Roundtrip + Cla
         settings.setLooperAnchor (99);
         REQUIRE (settings.getLooperAnchor() == 31);
         settings.setLooperAnchor (2);
+
+        // Spektrum-View (S2): default aus
+        REQUIRE_FALSE (settings.isLooperSpectrumEnabled());
+        settings.setLooperSpectrumEnabled (true);
     }
 
     // Zweite Instanz liest dieselbe Datei
     conduit::TransportSettings reloaded (temp.options());
     REQUIRE (reloaded.getLooperSource() == "hw:1");
     REQUIRE (reloaded.getLooperAnchor() == 2);
+    REQUIRE (reloaded.isLooperSpectrumEnabled());
 }

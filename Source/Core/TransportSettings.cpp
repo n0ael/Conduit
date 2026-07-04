@@ -16,6 +16,7 @@ namespace
     constexpr const char* metronomeAnchorKey = "metronomeAnchor";
     constexpr const char* looperSourceKey    = "looperSource";
     constexpr const char* looperAnchorKey    = "looperAnchor";
+    constexpr const char* looperSpectrumKey  = "looperSpectrum";
 
     constexpr double minTapResetHold = 0.3;
     constexpr double maxTapResetHold = 3.0;
@@ -66,6 +67,7 @@ void TransportSettings::loadFromFile()
         if (looperSource.isEmpty())
             looperSource = "master";
         looperAnchor = juce::jlimit (0, 31, file->getIntValue (looperAnchorKey, 0));
+    looperSpectrum = file->getBoolValue (looperSpectrumKey, false);
     }
 }
 
@@ -190,6 +192,15 @@ void TransportSettings::setLooperAnchor (int pairIndex)
 
     looperAnchor = clamped;
     writeValue (looperAnchorKey, clamped);
+}
+
+void TransportSettings::setLooperSpectrumEnabled (bool enabled)
+{
+    if (looperSpectrum == enabled)
+        return;
+
+    looperSpectrum = enabled;
+    writeValue (looperSpectrumKey, enabled);
 }
 
 } // namespace conduit

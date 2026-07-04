@@ -165,6 +165,12 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
 
     looperPage.onStop = [this] { engine.stopLooper(); };
 
+    // Spektrum-View (S2): persistierter Zustand steuert Strip + Kachel-LED;
+    // der Klick schaltet die Page selbst um, hier nur Persistenz
+    looperPage.setSpectrumView (engine.getTransportSettings().isLooperSpectrumEnabled());
+    looperPage.onViewToggled = [this] (bool spectrum)
+    { engine.getTransportSettings().setLooperSpectrumEnabled (spectrum); };
+
     transportBar.setBrowserItems (buildBrowserItems());
 
     // Metronom-Ziel-Paare fürs Link-Menü: Labels aus den ChannelNames,

@@ -674,6 +674,12 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
     einen sample-kontinuierlichen Playhead: Messung aus SampleClock +
     jüngstem Takt-Anker, Korrektur slew-limitiert (0.2 % Varispeed), Snap
     nur bei echten Beat-Sprüngen.
+  - **Spektrum-View:** der Strip schaltet per Spectrum-Kachel (persistiert
+    als looperSpectrum, TransportSettings) auf ein Spektrogramm um —
+    zweiter always-on Tap-Pfad (FFT 2048/Hann, 64 Log-Bänder via
+    looper::SpectrumBands, 16 Spalten/Beat), Rendering als
+    ring-adressiertes Beat-Raum-Image + Segment-Blits (Fire-Palette);
+    Segment-Klicks/Commit identisch in beiden Views.
 
 - Touch-first Design: `setAcceptsTouchEvents(true)`
 - Minimale Touch-Target-Größe: 44px

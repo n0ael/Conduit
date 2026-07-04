@@ -28,11 +28,35 @@ namespace conduit
 
     Klick/Tap auf ein Segment meldet die Commit-Länge (8/4/2/1 Takte) über
     onSegmentClicked — der Commit selbst kommt in Baustein B5.
+
+    Spektrum-View (S2): umschaltbares Spektrogramm (Fire-Palette) auf
+    demselben Segment-Layout. Datenpfad: Spektral-Spalten des Taps landen
+    in einem ring-adressierten Beat-Raum-Image (spectrumRingColumns breit,
+    spectrumBands hoch, Spalte = index % Ringbreite, Band 63 = oben) plus
+    Tag-Array; tick() schwärzt veraltete Spalten im sichtbaren Fenster
+    (Startup/Queue-Lücken/Ring-Wrap). paint() blittet pro Segment den
+    Beat-Bereich als skalierte drawImageTransformed-Züge (Ring-Wrap ⇒
+    max. 2 Blits pro Segment, Sub-Spalten-genau — kein Pro-Pixel-Malen).
+    Segment-Grenzen, Labels, Hover und Commit-Klick sind View-unabhängig.
 */
 class LooperWaveformStrip final : public juce::Component
 {
 public:
+    enum class View { waveform, spectrum };
+
     LooperWaveformStrip();
+
+    /** [Editor] Ansicht umschalten (Persistenz: TransportSettings). */
+    void setView (View viewToShow) noexcept
+    {
+        if (view != viewToShow)
+        {
+            view = viewToShow;
+            repaint();
+        }
+    }
+
+    [[nodiscard]] View getView() const noexcept { return view; }
 
     /** [Editor] Bin-Quelle (nicht owned — der EngineProcessor überlebt
         den Editor samt Strip). nullptr = Anzeige friert ein. */
@@ -60,6 +84,14 @@ public:
         pullBins) — Tests ohne Audio-Rig. */
     void ingestBinForTest (const LooperWaveformTap::Bin& bin) { store (bin); }
 
+    /** Spektral-Spalte direkt ins Ring-Image schreiben (identischer Pfad
+        wie pullBins) — Tests ohne Audio-Rig. */
+    void ingestSpectrumForTest (const LooperWaveformTap::SpectralColumn& column)
+    {
+        juce::Image::BitmapData pixels { spectrumImage, juce::Image::BitmapData::writeOnly };
+        storeSpectrum (column, pixels);
+    }
+
     /** Aggregat einer Pixelspalte über den History-Ring: false, wenn kein
         einziger Bin des Spalten-Bereichs vorliegt. */
     [[nodiscard]] bool aggregateColumn (int x, double beatAtRightEdge,
@@ -67,9 +99,29 @@ public:
 
     void setBeatNowForTest (double beat) noexcept { beatNow = beat; }
 
+    /** Stale-Clear des sichtbaren Fensters (der tick()-Schritt). */
+    void clearStaleSpectrumColumnsForTest() { clearStaleSpectrumColumns(); }
+
+    [[nodiscard]] std::int64_t getSpectrumTagForTest (int slot) const
+    {
+        return spectrumTags[static_cast<std::size_t> (slot)];
+    }
+
+    [[nodiscard]] juce::Colour getSpectrumPixelForTest (int slot, int band) const
+    {
+        return spectrumImage.getPixelAt (slot, looper::spectrumBands - 1 - band);
+    }
+
+    static constexpr int spectrumRingColumns = 1024;  // > 512 sichtbare Spalten
+
 private:
-    void tick();  // VBlank: beatNow + Bins nachziehen, repaint
+    void tick();  // VBlank: beatNow + Bins nachziehen, Stale-Clear, repaint
     void store (const LooperWaveformTap::Bin& bin);
+    void storeSpectrum (const LooperWaveformTap::SpectralColumn& column,
+                        juce::Image::BitmapData& pixels);
+    void clearStaleSpectrumColumns();
+    void paintWaveform (juce::Graphics& g, juce::Rectangle<float> wave);
+    void paintSpectrum (juce::Graphics& g, juce::Rectangle<float> wave);
 
     struct Entry
     {
@@ -83,7 +135,15 @@ private:
 
     std::array<Entry, static_cast<std::size_t> (historySize)> history {};
 
+    // Spektrum-View: Beat-Raum-Image (Ringspalte = index % Ringbreite) +
+    // Tags; die Farb-LUT (Fire-Palette) wird im Ctor vorberechnet
+    juce::Image spectrumImage { juce::Image::ARGB, spectrumRingColumns,
+                                looper::spectrumBands, true };
+    std::array<std::int64_t, static_cast<std::size_t> (spectrumRingColumns)> spectrumTags;
+    std::array<juce::Colour, 256> spectrumLut;
+
     LooperWaveformTap* tap = nullptr;
+    View view = View::waveform;
     double beatNow = 0.0;
     int hoveredSegment = -1;
 

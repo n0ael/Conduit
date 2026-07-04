@@ -62,6 +62,31 @@ TEST_CASE ("LooperPage: Quellen-Liste, persistierte Auswahl und Klick-Callback",
         REQUIRE (selectedPair == 0);
     }
 
+    SECTION ("Spectrum-Kachel (S2): Setter ohne Callback, Klick toggelt und meldet")
+    {
+        bool toggled = false;
+        bool lastValue = false;
+        page.onViewToggled = [&] (bool spectrum) { toggled = true; lastValue = spectrum; };
+
+        // Persistierter Zustand: Kachel + Strip folgen, KEIN Callback
+        page.setSpectrumView (true);
+        REQUIRE (page.getSpectrumTile().isActive());
+        REQUIRE (page.getStrip().getView() == conduit::LooperWaveformStrip::View::spectrum);
+        REQUIRE_FALSE (toggled);
+
+        // Klick schaltet zurück auf Wellenform und meldet den neuen Zustand
+        page.getSpectrumTile().onClick();
+        REQUIRE (toggled);
+        REQUIRE_FALSE (lastValue);
+        REQUIRE_FALSE (page.getSpectrumTile().isActive());
+        REQUIRE (page.getStrip().getView() == conduit::LooperWaveformStrip::View::waveform);
+
+        // Zweiter Klick: wieder Spektrum
+        page.getSpectrumTile().onClick();
+        REQUIRE (lastValue);
+        REQUIRE (page.getStrip().getView() == conduit::LooperWaveformStrip::View::spectrum);
+    }
+
     SECTION ("Stop-Kachel: initial disabled (kein Loop), Klick meldet onStop")
     {
         REQUIRE_FALSE (page.getStopTile().isEnabled());

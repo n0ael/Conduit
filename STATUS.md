@@ -16,6 +16,31 @@
 
 ## Aktueller Meilenstein (Juli 2026 — in Arbeit)
 
+**Looper Spektrum-View — FERTIG (04.07.2026, Bausteine S1–S2):**
+
+- **Konzept:** der Waveform-Strip der Looper-Page schaltet per Spectrum-Kachel
+  (Capture-Orange, persistiert als `looperSpectrum` in TransportSettings) auf ein
+  Spektrogramm um (Fire-Palette wie klassische Analyzer) — gleiche Segment-Stauchung,
+  gleiche Commit-Klicks, tonale Struktur sichtbar BEVOR man committet. Strip-Grund
+  in beiden Views reines Schwarz statt Kachelgrau (LCD-Optik, User-Wunsch 07/2026).
+- **S1 Datenpfad:** `LooperWaveformTap` bekam einen zweiten, always-on Ausgabepfad
+  (gleiche Quelle/Reset/Backfill-Logik, eigener Cursor + SPSC-Queue): pro Spalte
+  (1/16 Beat) die letzten 2048 Samples Hann-gefenstert durch `juce::dsp::FFT`
+  (Ordnung 11, Warmup im Ctor — perform ist allocation-free, RT-Audit-Test), auf 64
+  log-verteilte Bänder reduziert (`looper::SpectrumBands`, pure + testbar;
+  dB-Mapping −66..0 → 0..1 via `looper::spectrumLevel`). `prepare()` heißt jetzt
+  `prepare (sampleRate)` (Band-Grenzen pro Rate). juce_dsp neu verlinkt (App+Tests).
+- **S2 Rendering + Umschalter:** Strip hält ein ring-adressiertes Beat-Raum-Image
+  (1024 Spalten × 64 Bänder) + Tag-Array; tick() schwärzt veraltete Spalten im
+  sichtbaren Fenster (Ring-Wrap/Queue-Lücken), paint() blittet pro Segment max. 2
+  skalierte `drawImageTransformed`-Züge (sub-spalten-genau, kein Pro-Pixel-Malen).
+  Spectrum-TextTile auf der Page (Setter ohne Notification, Muster setSources),
+  EngineEditor verdrahtet Persistenz + Initialzustand.
+- **Verifikation:** ConduitTests 345 Fälle / 19524 Assertions grün, Debug UND ASan;
+  neue Tests: Band-Grenzen-Invarianten über 4 Sample-Rates, 1-kHz-Sinus → richtiges
+  Band (Nachbarn leise), lückenlose Spalten, Null-Spalten, Spektral-Backfill mit
+  Budget, Ring-Image/Stale-Clear/View, Kachel-Toggle, Settings-Roundtrip.
+
 **Retro-Looper (Endlesss-Stil) auf Capture-Audio-Basis — FERTIG (04.07.2026, Bausteine B1–B6):**
 
 - **Konzept (User-Entscheidungen 07/2026):** der Looper nimmt immer auf (Capture-Ring),
