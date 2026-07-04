@@ -4,7 +4,10 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "LinkClock.h"
+#include "Browser/BrowserContextProvider.h"
+#include "Browser/BrowserModel.h"
 #include "Capture/CaptureWriter.h"
+#include "UI/Browser/BrowserPanel.h"
 #include "UI/CapturePanel.h"
 #include "UI/CaptureToast.h"
 #include "UI/DevPanel.h"
@@ -69,6 +72,12 @@ private:
     void closeDevPanelAsync();
     [[nodiscard]] std::vector<ModuleBrowser::Item> buildBrowserItems();
 
+    /** ZENTRALER Page-Wechsel — jeder Pfad (Page-Icons, Tape-Kachel)
+        läuft hierüber, damit der BrowserContextProvider nie desynct. */
+    void selectPage (int pageIndex);
+
+    void toggleBrowserPanel();
+
     // Looper-Page (B3): Quellen-Liste (Master + Hardware-Paare + Taps)
     // neu aufbauen — bei Start, Tap-Änderungen und ChannelNames-Broadcasts
     [[nodiscard]] std::vector<LooperPage::Source> buildLooperSources();
@@ -108,6 +117,13 @@ private:
     // Nach Canvas + LooperPage deklariert (hält Referenzen darauf): die
     // Pages hinter den Push-Icons — Device = Canvas, Rest Platzhalter
     PageHost pageHost { canvas, looperPage };
+
+    // Browser-Panel (rechts angedockt): Kontext ← selectPage, Modell hält
+    // seinen EIGENEN ValueTree (nie im Patch) — Reihenfolge: Provider vor
+    // Modell vor Panel (Referenzen)
+    BrowserContextProvider browserContext;
+    BrowserModel browserModel;   // Init in der Ctor-Liste (braucht EngineProcessor-Definition)
+    BrowserPanel browserPanel { browserModel };
 
     // Port-Tooltips der I/O-Endpunkte (ChannelNames-Labels, Maus-Hover)
     juce::TooltipWindow tooltipWindow { this };

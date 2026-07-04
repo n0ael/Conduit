@@ -679,6 +679,7 @@ juce::ValueTree EngineProcessor::getRootState() noexcept       { return rootStat
 juce::UndoManager& EngineProcessor::getUndoManager() noexcept  { return undoManager; }
 GraphManager& EngineProcessor::getGraphManager() noexcept      { return graphManager; }
 NodeUiRegistry& EngineProcessor::getNodeUiRegistry() noexcept  { return nodeUiRegistry; }
+ModuleFactory& EngineProcessor::getModuleFactory() noexcept    { return moduleFactory; }
 OscController& EngineProcessor::getOscController() noexcept    { return oscController; }
 LinkClock& EngineProcessor::getLinkClock() noexcept            { return linkClock; }
 const BarSampleAnchors& EngineProcessor::getBarAnchors() const noexcept { return barAnchors; }

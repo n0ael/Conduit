@@ -86,7 +86,9 @@ struct TestRig
     TestRig()
     {
         conduit::registerDefaultModules (factory);
-        factory.registerModule ("failing_test_module",
+        factory.registerModule ({ "failing_test_module", "Failing Test Module",
+                                  conduit::ModuleDescriptor::Branch::cvControl,
+                                  "Test", {} },
                                 [] { return std::make_unique<FailingModule>(); });
     }
 

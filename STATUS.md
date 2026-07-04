@@ -16,6 +16,44 @@
 
 ## Aktueller Meilenstein (Juli 2026 — in Arbeit)
 
+**Browser-Panel (M1–M6, Branch `feature/browser-panel`) — M1 FERTIG (04.07.2026):**
+
+Kontextsensitiver, touch-first Browser als rechts angedocktes Panel
+(User-Prompt 04.07. mit fixer Informationsarchitektur: PROJEKTE · AUDIO
+(Loops/One-Shots/Captures) · MODULE (CV/Control · AudioFX)). User-
+Entscheidungen: Icons als juce::Path in PushIcons (Referenz-SVGs in
+`Assets/svg-browser-icons/`, KEIN Runtime-SVG); Toggle = der reservierte
+`browserPanelTile` (das alte „+" fliegt in M3 raus, sobald Tap-to-Load
+steht — bis dahin bleibt die alte CallOutBox als Modul-Add-Pfad);
+Browser-Zustand in EIGENEM ValueTree "ui.browser" (nie im Patch/Undo);
+Verzeichnisse unter Dokumente/Conduit (+ Captures aus CaptureSettings).
+
+- **M1 (Gerüst):** `ModuleDescriptor` (id/displayName/branch/category/tags)
+  als Pflicht-Metadaten in der ModuleFactory (`registerModule(descriptor,
+  creator)`, `getDescriptors()`); `AirwindowsRegistry::RegistryEntry` um
+  category/tags erweitert — alle 57 Einträge kategorisiert (Dynamics,
+  Filter/EQ, Distortion/Saturation, Lo-Fi/Tape, Modulation, Console,
+  Reverb/Delay, Utility), Single Source für die AudioFX-Kategorien.
+  `BrowserContextProvider` (Page→Sichtbarkeit/Startbereich, DIE Stelle
+  fürs spätere Mapping), `BrowserModel` (headless, eigener ValueTree,
+  Übersicht ↔ Bereich, Kontextwechsel verlässt unsichtbare Bereiche),
+  `BrowserPanel` (Breadcrumb-Header + Zurück, juce::ListBox 44-px-Zeilen,
+  Slide-in 180 ms), `AnimatedValue` (VBlank-Ease-Out, headless-sicher).
+  EngineEditor: zentraler `selectPage`-Helper (Page-Icons + Tape-Kachel),
+  Dock via `removeFromRight` (Clamp getWidth()/3). 6 neue Icons
+  (browserProjects/Audio/CvControl/AudioFx, search, chevronLeft).
+  13 neue Tests (368 gesamt / 20335 Assertions, Debug + ASan grün);
+  Smoke: docs/smoke/browser_m1_*.png (MODULE-Start auf Device, Übersicht,
+  Looper-Kontext ohne MODULE). **Smoke-Automation-Notiz:** UI läuft mit
+  uiScale 1.1 — Klick-Koordinaten = logische Koordinate × (ClientRect-
+  Breite/1480).
+- **Offen:** M2 Virtualisierung/Unterkategorien → M3 Tap+Drag (dann
+  „+"-Entfernung + Interim-„Preset laden…"-Row in PROJEKTE) → M4 Suche →
+  M5 TouchKeyboard (UiSettings::softKeyboardEnabled, Linux an/Desktop aus)
+  → M6 PROJEKTE/AUDIO-Daten + Abschlussbericht.
+
+---
+
 **Looper-Knackser-Diagnose + Snap-Declick — FERTIG, Ohr-Abnahme bestanden (04.07.2026):**
 
 - **Symptom (User):** seltene Knackser, am deutlichsten beim Looper-Playback;

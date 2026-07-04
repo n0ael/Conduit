@@ -259,6 +259,79 @@ juce::Path sharpSign()
     return p;
 }
 
+juce::Path browserProjectsFolder()
+{
+    // Ordner mit Tab oben links (Referenz: Assets/svg-browser-icons/projects.svg)
+    juce::Path p;
+    p.startNewSubPath (0.10f, 0.30f);
+    p.lineTo (0.10f, 0.20f);
+    p.lineTo (0.40f, 0.20f);
+    p.lineTo (0.48f, 0.30f);
+    p.lineTo (0.90f, 0.30f);
+    p.lineTo (0.90f, 0.78f);
+    p.lineTo (0.10f, 0.78f);
+    p.closeSubPath();
+    return p;
+}
+
+juce::Path browserAudioWave()
+{
+    // Waveform: fünf Balken symmetrisch um die Mittellinie (Fill wie Nudge)
+    // (Referenz: Assets/svg-browser-icons/audio.svg)
+    juce::Path p;
+    constexpr float xs[]      = { 0.14f, 0.32f, 0.50f, 0.68f, 0.86f };
+    constexpr float halves[]  = { 0.14f, 0.30f, 0.38f, 0.24f, 0.10f };
+    constexpr float barWidth  = 0.09f;
+
+    for (int i = 0; i < 5; ++i)
+        p.addRectangle (xs[i] - barWidth * 0.5f, 0.50f - halves[i],
+                        barWidth, halves[i] * 2.0f);
+    return p;
+}
+
+juce::Path browserCvSine()
+{
+    // Eine Sinusperiode — CV/Control-Ast
+    // (Referenz: Assets/svg-browser-icons/modules-cv-control.svg)
+    juce::Path p;
+    p.startNewSubPath (0.08f, 0.50f);
+    p.cubicTo (0.20f, 0.10f, 0.34f, 0.10f, 0.50f, 0.50f);
+    p.cubicTo (0.66f, 0.90f, 0.80f, 0.90f, 0.92f, 0.50f);
+    return p;
+}
+
+juce::Path browserFxKnob()
+{
+    // Drehknopf: Kreis + Zeiger nach oben rechts — AudioFX-Ast
+    // (Referenz: Assets/svg-browser-icons/modules-audiofx.svg)
+    juce::Path p;
+    p.addEllipse (0.16f, 0.16f, 0.68f, 0.68f);
+    p.startNewSubPath (0.50f, 0.50f);
+    p.lineTo (0.70f, 0.28f);
+    return p;
+}
+
+juce::Path searchLens()
+{
+    // Lupe: Kreis oben links + Griff nach unten rechts
+    // (Referenz: Assets/svg-browser-icons/search.svg)
+    juce::Path p;
+    p.addEllipse (0.14f, 0.14f, 0.48f, 0.48f);
+    p.startNewSubPath (0.60f, 0.60f);
+    p.lineTo (0.86f, 0.86f);
+    return p;
+}
+
+juce::Path chevronLeftArrow()
+{
+    // ‹ — Zurück im Breadcrumb-Header
+    juce::Path p;
+    p.startNewSubPath (0.62f, 0.20f);
+    p.lineTo (0.34f, 0.50f);
+    p.lineTo (0.62f, 0.80f);
+    return p;
+}
+
 juce::Path gridLoop()
 {
     // Offener Ring wie im Live-Header (User 03.07.): Bogen mit Öffnung
@@ -308,6 +381,13 @@ juce::Path strokeGeometry (Icon icon)
         case Icon::curve:        return curveSweep();
         case Icon::sharp:        return sharpSign();
         case Icon::browserPanel: return browserPanelOutline();
+
+        case Icon::browserProjects:  return browserProjectsFolder();
+        case Icon::browserAudio:     return {};   // reines Fill-Icon (Balken)
+        case Icon::browserCvControl: return browserCvSine();
+        case Icon::browserAudioFx:   return browserFxKnob();
+        case Icon::search:           return searchLens();
+        case Icon::chevronLeft:      return chevronLeftArrow();
     }
 
     jassertfalse;
@@ -326,6 +406,7 @@ juce::Path fillGeometry (Icon icon)
         case Icon::browserPanel: return browserPanelFill();
         case Icon::nudgeLeft:   return nudgeBars (false);
         case Icon::nudgeRight:  return nudgeBars (true);
+        case Icon::browserAudio: return browserAudioWave();
 
         // reine Stroke-Icons — explizit statt default (Clang -Wswitch-enum)
         case Icon::play:
@@ -342,6 +423,11 @@ juce::Path fillGeometry (Icon icon)
         case Icon::valueButtons:
         case Icon::curve:
         case Icon::sharp:
+        case Icon::browserProjects:
+        case Icon::browserCvControl:
+        case Icon::browserAudioFx:
+        case Icon::search:
+        case Icon::chevronLeft:
             return {};
     }
 

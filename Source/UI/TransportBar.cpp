@@ -187,10 +187,11 @@ TransportBar::TransportBar (juce::ValueTree rootTree, LinkClock& linkClockToUse,
     devTile.onClick = [this] { if (onToggleDevPanel != nullptr) onToggleDevPanel(); };
     addChildComponent (devTile);   // Sichtbarkeit setzt der Editor
 
-    // Browser-Panel-Toggle: Platzhalter bis zum Browser-Meilenstein
-    browserPanelTile.setTooltip (juce::String::fromUTF8 (
-        "Browser-Panel — kommt als eigener Meilenstein"));
-    browserPanelTile.setEnabled (false);
+    // Browser-Panel-Toggle: klappt das rechts angedockte Browser-Panel
+    // auf/zu (LED = offen, Status setzt der Editor)
+    browserPanelTile.setTooltip ("Browser");
+    browserPanelTile.onClick = [this]
+    { if (onToggleBrowserPanel != nullptr) onToggleBrowserPanel(); };
 
     // -- Globale Session-Skala (Schema 6.2) — Ableton-Look: [♯][Root][Skala] --
     {
@@ -280,6 +281,11 @@ void TransportBar::setDevTileVisible (bool shouldBeVisible)
 void TransportBar::setDevPanelOpen (bool isOpen)
 {
     devTile.setActive (isOpen);
+}
+
+void TransportBar::setBrowserPanelOpen (bool isPanelOpen)
+{
+    browserPanelTile.setActive (isPanelOpen);
 }
 
 void TransportBar::setBrowserItems (std::vector<ModuleBrowser::Item> items)

@@ -85,7 +85,8 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
       canvas (rootState, engineProcessor.getGraphManager(), engineProcessor.getNodeUiRegistry(),
               &engineProcessor.getChannelNames(),
               &engineProcessor.getInputLevels(), &engineProcessor.getOutputLevels(),
-              &engineProcessor.getInputLinkSend(), &engineProcessor.getUiSettings())
+              &engineProcessor.getInputLinkSend(), &engineProcessor.getUiSettings()),
+      browserModel (engineProcessor.getModuleFactory(), browserContext)
 {
     // Push-3-Design app-weit: Jost + dunkle Kacheln auch in PopupMenus,
     // Dialogen und dem Settings-Fenster (CLAUDE.md 10)
@@ -129,16 +130,20 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
     };
 
     transportBar.onPageSelected = [this] (int pageIndex)
-    { pageHost.setPage (pageIndex); };
+    { selectPage (pageIndex); };
 
     // Tape (oo) → Retro-Looper-Page (B3): Toggle Looper ↔ Device; die
     // Tape-LED folgt dem Page-Zustand über den Editor-Timer
     transportBar.onToggleLooperPage = [this]
     {
-        pageHost.setPage (pageHost.getPage() == TransportBar::pageLooper
-                              ? TransportBar::pageDevice
-                              : TransportBar::pageLooper);
+        selectPage (pageHost.getPage() == TransportBar::pageLooper
+                        ? TransportBar::pageDevice
+                        : TransportBar::pageLooper);
     };
+
+    // Browser-Panel: Toggle über die Bar, Dock-Breite animiert → Layout
+    transportBar.onToggleBrowserPanel = [this] { toggleBrowserPanel(); };
+    browserPanel.onDockWidthChanged = [this] { resized(); };
 
     // Looper-Quellen (Master + Hardware-Paare + Taps): Auswahl armt den
     // Capture-Kanal und persistiert den Schlüssel (setLooperSource);
@@ -194,6 +199,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
     addAndMakeVisible (transportBar);
     addChildComponent (capturePanel);    // eingeklappt bis zum Shift-Klick
     addAndMakeVisible (pageHost);        // Device (Canvas) + Platzhalter-Pages
+    addChildComponent (browserPanel);    // rechts angedockt, zeigt sich beim Toggle
     addChildComponent (captureToast);    // Overlay, zeigt sich selbst
 
     setWantsKeyboardFocus (true);
@@ -506,6 +512,19 @@ std::vector<ModuleBrowser::Item> EngineEditor::buildBrowserItems()
 }
 
 //==============================================================================
+void EngineEditor::selectPage (int pageIndex)
+{
+    pageHost.setPage (pageIndex);
+    browserContext.setActivePage (pageIndex);
+}
+
+void EngineEditor::toggleBrowserPanel()
+{
+    browserPanel.setOpen (! browserPanel.isOpen());
+    transportBar.setBrowserPanelOpen (browserPanel.isOpen());
+}
+
+//==============================================================================
 void EngineEditor::launchPresetChooser (bool saving)
 {
     const auto defaultDirectory = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
@@ -676,6 +695,13 @@ void EngineEditor::resized()
 
     if (capturePanel.isVisible())
         capturePanel.setBounds (bounds.removeFromTop (CapturePanel::preferredHeight));
+
+    // Browser-Dock rechts (animierte Breite); Clamp hält den Canvas
+    // auch in schmalen Fenstern nutzbar
+    const auto browserWidth = juce::jmin (browserPanel.currentDockWidth(),
+                                          getWidth() / 3);
+    if (browserWidth > 0)
+        browserPanel.setBounds (bounds.removeFromRight (browserWidth));
 
     pageHost.setBounds (bounds);
 

@@ -50,7 +50,16 @@ enum class Icon
     curve,          // ~  Bezier-Kurve/Range-Editor
 
     sharp,          // ♯  Session-Skala an/aus (Header, Ableton-Scale-Toggle)
-    browserPanel    // ▯▮ Browser-Panel rechts (Live-Icon gespiegelt)
+    browserPanel,   // ▯▮ Browser-Panel rechts (Live-Icon gespiegelt)
+
+    // Browser-Panel (Referenz-SVGs: Assets/svg-browser-icons/, von Hand
+    // portiert — kein SVG-Runtime-Loading, CLAUDE.md 10)
+    browserProjects,  // Ordner — PROJEKTE (gespeicherte Sessions)
+    browserAudio,     // Waveform-Balken — AUDIO (Loops/One-Shots/Captures)
+    browserCvControl, // Sinuswelle — MODULE ▸ CV/Control
+    browserAudioFx,   // Drehknopf — MODULE ▸ AudioFX
+    search,           // Lupe — Suchfeld
+    chevronLeft       // ‹ Zurück (Breadcrumb-Header)
 };
 
 /** Zeichnet das Icon in die Bounds (Stroke-Breite skaliert mit der Größe). */

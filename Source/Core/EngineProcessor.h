@@ -125,6 +125,9 @@ public:
 
     [[nodiscard]] GraphManager& getGraphManager() noexcept;
     [[nodiscard]] NodeUiRegistry& getNodeUiRegistry() noexcept;
+
+    /** Statische Modul-Metadaten (Descriptors) fürs Browser-Panel. */
+    [[nodiscard]] ModuleFactory& getModuleFactory() noexcept;
     [[nodiscard]] OscController& getOscController() noexcept;
     [[nodiscard]] LinkClock& getLinkClock() noexcept;
 

@@ -113,6 +113,8 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/SourceNameResolver.cpp
     Source/Core/TransportSettings.cpp
     Source/Core/UiSettings.cpp
+    Source/Core/Browser/BrowserContextProvider.cpp
+    Source/Core/Browser/BrowserModel.cpp
     Source/Core/Capture/BufferPool.cpp
     Source/Core/Capture/CaptureChannel.cpp
     Source/Core/Capture/CaptureService.cpp
@@ -191,6 +193,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Modules/ScopeModule.cpp
     Source/Modules/StepSequencerModule.cpp
     Source/UI/AudioSettingsComponent.cpp
+    Source/UI/Browser/BrowserPanel.cpp
     Source/UI/CaptureAllButton.cpp
     Source/UI/CapturePanel.cpp
     Source/UI/CaptureSettingsComponent.cpp
@@ -248,6 +251,8 @@ target_sources(Conduit PRIVATE
     Source/Core/RemoteModuleBinder.h
     Source/Core/SourceNameResolver.h
     Source/Core/TransportSettings.h
+    Source/Core/Browser/BrowserContextProvider.h
+    Source/Core/Browser/BrowserModel.h
     Source/Core/Capture/BufferPool.h
     Source/Core/Capture/CaptureChannel.h
     Source/Core/Capture/CaptureGate.h
@@ -337,7 +342,9 @@ target_sources(Conduit PRIVATE
     Source/Modules/LinkAudioSendModule.h
     Source/Modules/ScopeModule.h
     Source/Modules/StepSequencerModule.h
+    Source/UI/AnimatedValue.h
     Source/UI/AudioSettingsComponent.h
+    Source/UI/Browser/BrowserPanel.h
     Source/UI/CaptureAllButton.h
     Source/UI/CapturePanel.h
     Source/UI/CaptureToast.h
@@ -446,6 +453,8 @@ if(CONDUIT_BUILD_TESTS)
     set(CONDUIT_TEST_CPP_SOURCES
         Tests/Core/AirwindowsModuleTests.cpp
         Tests/Core/AudioDeviceControllerTests.cpp
+        Tests/Core/Browser/BrowserContextProviderTests.cpp
+        Tests/Core/Browser/BrowserModelTests.cpp
         Tests/Core/CallbackTimingMonitorTests.cpp
         Tests/Core/CaptureBufferTests.cpp
         Tests/Core/CaptureGateTests.cpp
@@ -484,6 +493,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/ThreadingStressTests.cpp
         Tests/Core/TransportLinkTests.cpp
         Tests/Core/UiSettingsTests.cpp
+        Tests/UI/BrowserPanelTests.cpp
         Tests/UI/FxModulePanelTests.cpp
         Tests/UI/NodeCanvasTests.cpp
         Tests/UI/LevelMeterBarTests.cpp
@@ -521,6 +531,8 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/SourceNameResolver.cpp
         Source/Core/TransportSettings.cpp
         Source/Core/UiSettings.cpp
+        Source/Core/Browser/BrowserContextProvider.cpp
+        Source/Core/Browser/BrowserModel.cpp
         Source/Core/Capture/BufferPool.cpp
         Source/Core/Capture/CaptureChannel.cpp
         Source/Core/Capture/CaptureService.cpp
@@ -599,6 +611,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Modules/ScopeModule.cpp
         Source/Modules/StepSequencerModule.cpp
         Source/UI/AudioSettingsComponent.cpp
+        Source/UI/Browser/BrowserPanel.cpp
         Source/UI/CaptureAllButton.cpp
         Source/UI/CapturePanel.cpp
         Source/UI/CaptureSettingsComponent.cpp

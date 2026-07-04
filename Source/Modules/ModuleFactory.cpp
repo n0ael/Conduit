@@ -1,5 +1,7 @@
 #include "ModuleFactory.h"
 
+#include "DSP/Airwindows/AirwindowsRegistry.h"
+
 #include "AirwindowsDensityModule.h"
 #include "AirwindowsSlewModule.h"
 #include "AirwindowsSpiralModule.h"
@@ -67,156 +69,193 @@
 namespace conduit
 {
 
-void ModuleFactory::registerModule (const juce::String& moduleId, Creator creator)
+void ModuleFactory::registerModule (ModuleDescriptor descriptor, Creator creator)
 {
     jassert (creator != nullptr);
-    jassert (moduleId.isNotEmpty());
+    jassert (descriptor.id.isNotEmpty());
+    jassert (descriptor.displayName.isNotEmpty());
+    jassert (descriptor.category.isNotEmpty());
 
-    creators[moduleId] = std::move (creator);
+    const auto key = descriptor.id;
+    entries[key] = { std::move (descriptor), std::move (creator) };
 }
 
 bool ModuleFactory::isRegistered (const juce::String& moduleId) const
 {
-    return creators.contains (moduleId);
+    return entries.contains (moduleId);
 }
 
 std::unique_ptr<ConduitModule> ModuleFactory::create (const juce::String& moduleId) const
 {
-    if (const auto it = creators.find (moduleId); it != creators.end())
-        return (it->second)();
+    if (const auto it = entries.find (moduleId); it != entries.end())
+        return (it->second.creator)();
 
     return nullptr;
 }
 
+std::vector<ModuleDescriptor> ModuleFactory::getDescriptors() const
+{
+    std::vector<ModuleDescriptor> descriptors;
+    descriptors.reserve (entries.size());
+
+    for (const auto& [key, entry] : entries)
+        descriptors.push_back (entry.descriptor);
+
+    std::sort (descriptors.begin(), descriptors.end(),
+               [] (const ModuleDescriptor& a, const ModuleDescriptor& b)
+               { return a.displayName.compareIgnoreCase (b.displayName) < 0; });
+
+    return descriptors;
+}
+
+ModuleDescriptor ModuleFactory::getDescriptor (const juce::String& moduleId) const
+{
+    if (const auto it = entries.find (moduleId); it != entries.end())
+        return it->second.descriptor;
+
+    return {};
+}
+
+//==============================================================================
+namespace
+{
+    /** Descriptor eines CV/Control-Moduls (Handschrift pro Modul). */
+    ModuleDescriptor cvDescriptor (const char* factoryKey, const char* displayName,
+                                   const char* category, const char* tags)
+    {
+        ModuleDescriptor descriptor;
+        descriptor.id          = factoryKey;
+        descriptor.displayName = displayName;
+        descriptor.branch      = ModuleDescriptor::Branch::cvControl;
+        descriptor.category    = category;
+        descriptor.tags.addTokens (juce::String (tags), " ", {});
+        return descriptor;
+    }
+
+    /** Descriptor eines Airwindows-Wrappers — Name/Kategorie/Tags kommen
+        aus der AirwindowsRegistry (Single Source, nie duplizieren). */
+    ModuleDescriptor airwindowsDescriptor (const char* staticModuleId)
+    {
+        const juce::String factoryKey (staticModuleId);
+        const auto pluginId = factoryKey.fromFirstOccurrenceOf ("airwindows_", false, false);
+
+        for (const auto& entry : airwindows::getRegisteredPlugins())
+        {
+            if (pluginId == entry.id)
+            {
+                ModuleDescriptor descriptor;
+                descriptor.id          = factoryKey;
+                descriptor.displayName = entry.name;
+                descriptor.branch      = ModuleDescriptor::Branch::audioFx;
+                descriptor.category    = entry.category;
+                descriptor.tags.addTokens (juce::String (entry.tags), " ", {});
+                return descriptor;
+            }
+        }
+
+        // Wrapper ohne Registry-Eintrag — darf nicht vorkommen (Test deckt ab)
+        jassertfalse;
+        ModuleDescriptor descriptor;
+        descriptor.id          = factoryKey;
+        descriptor.displayName = factoryKey;
+        descriptor.branch      = ModuleDescriptor::Branch::audioFx;
+        descriptor.category    = "Utility";
+        return descriptor;
+    }
+
+    template <typename ModuleType>
+    void registerAirwindows (ModuleFactory& factory)
+    {
+        factory.registerModule (airwindowsDescriptor (ModuleType::staticModuleId),
+                                [] { return std::make_unique<ModuleType>(); });
+    }
+} // namespace
+
 //==============================================================================
 void registerDefaultModules (ModuleFactory& factory)
 {
-    factory.registerModule (AttenuatorModule::staticModuleId,
-                            [] { return std::make_unique<AttenuatorModule>(); });
-    factory.registerModule (AirwindowsDensityModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsDensityModule>(); });
-    factory.registerModule (AirwindowsSlewModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsSlewModule>(); });
-    factory.registerModule (AirwindowsSpiralModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsSpiralModule>(); });
-    factory.registerModule (AirwindowsAir4Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsAir4Module>(); });
-    factory.registerModule (AirwindowsCansModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsCansModule>(); });
-    factory.registerModule (AirwindowsCansAWModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsCansAWModule>(); });
-    factory.registerModule (AirwindowsConsole0BussModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsConsole0BussModule>(); });
-    factory.registerModule (AirwindowsConsole0ChannelModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsConsole0ChannelModule>(); });
-    factory.registerModule (AirwindowsConsoleLABussModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsConsoleLABussModule>(); });
-    factory.registerModule (AirwindowsConsoleMCBussModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsConsoleMCBussModule>(); });
-    factory.registerModule (AirwindowsDeBessModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsDeBessModule>(); });
-    factory.registerModule (AirwindowsDeBezModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsDeBezModule>(); });
-    factory.registerModule (AirwindowsDeRez3Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsDeRez3Module>(); });
-    factory.registerModule (AirwindowsDigitalBlackModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsDigitalBlackModule>(); });
-    factory.registerModule (AirwindowsDiscontapeityModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsDiscontapeityModule>(); });
-    factory.registerModule (AirwindowsDistance3Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsDistance3Module>(); });
-    factory.registerModule (AirwindowsDubSub2Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsDubSub2Module>(); });
-    factory.registerModule (AirwindowsDubly3Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsDubly3Module>(); });
-    factory.registerModule (AirwindowsFatEQModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsFatEQModule>(); });
-    factory.registerModule (AirwindowsFlutter2Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsFlutter2Module>(); });
-    factory.registerModule (AirwindowsGatelopeModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsGatelopeModule>(); });
-    factory.registerModule (AirwindowsGlitchShifterModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsGlitchShifterModule>(); });
-    factory.registerModule (AirwindowsHypersoftModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsHypersoftModule>(); });
-    factory.registerModule (AirwindowsInflamerModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsInflamerModule>(); });
-    factory.registerModule (AirwindowsIsolator3Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsIsolator3Module>(); });
-    factory.registerModule (AirwindowsMackityModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsMackityModule>(); });
-    factory.registerModule (AirwindowsOneCornerClipModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsOneCornerClipModule>(); });
-    factory.registerModule (AirwindowsParametricModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsParametricModule>(); });
-    factory.registerModule (AirwindowsPearEQModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsPearEQModule>(); });
-    factory.registerModule (AirwindowsPockey2Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsPockey2Module>(); });
-    factory.registerModule (AirwindowsPointyGuitarModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsPointyGuitarModule>(); });
-    factory.registerModule (AirwindowsPop2Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsPop2Module>(); });
-    factory.registerModule (AirwindowsSilkenModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsSilkenModule>(); });
-    factory.registerModule (AirwindowsSingleEndedTriodeModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsSingleEndedTriodeModule>(); });
-    factory.registerModule (AirwindowsSmoothModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsSmoothModule>(); });
-    factory.registerModule (AirwindowsSmoothEQ3Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsSmoothEQ3Module>(); });
-    factory.registerModule (AirwindowsSoftGateModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsSoftGateModule>(); });
-    factory.registerModule (AirwindowsStoneFireCompModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsStoneFireCompModule>(); });
-    factory.registerModule (AirwindowsStonefireModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsStonefireModule>(); });
-    factory.registerModule (AirwindowsSweetenModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsSweetenModule>(); });
-    factory.registerModule (AirwindowsTakeCareModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsTakeCareModule>(); });
-    factory.registerModule (AirwindowsTapeDelay2Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsTapeDelay2Module>(); });
-    factory.registerModule (AirwindowsTapeDustModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsTapeDustModule>(); });
-    factory.registerModule (AirwindowsTapeHack2Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsTapeHack2Module>(); });
-    factory.registerModule (AirwindowsToneSlantModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsToneSlantModule>(); });
-    factory.registerModule (AirwindowsTremoSquareModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsTremoSquareModule>(); });
-    factory.registerModule (AirwindowsTrianglizerModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsTrianglizerModule>(); });
-    factory.registerModule (AirwindowsTube2Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsTube2Module>(); });
-    factory.registerModule (AirwindowsVibratoModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsVibratoModule>(); });
-    factory.registerModule (AirwindowsWeightModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsWeightModule>(); });
-    factory.registerModule (AirwindowsWiderModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsWiderModule>(); });
-    factory.registerModule (AirwindowsChamberModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsChamberModule>(); });
-    factory.registerModule (AirwindowsGalacticModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsGalacticModule>(); });
-    factory.registerModule (AirwindowsVerbTinyModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsVerbTinyModule>(); });
-    factory.registerModule (AirwindowsKBeyondModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsKBeyondModule>(); });
-    factory.registerModule (AirwindowsKCathedral5Module::staticModuleId,
-                            [] { return std::make_unique<AirwindowsKCathedral5Module>(); });
-    factory.registerModule (AirwindowsKWoodRoomModule::staticModuleId,
-                            [] { return std::make_unique<AirwindowsKWoodRoomModule>(); });
-    factory.registerModule (LfoModule::staticModuleId,
-                            [] { return std::make_unique<LfoModule>(); });
-    factory.registerModule (ScopeModule::staticModuleId,
-                            [] { return std::make_unique<ScopeModule>(); });
-    factory.registerModule (StepSequencerModule::staticModuleId,
-                            [] { return std::make_unique<StepSequencerModule>(); });
-    factory.registerModule (LinkAudioSendModule::staticModuleId,
-                            [] { return std::make_unique<LinkAudioSendModule>(); });
-    factory.registerModule (CaptureTapModule::staticModuleId,
-                            [] { return std::make_unique<CaptureTapModule>(); });
+    factory.registerModule (
+        cvDescriptor (AttenuatorModule::staticModuleId, "Attenuator", "Utility",
+                      "attenuator gain level cv abschwaecher"),
+        [] { return std::make_unique<AttenuatorModule>(); });
+    factory.registerModule (
+        cvDescriptor (LfoModule::staticModuleId, "LFO", "LFO",
+                      "lfo oscillator modulation rate sine"),
+        [] { return std::make_unique<LfoModule>(); });
+    factory.registerModule (
+        cvDescriptor (ScopeModule::staticModuleId, "Scope", "Analyse",
+                      "scope oscilloscope analyse waveform visual"),
+        [] { return std::make_unique<ScopeModule>(); });
+    factory.registerModule (
+        cvDescriptor (StepSequencerModule::staticModuleId, "Sequencer", "Sequencer",
+                      "sequencer steps cv gate pattern clock"),
+        [] { return std::make_unique<StepSequencerModule>(); });
+    factory.registerModule (
+        cvDescriptor (LinkAudioSendModule::staticModuleId, "Link Send", "I/O",
+                      "link audio send network ableton stream"),
+        [] { return std::make_unique<LinkAudioSendModule>(); });
+    factory.registerModule (
+        cvDescriptor (CaptureTapModule::staticModuleId, "Capture Tap", "Utility",
+                      "capture tap record aufnahme export"),
+        [] { return std::make_unique<CaptureTapModule>(); });
+
+    registerAirwindows<AirwindowsDensityModule> (factory);
+    registerAirwindows<AirwindowsSlewModule> (factory);
+    registerAirwindows<AirwindowsSpiralModule> (factory);
+    registerAirwindows<AirwindowsAir4Module> (factory);
+    registerAirwindows<AirwindowsCansModule> (factory);
+    registerAirwindows<AirwindowsCansAWModule> (factory);
+    registerAirwindows<AirwindowsConsole0BussModule> (factory);
+    registerAirwindows<AirwindowsConsole0ChannelModule> (factory);
+    registerAirwindows<AirwindowsConsoleLABussModule> (factory);
+    registerAirwindows<AirwindowsConsoleMCBussModule> (factory);
+    registerAirwindows<AirwindowsDeBessModule> (factory);
+    registerAirwindows<AirwindowsDeBezModule> (factory);
+    registerAirwindows<AirwindowsDeRez3Module> (factory);
+    registerAirwindows<AirwindowsDigitalBlackModule> (factory);
+    registerAirwindows<AirwindowsDiscontapeityModule> (factory);
+    registerAirwindows<AirwindowsDistance3Module> (factory);
+    registerAirwindows<AirwindowsDubSub2Module> (factory);
+    registerAirwindows<AirwindowsDubly3Module> (factory);
+    registerAirwindows<AirwindowsFatEQModule> (factory);
+    registerAirwindows<AirwindowsFlutter2Module> (factory);
+    registerAirwindows<AirwindowsGatelopeModule> (factory);
+    registerAirwindows<AirwindowsGlitchShifterModule> (factory);
+    registerAirwindows<AirwindowsHypersoftModule> (factory);
+    registerAirwindows<AirwindowsInflamerModule> (factory);
+    registerAirwindows<AirwindowsIsolator3Module> (factory);
+    registerAirwindows<AirwindowsMackityModule> (factory);
+    registerAirwindows<AirwindowsOneCornerClipModule> (factory);
+    registerAirwindows<AirwindowsParametricModule> (factory);
+    registerAirwindows<AirwindowsPearEQModule> (factory);
+    registerAirwindows<AirwindowsPockey2Module> (factory);
+    registerAirwindows<AirwindowsPointyGuitarModule> (factory);
+    registerAirwindows<AirwindowsPop2Module> (factory);
+    registerAirwindows<AirwindowsSilkenModule> (factory);
+    registerAirwindows<AirwindowsSingleEndedTriodeModule> (factory);
+    registerAirwindows<AirwindowsSmoothModule> (factory);
+    registerAirwindows<AirwindowsSmoothEQ3Module> (factory);
+    registerAirwindows<AirwindowsSoftGateModule> (factory);
+    registerAirwindows<AirwindowsStoneFireCompModule> (factory);
+    registerAirwindows<AirwindowsStonefireModule> (factory);
+    registerAirwindows<AirwindowsSweetenModule> (factory);
+    registerAirwindows<AirwindowsTakeCareModule> (factory);
+    registerAirwindows<AirwindowsTapeDelay2Module> (factory);
+    registerAirwindows<AirwindowsTapeDustModule> (factory);
+    registerAirwindows<AirwindowsTapeHack2Module> (factory);
+    registerAirwindows<AirwindowsToneSlantModule> (factory);
+    registerAirwindows<AirwindowsTremoSquareModule> (factory);
+    registerAirwindows<AirwindowsTrianglizerModule> (factory);
+    registerAirwindows<AirwindowsTube2Module> (factory);
+    registerAirwindows<AirwindowsVibratoModule> (factory);
+    registerAirwindows<AirwindowsWeightModule> (factory);
+    registerAirwindows<AirwindowsWiderModule> (factory);
+    registerAirwindows<AirwindowsChamberModule> (factory);
+    registerAirwindows<AirwindowsGalacticModule> (factory);
+    registerAirwindows<AirwindowsVerbTinyModule> (factory);
+    registerAirwindows<AirwindowsKBeyondModule> (factory);
+    registerAirwindows<AirwindowsKCathedral5Module> (factory);
+    registerAirwindows<AirwindowsKWoodRoomModule> (factory);
 }
 
 } // namespace conduit

@@ -56,6 +56,7 @@ public:
     std::function<void()> onToggleDevPanel;   // Dev-Tile (nur im Dev Mode sichtbar)
     std::function<void()> onCaptureAll, onToggleCapturePanel;
     std::function<void()> onToggleLooperPage;             // Tape-Kachel (oo)
+    std::function<void()> onToggleBrowserPanel;           // Browser-Toggle rechts außen
     std::function<void (int pageIndex)> onPageSelected;   // Reihenfolge: pages[]
 
     /** Browser-Einträge (Module + Presets) — Anzeige-Reihenfolge = Liste. */
@@ -137,6 +138,11 @@ public:
 
     [[nodiscard]] push::TextTile& getDevTile() noexcept { return devTile; }
     [[nodiscard]] push::IconTile& getScaleToggleTile() noexcept { return scaleToggleTile; }
+
+    /** LED des Browser-Toggles = Panel offen (Status kommt vom Editor). */
+    void setBrowserPanelOpen (bool isPanelOpen);
+
+    [[nodiscard]] push::IconTile& getBrowserPanelTile() noexcept { return browserPanelTile; }
 
 private:
     void openBrowser();
