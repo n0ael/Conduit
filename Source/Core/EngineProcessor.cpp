@@ -43,6 +43,14 @@ EngineProcessor::EngineProcessor()
     // moduleId bei der Materialisierung (Spurname == moduleId)
     graphManager.setCaptureService (&captureService);
 
+    // Master-Output-Tap (Looper B2): die Session-Summe nach dem GraphFader
+    // als zwei virtuelle Capture-Kanäle — Quelle des Retro-Loopers, und
+    // Capture All exportiert die Summe automatisch sample-aligned mit.
+    // Registrierung VOR jedem Audio-Start, Handles danach unveränderlich —
+    // deshalb schlichte Member statt der rtSlot-Atomics des CaptureTapModule.
+    masterTapLeft  = captureService.registerVirtualChannel ("master_l");
+    masterTapRight = captureService.registerVirtualChannel ("master_r");
+
     // Kanal-Namen — Auto-Naming der Send-Kanäle (7.2): Quelle am audio_input
     // liefert ihr ChannelNames-Label
     graphManager.setChannelNames (&channelNames);
@@ -387,6 +395,25 @@ void EngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     graph.processBlock (buffer, midiMessages);
     graphFader.process (buffer);  // Master-Fade hinter dem Graph (5.2)
+
+    // Master-Output-Tap (Looper B2): die Session-Summe direkt nach dem
+    // Fader in die virtuellen Capture-Kanäle spiegeln — VOR Metronom und
+    // (künftigem) Looper-Playback: Capture-Philosophie "Rohmaterial"
+    // (kein Click in der Aufzeichnung) und strukturell feedback-frei
+    // (der Looper kann seine eigene Ausgabe nie wieder einfangen).
+    {
+        const rt::ScopedRealtimeSection rtAudit;
+        const auto usable = juce::jmin (getTotalNumOutputChannels(),
+                                        buffer.getNumChannels());
+        if (usable > 0)
+            captureService.writeVirtualChannel (masterTapLeft,
+                                                buffer.getReadPointer (0),
+                                                buffer.getNumSamples());
+        if (usable > 1)
+            captureService.writeVirtualChannel (masterTapRight,
+                                                buffer.getReadPointer (1),
+                                                buffer.getNumSamples());
+    }
 
     // Metronom NACH dem Fader (Click faded bei Graph-Swaps nicht mit) und
     // VOR dem Sicht-Metering — der Capture-Tap am Blockanfang bleibt sauber

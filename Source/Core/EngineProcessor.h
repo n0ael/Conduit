@@ -49,6 +49,17 @@ class EngineProcessor final : public juce::AudioProcessor,
 {
 public:
     EngineProcessor();
+
+    /** Test-Injektionspunkt für die Settings-Persistenz: leitet ALLE
+        Settings-Dateien des Processors (Capture, ChannelNames, Meter, UI,
+        ModuleUiDefaults, Transport, OscSend) in den angegebenen Ordner um —
+        Tests schreiben damit in ein Temp-Verzeichnis statt in die echten
+        AppData-Dateien des Users. Ein ungültiges File (Default-Konstruktor
+        oben) bedeutet: unverändert die Produktions-Pfade der jeweiligen
+        defaultOptions(). Dateinamen (applicationName + Suffix) bleiben
+        identisch, nur der Speicherort wechselt. */
+    explicit EngineProcessor (const juce::File& settingsFolder);
+
     ~EngineProcessor() override;
 
     //==========================================================================
@@ -232,6 +243,12 @@ private:
     // rohen Hardware-Input. Nach den Settings deklariert (Konstruktor-Ref);
     // die Host-Verdrahtung für die Resize-Policy passiert im Konstruktor.
     CaptureService captureService { captureSettings };
+
+    // Master-Output-Tap (Looper B2): Registry-Slots der Session-Summe
+    // ("master_l"/"master_r"), im Konstruktor registriert und danach
+    // unveränderlich — der Audio Thread liest sie deshalb direkt
+    CaptureService::VirtualChannelHandle masterTapLeft;
+    CaptureService::VirtualChannelHandle masterTapRight;
 
     // Sicht-Metering (Ableton-Style) für die audio_in/audio_out-Kacheln —
     // getrennt vom capture-InputMeter; processBlock speist beide.

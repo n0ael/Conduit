@@ -460,6 +460,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/LinkSendTapsTests.cpp
         Tests/Core/LooperMathTests.cpp
         Tests/Core/BarSampleAnchorsTests.cpp
+        Tests/Core/MasterTapTests.cpp
         Tests/Core/MeterSettingsTests.cpp
         Tests/Core/MetronomeTests.cpp
         Tests/Core/OscControllerTests.cpp
