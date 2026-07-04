@@ -1,5 +1,6 @@
 #include "BrowserListRow.h"
 
+#include "UI/Browser/BrowserDragPayload.h"
 #include "UI/PushIcons.h"
 #include "UI/PushLookAndFeel.h"
 
@@ -89,12 +90,35 @@ void BrowserListRow::mouseDown (const juce::MouseEvent&)
 {
     // Tap-Feedback übernimmt die Selektion nach dem mouseUp — hier nichts,
     // damit der Viewport vertikale Drags ungestört übernehmen kann
+    dragStarted = false;
+}
+
+void BrowserListRow::mouseDrag (const juce::MouseEvent& event)
+{
+    if (dragStarted || row.kind != BrowserModel::Row::Kind::module)
+        return;
+
+    // Nur klar HORIZONTALE Bewegung wird zum Modul-Drag — vertikal
+    // gehört dem Viewport (Flick-Scroll)
+    const auto dx = std::abs (event.getDistanceFromDragStartX());
+    const auto dy = std::abs (event.getDistanceFromDragStartY());
+
+    if (dx <= tapThreshold || dx <= dy)
+        return;
+
+    if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this))
+    {
+        dragStarted = true;
+        // Kein eigenes Drag-Image: JUCE nimmt den Row-Snapshot
+        container->startDragging (browser_drag::makeModulePayload (row.id),
+                                  this, juce::ScaledImage(), true);
+    }
 }
 
 void BrowserListRow::mouseUp (const juce::MouseEvent& event)
 {
-    // Tap nur ohne nennenswerte Bewegung — sonst war es ein Flick-Scroll
-    if (event.getDistanceFromDragStart() > tapThreshold)
+    // Tap nur ohne nennenswerte Bewegung — sonst war es Flick-Scroll/Drag
+    if (dragStarted || event.getDistanceFromDragStart() > tapThreshold)
         return;
 
     if (! getLocalBounds().contains (event.getPosition()))

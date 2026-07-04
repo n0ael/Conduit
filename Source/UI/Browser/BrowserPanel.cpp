@@ -141,9 +141,26 @@ void BrowserPanel::handleRowActivated (int rowIndex)
     if (rowIndex < 0 || rowIndex >= (int) rows.size())
         return;
 
-    // Modul-Zeilen: visuelle Selektion; Tap-to-Load folgt in M3
-    if (rows[(size_t) rowIndex].kind == BrowserModel::Row::Kind::module)
+    const auto& row = rows[(size_t) rowIndex];
+
+    if (row.kind == BrowserModel::Row::Kind::module)
+    {
         list.selectRow (rowIndex);
+
+        if (onModuleActivated != nullptr)
+        {
+            // Zeilen-Anker für Dialoge (Link-Send); Fallback: Panel-Bounds
+            auto anchor = getScreenBounds();
+            if (auto* rowComponent = list.getComponentForRowNumber (rowIndex))
+                anchor = rowComponent->getScreenBounds();
+
+            onModuleActivated (row.id, anchor);
+        }
+        return;
+    }
+
+    if (row.kind == BrowserModel::Row::Kind::action && onAction != nullptr)
+        onAction (row.id);
 }
 
 //==============================================================================

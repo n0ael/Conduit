@@ -33,8 +33,14 @@ namespace conduit
 
     Doppelklick/Doppel-Tap auf freie Fläche legt ein Modul an der Klickposition
     an (bis zur Modul-Palette fest: Attenuator).
+
+    Drag-and-drop aus dem Browser-Panel (M3): DragAndDropTarget für
+    Descriptions "conduit.module:{factoryKey}" — Drop legt das Modul an
+    der Drop-Position an (derselbe undo-fähige addModuleNode-Pfad wie der
+    Tap); während des Hovers zeigt ein Akzent-Rahmen die Drop-Fläche.
 */
 class NodeCanvas final : public juce::Component,
+                         public juce::DragAndDropTarget,
                          private juce::ValueTree::Listener
 {
 public:
@@ -65,6 +71,13 @@ public:
     /** Kabel unter dem Punkt (Toleranz ~8px), invalides ValueTree wenn keins.
         Public für Tests. */
     [[nodiscard]] juce::ValueTree findConnectionAt (juce::Point<int> position) const;
+
+    //==========================================================================
+    // juce::DragAndDropTarget — Browser-Drag (Payload: BrowserDragPayload.h)
+    bool isInterestedInDragSource (const SourceDetails& details) override;
+    void itemDropped (const SourceDetails& details) override;
+    void itemDragEnter (const SourceDetails& details) override;
+    void itemDragExit (const SourceDetails& details) override;
 
     //==========================================================================
     void paint (juce::Graphics& g) override;
@@ -106,6 +119,8 @@ private:
     };
 
     std::optional<CableDrag> activeCableDrag;
+
+    bool dropHighlight = false;   // Browser-Drag schwebt über der Fläche
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NodeCanvas)
 };

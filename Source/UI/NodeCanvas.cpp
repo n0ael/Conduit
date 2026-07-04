@@ -4,6 +4,7 @@
 
 #include "Modules/AttenuatorModule.h"
 #include "PushLookAndFeel.h"
+#include "UI/Browser/BrowserDragPayload.h"
 
 namespace conduit
 {
@@ -243,6 +244,13 @@ void NodeCanvas::paint (juce::Graphics& g)
 {
     g.fillAll (push::colours::background);
 
+    // Browser-Drag schwebt über der Fläche: Akzent-Rahmen als Drop-Hinweis
+    if (dropHighlight)
+    {
+        g.setColour (push::colours::ledOrange.withAlpha (0.6f));
+        g.drawRect (getLocalBounds(), 2);
+    }
+
     // Kabel aus Connections[] (Schema 6.2) — unter den Node-Kacheln
     const juce::PathStrokeType cableStroke (3.0f, juce::PathStrokeType::curved,
                                             juce::PathStrokeType::rounded);
@@ -314,6 +322,37 @@ void NodeCanvas::mouseDoubleClick (const juce::MouseEvent& event)
     const auto created = graphManager.addModuleNode (AttenuatorModule::staticModuleId,
                                                      event.getPosition());
     jassertquiet (created.isValid());
+}
+
+//==============================================================================
+bool NodeCanvas::isInterestedInDragSource (const SourceDetails& details)
+{
+    return browser_drag::extractFactoryKey (details.description.toString()).isNotEmpty();
+}
+
+void NodeCanvas::itemDropped (const SourceDetails& details)
+{
+    dropHighlight = false;
+    repaint();
+
+    const auto factoryKey = browser_drag::extractFactoryKey (details.description.toString());
+
+    // localPosition ist bereits Canvas-lokal — derselbe undo-fähige Pfad
+    // wie Tap-to-Load ("Modul hinzufügen"-Transaktion)
+    const auto created = graphManager.addModuleNode (factoryKey, details.localPosition);
+    jassertquiet (created.isValid());
+}
+
+void NodeCanvas::itemDragEnter (const SourceDetails&)
+{
+    dropHighlight = true;
+    repaint();
+}
+
+void NodeCanvas::itemDragExit (const SourceDetails&)
+{
+    dropHighlight = false;
+    repaint();
 }
 
 } // namespace conduit

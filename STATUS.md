@@ -63,8 +63,28 @@ Verzeichnisse unter Dokumente/Conduit (+ Captures aus CaptureSettings).
   Flick-Scroll via ScrollOnDragMode bleibt frei), Modul-Tap selektiert
   (Akzentbalken; Laden folgt M3). 5 neue Tests (373/20453, Debug + ASan);
   Smoke: docs/smoke/browser_m2_*.png.
-- **Offen:** M3 Tap+Drag (dann
-  „+"-Entfernung + Interim-„Preset laden…"-Row in PROJEKTE) → M4 Suche →
+- **M3 (Tap-to-Load + Drag-to-Graph):** Modul-Tap ruft den Panel-Hook
+  `onModuleActivated(factoryKey, rowScreenBounds)` — der Editor legt via
+  `addModuleNode` an (Stagger-Position, bestehende Undo-Transaktion);
+  Link-Send-Sonderfall öffnet seinen Config-Dialog verankert an der
+  getappten Zeile. Drag-to-Graph: EngineEditor erbt DragAndDropContainer
+  (erster DnD im Repo), `BrowserListRow::mouseDrag` startet bei klar
+  HORIZONTALER Bewegung (>8 px, dx>dy — vertikal bleibt Flick-Scroll) den
+  Drag mit Payload aus `UI/Browser/BrowserDragPayload.h` (EINE Definition
+  für Quelle+Ziel); `NodeCanvas` ist DragAndDropTarget (Drop-Position =
+  Node-Position, Akzent-Rahmen beim Hover). **Alte „+"-CallOutBox
+  entfernt:** plusTile/openBrowser/setBrowserItems/ModuleBrowser.h+.cpp
+  gelöscht, EngineEditor::buildBrowserItems (~60 Airwindows-Includes) weg;
+  PROJEKTE trägt bis M6 die Interim-Zeile „Preset laden…" (Save bleibt
+  auf der Save-Kachel). 3 neue/2 ersetzte Tests (376/20471, Debug+ASan);
+  Smoke: browser_m3_*.png — Tap-Insert (Chamber) und Drag-Insert
+  (Galactic an Drop-Position) MIT laufendem Metronom-Testton, Undo räumt
+  den Canvas. Höreindruck der Glitchfreiheit ist automatisiert nicht
+  bewertbar — der Einfüge-Pfad ist der bestehende Fade-Swap (5.2);
+  Ohr-Check beim nächsten manuellen Test empfohlen. Smoke-Lektion:
+  Ctrl+Z via keybd_event erreicht den Editor nicht, wenn der Fokus auf
+  der Browser-Liste liegt — Undo-Beleg über die Undo-Kachel.
+- **Offen:** M4 Suche →
   M5 TouchKeyboard (UiSettings::softKeyboardEnabled, Linux an/Desktop aus)
   → M6 PROJEKTE/AUDIO-Daten + Abschlussbericht.
 

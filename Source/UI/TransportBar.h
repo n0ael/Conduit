@@ -7,7 +7,6 @@
 
 #include "Core/TapTempo.h"
 #include "Core/TransportSettings.h"
-#include "ModuleBrowser.h"
 #include "PushTiles.h"
 #include "Util/ScaleQuantizer.h"
 
@@ -24,8 +23,8 @@ class LinkClock;
     Layout (links → rechts):
       [▷ Play] [oo Tape] [⛶ Capture] · [Tap ▾] [Set] [‹] [›] [○● Metronom] ·
       [Tempo 120.00] [Position] [Swing] [Link ▾] · … ·
-      [Ω Grid] [∥∥ Mixer] [▷▭ Clip] [||| Device] · [+] [Undo] [Save] [⚙] ·
-      [Root] [Skala]
+      [Ω Grid] [∥∥ Mixer] [▷▭ Clip] [||| Device] · [Undo] [Save] [⚙] ·
+      [Root] [Skala] · [▯▮ Browser]
 
     Zuständigkeiten:
       - Die Bar besitzt NUR UI-Zustand. Aktionen laufen über die
@@ -34,7 +33,9 @@ class LinkClock;
       - Skala schreibt direkt die Root-Tree-Properties (Session-Setting,
         bewusst ohne UndoManager — wie zuvor in der Toolbar).
       - Tempo: Drag (vertikal) und Doppelklick-Edit via LinkClock.
-      - Browser („+"): Einträge injiziert der Editor (setBrowserItems).
+      - Browser-Toggle (▯▮, außen rechts): klappt das rechts angedockte
+        Browser-Panel auf/zu — das frühere „+" (ModuleBrowser-CallOutBox)
+        ist im Panel aufgegangen (M3, 04.07.2026).
 
     Funktions-Staffelung des Meilensteins: Play/Link-Menü folgen in
     Schritt 3, Tap/Nudge/Position/Swing in Schritt 4, Metronom in
@@ -58,9 +59,6 @@ public:
     std::function<void()> onToggleLooperPage;             // Tape-Kachel (oo)
     std::function<void()> onToggleBrowserPanel;           // Browser-Toggle rechts außen
     std::function<void (int pageIndex)> onPageSelected;   // Reihenfolge: pages[]
-
-    /** Browser-Einträge (Module + Presets) — Anzeige-Reihenfolge = Liste. */
-    void setBrowserItems (std::vector<ModuleBrowser::Item> items);
 
     /** Beschriftungen der Metronom-Ziel-Paare (Kanäle 2n/2n+1) fürs
         Link-Menü — der Editor liefert sie aus den ChannelNames. */
@@ -106,7 +104,6 @@ public:
     [[nodiscard]] push::IconTile& getPlayTile()     noexcept { return playTile; }
     [[nodiscard]] push::IconTile& getTapeTile()     noexcept { return tapeTile; }
     [[nodiscard]] push::IconTile& getCaptureTile()  noexcept { return captureTile; }
-    [[nodiscard]] push::IconTile& getPlusTile()     noexcept { return plusTile; }
     [[nodiscard]] push::TextTile& getUndoTile()     noexcept { return undoTile; }
     [[nodiscard]] push::TextTile& getLinkTile()     noexcept { return linkTile; }
     [[nodiscard]] push::ValueTile& getTempoTile()   noexcept { return tempoTile; }
@@ -145,7 +142,6 @@ public:
     [[nodiscard]] push::IconTile& getBrowserPanelTile() noexcept { return browserPanelTile; }
 
 private:
-    void openBrowser();
     void openLinkMenu();
     void openTapMenu();
     void applyTempoText (const juce::String& entered);
@@ -178,7 +174,6 @@ private:
 
     // Rechts: Pages + Aktionen + Skala
     std::vector<std::unique_ptr<push::IconTile>> pageTiles;
-    push::IconTile plusTile { push::Icon::plus, "plus" };
     push::TextTile undoTile { "Undo" };
     push::TextTile saveTile { "Save" };
     push::IconTile gearTile { push::Icon::gear, "settings" };
@@ -200,7 +195,6 @@ private:
     juce::Label warningLabel;
     juce::Label dspMeterLabel;   // „DSP x % ⌀ / y % pk · N XRuns" (Timing-Monitor)
 
-    std::vector<ModuleBrowser::Item> browserItems;
     int selectedPage = pageDevice;
     double tempoAtDragStart = 120.0;
     double swingAtDragStart = 0.0;

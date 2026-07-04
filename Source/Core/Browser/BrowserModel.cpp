@@ -202,8 +202,18 @@ void BrowserModel::rebuildRows()
                              category.fromFirstOccurrenceOf (":", false, false));
     else if (section == sectionAudio && category.isEmpty())
         buildAudioRootRows();
+    else if (section == sectionProjects)
+    {
+        // Interim bis M6 (Session-Liste): Preset-Load bleibt erreichbar,
+        // seit die alte „+"-CallOutBox weg ist (M3)
+        visibleRows.push_back ({ Row::Kind::action, Icon::none,
+                                 juce::String::fromUTF8 ("Preset laden…"),
+                                 "load_preset", 0 });
+        visibleRows.push_back ({ Row::Kind::hint, Icon::none,
+                                 juce::String::fromUTF8 ("Session-Liste folgt …"), {}, 0 });
+    }
     else
-        // PROJEKTE / AUDIO-Unterbereiche: Datenanbindung folgt in M6
+        // AUDIO-Unterbereiche: Datenanbindung folgt in M6
         visibleRows.push_back ({ Row::Kind::hint, Icon::none,
                                  juce::String::fromUTF8 ("Inhalte folgen …"), {}, 0 });
 

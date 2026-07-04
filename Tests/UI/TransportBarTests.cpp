@@ -148,10 +148,10 @@ TEST_CASE ("TransportBar: Skala-Combos schreiben die Root-Properties", "[transpo
 
     rig.bar.setBounds (0, 0, 1480, 56);  // Layout einmal durchlaufen
 
-    // Play/Capture/Plus sind funktional; Metronom folgt in Schritt 5
+    // Play/Capture/Browser-Toggle sind funktional
     REQUIRE (rig.bar.getPlayTile().isEnabled());
     REQUIRE (rig.bar.getCaptureTile().isEnabled());
-    REQUIRE (rig.bar.getPlusTile().isEnabled());
+    REQUIRE (rig.bar.getBrowserPanelTile().isEnabled());
 }
 
 TEST_CASE ("TransportBar: Skala-Toggle schaltet chromatisch <-> letzte Skala", "[transport][ui]")
@@ -293,27 +293,24 @@ TEST_CASE ("TransportBar: Looper-Toggles schreiben die TransportSettings", "[tra
 }
 
 //==============================================================================
-TEST_CASE ("ModuleBrowser: Klick auf einen Eintrag löst die Aktion aus", "[transport][ui]")
+TEST_CASE ("TransportBar: Browser-Toggle feuert den Hook, LED folgt dem Editor",
+           "[transport][ui]")
 {
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TransportBarRig rig;
 
-    int fired = -1;
-    std::vector<conduit::ModuleBrowser::Item> items;
-    items.push_back ({ "Attenuator", [&fired] { fired = 0; }, false });
-    items.push_back ({ "LFO",        [&fired] { fired = 1; }, false });
-    items.push_back ({ juce::String::fromUTF8 ("Preset laden\xe2\x80\xa6"),
-                       [&fired] { fired = 2; }, true });
+    int toggles = 0;
+    rig.bar.onToggleBrowserPanel = [&toggles] { ++toggles; };
 
-    conduit::ModuleBrowser browser (items);
-    browser.setBounds (0, 0, conduit::ModuleBrowser::panelWidth, browser.getHeight());
+    auto& tile = rig.bar.getBrowserPanelTile();
+    REQUIRE_FALSE (tile.isActive());
 
-    // Kachel 2 (Preset laden) direkt klicken — ohne CallOutBox-Parent ist
-    // dismiss() ein No-op, die Aktion muss trotzdem feuern
-    auto* tile = dynamic_cast<juce::Button*> (browser.getChildComponent (2));
-    REQUIRE (tile != nullptr);
-    tile->onClick();
-    REQUIRE (fired == 2);
+    tile.onClick();
+    REQUIRE (toggles == 1);
 
-    // Höhe: 3 Zeilen + eine Sektions-Trennung
-    REQUIRE (browser.getHeight() > 3 * conduit::ModuleBrowser::itemHeight);
+    // LED-Status kommt vom Editor (Panel offen), nicht vom Klick selbst
+    REQUIRE_FALSE (tile.isActive());
+    rig.bar.setBrowserPanelOpen (true);
+    REQUIRE (tile.isActive());
+    rig.bar.setBrowserPanelOpen (false);
+    REQUIRE_FALSE (tile.isActive());
 }

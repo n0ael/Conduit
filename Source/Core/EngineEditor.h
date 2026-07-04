@@ -43,6 +43,7 @@ class EngineProcessor;
     freigeben" fragt IMMER erst nach (User-Vorgabe) — handleExportReport().
 */
 class EngineEditor final : public juce::AudioProcessorEditor,
+                           public juce::DragAndDropContainer,   // Browser-Drag → Canvas
                            private juce::Timer,
                            private juce::ChangeListener
 {
@@ -70,7 +71,6 @@ private:
     void handleExportReport (const CaptureWriter::Report& report);
     void toggleDevPanel();
     void closeDevPanelAsync();
-    [[nodiscard]] std::vector<ModuleBrowser::Item> buildBrowserItems();
 
     /** ZENTRALER Page-Wechsel — jeder Pfad (Page-Icons, Tape-Kachel)
         läuft hierüber, damit der BrowserContextProvider nie desynct. */

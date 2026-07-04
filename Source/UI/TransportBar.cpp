@@ -162,9 +162,6 @@ TransportBar::TransportBar (juce::ValueTree rootTree, LinkClock& linkClockToUse,
     setSelectedPage (pageDevice);
 
     // -- Aktionen rechts ------------------------------------------------------
-    plusTile.setTooltip (juce::String::fromUTF8 ("Browser: Module hinzufügen, Presets"));
-    plusTile.onClick = [this] { openBrowser(); };
-
     undoTile.setTooltip (juce::String::fromUTF8 ("Undo — Shift-Klick: Redo"));
     undoTile.onClick = [this]
     {
@@ -260,7 +257,7 @@ TransportBar::TransportBar (juce::ValueTree rootTree, LinkClock& linkClockToUse,
              &playTile, &tapeTile, &captureTile, &fixedLengthTile, &automateTile,
              &tapTile, &setTile, &nudgeDownTile, &nudgeUpTile,
              &metronomeTile, &tempoTile, &positionTile, &swingTile, &linkTile,
-             &plusTile, &undoTile, &saveTile, &gearTile,
+             &undoTile, &saveTile, &gearTile,
              &scaleToggleTile, &rootCombo, &scaleCombo, &browserPanelTile,
              &warningLabel, &dspMeterLabel })
         addAndMakeVisible (component);
@@ -286,21 +283,6 @@ void TransportBar::setDevPanelOpen (bool isOpen)
 void TransportBar::setBrowserPanelOpen (bool isPanelOpen)
 {
     browserPanelTile.setActive (isPanelOpen);
-}
-
-void TransportBar::setBrowserItems (std::vector<ModuleBrowser::Item> items)
-{
-    browserItems = std::move (items);
-}
-
-void TransportBar::openBrowser()
-{
-    if (browserItems.empty())
-        return;
-
-    auto browser = std::make_unique<ModuleBrowser> (browserItems);
-    juce::CallOutBox::launchAsynchronously (std::move (browser),
-                                            plusTile.getScreenBounds(), nullptr);
 }
 
 void TransportBar::openTapMenu()
@@ -561,8 +543,7 @@ void TransportBar::resized()
         placeRight (devTile, 48);
 
     placeRight (saveTile,  56);
-    placeRight (undoTile,  56);
-    placeRight (plusTile, tile, 14);
+    placeRight (undoTile,  56, 14);
 
     for (auto page = (int) pageTiles.size(); --page >= 0;)
         placeRight (*pageTiles[(size_t) page], tile, page == 0 ? 14 : 6);

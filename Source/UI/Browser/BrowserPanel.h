@@ -52,6 +52,18 @@ public:
     std::function<void()> onDockWidthChanged;
 
     //==========================================================================
+    // Aktions-Hooks — vom EngineEditor verdrahtet (das Panel kennt weder
+    // GraphManager noch Engine)
+
+    /** Tap auf eine Modul-Zeile: factoryKey + Screen-Bounds der Zeile
+        (Anker für Dialoge, z.B. Link-Send-Konfiguration). */
+    std::function<void (const juce::String& factoryKey,
+                        juce::Rectangle<int> rowScreenBounds)> onModuleActivated;
+
+    /** Tap auf eine Aktions-Zeile (z.B. "load_preset"). */
+    std::function<void (const juce::String& actionId)> onAction;
+
+    //==========================================================================
     void paint (juce::Graphics& g) override;
     void resized() override;
 

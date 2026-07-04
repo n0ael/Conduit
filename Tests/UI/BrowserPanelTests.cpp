@@ -89,11 +89,40 @@ TEST_CASE ("Browser-Panel: Kategorie-Tap steigt ab, Modul-Tap selektiert",
     REQUIRE (rig.model.rows().front().kind
                  == conduit::BrowserModel::Row::Kind::module);
 
-    // Modul-Tap: Navigation bleibt stehen, Zeile wird selektiert (M3 lädt)
+    // Modul-Tap: Navigation bleibt stehen, Zeile wird selektiert und der
+    // Hook liefert den factoryKey (Editor legt das Modul an)
+    juce::String activatedKey;
+    rig.panel.onModuleActivated = [&activatedKey] (const juce::String& key,
+                                                   juce::Rectangle<int>)
+    { activatedKey = key; };
+
+    const auto expectedKey = rig.model.rows().front().id;
     rig.panel.activateRowForTest (0);
     REQUIRE (rig.model.rows().front().kind
                  == conduit::BrowserModel::Row::Kind::module);
     REQUIRE (rig.panel.getListBox().getSelectedRow() == 0);
+    REQUIRE (activatedKey == expectedKey);
+}
+
+TEST_CASE ("Browser-Panel: PROJEKTE-Interim-Zeile feuert den Aktions-Hook",
+           "[browser][ui]")
+{
+    PanelRig rig;
+    rig.model.openSection (conduit::BrowserContextProvider::Section::projects);
+
+    REQUIRE (rig.model.rows().front().kind
+                 == conduit::BrowserModel::Row::Kind::action);
+
+    juce::String actionId;
+    rig.panel.onAction = [&actionId] (const juce::String& id) { actionId = id; };
+
+    rig.panel.activateRowForTest (0);
+    REQUIRE (actionId == "load_preset");
+
+    // Hinweis-Zeile bleibt stumm
+    actionId.clear();
+    rig.panel.activateRowForTest (1);
+    REQUIRE (actionId.isEmpty());
 }
 
 TEST_CASE ("Browser-Panel: virtualisierte Zeilen — Komponenten nur für den Viewport",

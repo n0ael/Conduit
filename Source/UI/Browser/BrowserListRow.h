@@ -19,8 +19,10 @@ namespace conduit
     Virtualisierung hält höchstens eine Bildschirmseite an Komponenten).
 
     Gesten: Tap (< Bewegungsschwelle) aktiviert die Zeile; vertikale
-    Bewegungen gehören dem Viewport (Flick-Scroll, ScrollOnDragMode).
-    Drag-to-Graph für Modul-Zeilen folgt in M3.
+    Bewegungen gehören dem Viewport (Flick-Scroll, ScrollOnDragMode);
+    HORIZONTALE Bewegung auf einer Modul-Zeile startet drag-and-drop
+    Richtung Canvas (Payload: BrowserDragPayload.h, Container =
+    EngineEditor, Ziel = NodeCanvas) — Drag-Image ist der Row-Snapshot.
 */
 class BrowserListRow final : public juce::Component
 {
@@ -36,6 +38,7 @@ public:
 
     void paint (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& event) override;
+    void mouseDrag (const juce::MouseEvent& event) override;
     void mouseUp (const juce::MouseEvent& event) override;
 
     /** Bewegungsschwelle in px: darunter Tap, darüber Scroll/Drag. */
@@ -45,6 +48,7 @@ private:
     BrowserModel::Row row;
     int rowIndex = -1;
     bool selected = false;
+    bool dragStarted = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BrowserListRow)
 };

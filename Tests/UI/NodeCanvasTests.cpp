@@ -9,6 +9,7 @@
 #include "Modules/AttenuatorModule.h"
 #include "Modules/LinkAudioSendModule.h"
 #include "Modules/ModuleFactory.h"
+#include "UI/Browser/BrowserDragPayload.h"
 #include "UI/NodeCanvas.h"
 
 namespace
@@ -652,4 +653,46 @@ TEST_CASE ("NodeCanvas: Drag vom Stereo-Port erzeugt beide Kabel, EIN Undo entfe
         REQUIRE (rig.undoManager.undo());
         REQUIRE (rig.connections().getNumChildren() == 2);
     }
+}
+
+//==============================================================================
+TEST_CASE ("NodeCanvas: Browser-Drop legt das Modul an der Drop-Position an",
+           "[ui][browser]")
+{
+    UiTestRig rig;
+    rig.canvas.setSize (800, 600);
+
+    juce::DragAndDropTarget::SourceDetails details (
+        conduit::browser_drag::makeModulePayload ("airwindows_density"),
+        &rig.canvas, { 300, 200 });
+
+    REQUIRE (rig.canvas.isInterestedInDragSource (details));
+
+    rig.canvas.itemDragEnter (details);
+    rig.canvas.itemDropped (details);
+
+    REQUIRE (rig.canvas.getNumNodeComponents() == 1);
+    const auto node = rig.nodes().getChild (0);
+    REQUIRE (node.getProperty (conduit::id::factoryId).toString() == "airwindows_density");
+    REQUIRE ((int) node.getProperty (conduit::id::positionX) == 300);
+    REQUIRE ((int) node.getProperty (conduit::id::positionY) == 200);
+
+    // Derselbe undo-faehige Pfad wie Tap-to-Load
+    REQUIRE (rig.undoManager.undo());
+    REQUIRE (rig.canvas.getNumNodeComponents() == 0);
+    REQUIRE (rig.undoManager.redo());
+    REQUIRE (rig.canvas.getNumNodeComponents() == 1);
+}
+
+TEST_CASE ("NodeCanvas: fremde Drag-Descriptions werden ignoriert", "[ui][browser]")
+{
+    UiTestRig rig;
+
+    juce::DragAndDropTarget::SourceDetails foreign ("irgendwas", &rig.canvas, { 10, 10 });
+    REQUIRE_FALSE (rig.canvas.isInterestedInDragSource (foreign));
+
+    // Payload-Roundtrip der gemeinsamen Definition
+    const auto payload = conduit::browser_drag::makeModulePayload ("lfo");
+    REQUIRE (conduit::browser_drag::extractFactoryKey (payload) == "lfo");
+    REQUIRE (conduit::browser_drag::extractFactoryKey ("lfo").isEmpty());
 }

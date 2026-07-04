@@ -208,7 +208,6 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/LinkAudioStatusBadge.cpp
     Source/UI/LinkMenuPanel.cpp
     Source/UI/LinkSendCreateDialog.cpp
-    Source/UI/ModuleBrowser.cpp
     Source/UI/NodeCanvas.cpp
     Source/UI/NodeComponent.cpp
     Source/UI/OscSettingsComponent.cpp
@@ -361,7 +360,6 @@ target_sources(Conduit PRIVATE
     Source/UI/LinkSendCreateDialog.h
     Source/UI/NodeCanvas.h
     Source/UI/NodeComponent.h
-    Source/UI/ModuleBrowser.h
     Source/UI/OscSettingsComponent.h
     Source/UI/PageHost.h
     Source/UI/ParameterPanel.h
@@ -630,7 +628,6 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/LinkSendCreateDialog.cpp
         Source/UI/NodeCanvas.cpp
         Source/UI/NodeComponent.cpp
-        Source/UI/ModuleBrowser.cpp
         Source/UI/OscSettingsComponent.cpp
         Source/UI/LooperPage.cpp
         Source/UI/LooperWaveformStrip.cpp
