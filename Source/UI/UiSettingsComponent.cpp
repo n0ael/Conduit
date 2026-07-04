@@ -40,6 +40,11 @@ UiSettingsComponent::UiSettingsComponent (UiSettings& settingsToUse)
     devModeToggle.onClick = [this] { settings.setDevModeEnabled (devModeToggle.getToggleState()); };
     addAndMakeVisible (devModeToggle);
 
+    dspMeterToggle.setButtonText (juce::String::fromUTF8 (
+        "DSP-Meter im Transport (Load ⌀/Peak + XRuns)"));
+    dspMeterToggle.onClick = [this] { settings.setDspMeterEnabled (dspMeterToggle.getToggleState()); };
+    addAndMakeVisible (dspMeterToggle);
+
     settings.addChangeListener (this);
     syncControls();
 }
@@ -72,6 +77,7 @@ void UiSettingsComponent::syncControls()
     fontScaleSlider.setValue (static_cast<double> (settings.getFontScale()) * 100.0,
                               juce::dontSendNotification);
     devModeToggle.setToggleState (settings.isDevModeEnabled(), juce::dontSendNotification);
+    dspMeterToggle.setToggleState (settings.isDspMeterEnabled(), juce::dontSendNotification);
 }
 
 //==============================================================================
@@ -95,6 +101,8 @@ void UiSettingsComponent::resized()
     layoutRow (area, fontScaleLabel, fontScaleSlider);
 
     devModeToggle.setBounds (area.removeFromTop (30));
+    area.removeFromTop (6);
+    dspMeterToggle.setBounds (area.removeFromTop (30));
 }
 
 } // namespace conduit

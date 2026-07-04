@@ -680,13 +680,17 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
     snapCount als Diagnose in der Looper-Statuszeile („N Re-Syncs" —
     häuft er sich, wackelt Link-Achse oder Audio-Callback; Anzeige nur
     im Dev-Modus, UiSettings::devMode).
-  - **Callback-Timing-Diagnose** (`Source/Core/CallbackTimingMonitor`,
-    Dev-Modus): XRun-Zähler (Callback-Start-Gap > 2× Blockdauer =
-    Deadline-Riss) + Peak-Load in ‰ des Block-Budgets, gemessen um den
+  - **Callback-Timing-Diagnose** (`Source/Core/CallbackTimingMonitor`):
+    XRun-Zähler (Callback-Start-Gap > 2× Blockdauer = Deadline-Riss) +
+    Load in ‰ des Block-Budgets als Durchschnitt UND Peak, gemessen um den
     GESAMTEN processBlock (QPC-Wall-Clock als dokumentierte 3.1-Ausnahme,
-    NUR Diagnose, nie Zeitbasis). TransportBar zeigt „DSP x % · N XRuns"
-    rechts neben der Setup-Warnung — trennt „PC überlastet" von
-    „Code-Problem", bevor der Looper re-syncen muss.
+    NUR Diagnose, nie Zeitbasis). TransportBar zeigt „DSP x % ⌀ / y % pk ·
+    N XRuns" rechts neben der Setup-Warnung — Durchschnitt = Ableton-CPU-
+    Meter-Semantik, Peak = XRun-Frühwarner. EIGENER Settings-Schalter
+    `UiSettings::dspMeter` (Default an), bewusst UNABHÄNGIG vom Dev-Modus
+    (User-Entscheidung 04.07.2026). Peak-vs-Durchschnitt-Lektion: der
+    Peak fängt den einen Block mit der Spektrum-FFT ein und liegt im
+    Debug-Build ~10× über Release — CPU-Vergleiche NUR im Release-Build.
   - **Spektrum-View:** der Strip schaltet per Spectrum-Kachel (persistiert
     als looperSpectrum, TransportSettings) auf ein Spektrogramm um —
     zweiter always-on Tap-Pfad (FFT 2048/Hann, 64 Log-Bänder via

@@ -600,8 +600,8 @@ void EngineEditor::timerCallback()
     if (capturePanel.isVisible())
         capturePanel.refresh();
 
-    // Diagnose-Anzeigen (Re-Syncs, XRuns/Load) nur im Dev-Modus —
-    // User-Entscheidung 04.07.2026
+    // Looper-Re-Syncs nur im Dev-Modus; das DSP-Meter hat einen EIGENEN
+    // Settings-Schalter (User-Entscheidung 04.07.2026)
     const auto devMode = engine.getUiSettings().isDevModeEnabled();
 
     // Looper-Status (B5): Tape-LED (Page offen ODER Loop spielt), Stop-
@@ -635,22 +635,26 @@ void EngineEditor::timerCallback()
         }
     }
 
-    // Callback-Timing (Dev-Modus): Peak-Load des letzten UI-Intervalls +
-    // XRuns seit Geräte-Start — trennt "PC überlastet" von "Code-Problem"
-    if (devMode)
+    // Callback-Timing (Settings-Schalter „DSP-Meter"): Durchschnitt wie
+    // Abletons CPU-Meter, Peak als XRun-Frühwarner (schlimmster Block des
+    // UI-Intervalls), XRuns seit Geräte-Start
+    if (engine.getUiSettings().isDspMeterEnabled())
     {
         auto& timing = engine.getTimingMonitor();
-        const auto loadPercent = (timing.consumePeakLoadPermille() + 5u) / 10u;
+        const auto avgPercent  = (timing.consumeAverageLoadPermille() + 5u) / 10u;
+        const auto peakPercent = (timing.consumePeakLoadPermille() + 5u) / 10u;
         const auto xruns = timing.getXrunCount();
 
-        transportBar.setDevStatusText ("DSP " + juce::String (loadPercent)
-                                       + juce::String::fromUTF8 (" % · ")
+        transportBar.setDspMeterText ("DSP " + juce::String (avgPercent)
+                                       + juce::String::fromUTF8 (" % ⌀ / ")
+                                       + juce::String (peakPercent)
+                                       + juce::String::fromUTF8 (" % pk · ")
                                        + juce::String (xruns)
                                        + (xruns == 1 ? " XRun" : " XRuns"));
     }
     else
     {
-        transportBar.setDevStatusText ({});
+        transportBar.setDspMeterText ({});
     }
 
     // audioSetupWarning folgt dem Controller (setzt/löscht bei Gerätewechsel)

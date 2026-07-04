@@ -21,8 +21,10 @@ namespace conduit
         ganzen Block zu spät — der Treiber musste überbrücken (Deadline-Riss).
         Lange Stalls (Debugger, Device-Suspend) zählen bewusst als EIN XRun.
       - Load: Rechenzeit des Blocks relativ zum Budget (numSamples/sampleRate)
-        in Promille; die UI konsumiert den Peak seit dem letzten Abruf
-        (peak-hold, consumePeakLoadPermille).
+        in Promille; die UI konsumiert Peak UND Durchschnitt seit dem letzten
+        Abruf (consumePeakLoadPermille / consumeAverageLoadPermille — Peak
+        zeigt den schlimmsten Block wie ein XRun-Frühwarner, der Durchschnitt
+        entspricht Abletons CPU-Meter-Semantik).
 
     Wall-Clock im Audio-Thread: bewusste, dokumentierte Ausnahme zu CLAUDE.md
     3.1 — getHighResolutionTicks (QueryPerformanceCounter) ist lock- und
@@ -49,6 +51,8 @@ public:
         startTicks     = 0;
         xruns.store (0, std::memory_order_relaxed);
         peakLoadPermille.store (0, std::memory_order_relaxed);
+        loadSumPermille.store (0, std::memory_order_relaxed);
+        loadBlockCount.store (0, std::memory_order_relaxed);
     }
 
     /** [Audio] Erste Zeile des Callbacks. */
@@ -95,6 +99,12 @@ public:
         while (previous < permille
                && ! peakLoadPermille.compare_exchange_weak (previous, permille,
                                                             std::memory_order_relaxed)) {}
+
+        // Durchschnitts-Basis: Summe + Blockzahl seit dem letzten UI-Konsum
+        // (getrennte Exchanges beim Konsum — ein dazwischenrutschender Block
+        // verfälscht den Diagnose-Durchschnitt maximal um einen Tick)
+        loadSumPermille.fetch_add (permille, std::memory_order_relaxed);
+        loadBlockCount.fetch_add (1, std::memory_order_relaxed);
     }
 
     /** [MT] Deadline-Risse seit prepare. */
@@ -110,6 +120,15 @@ public:
         return peakLoadPermille.exchange (0, std::memory_order_relaxed);
     }
 
+    /** [MT] Durchschnitts-Load (Promille) über alle Blöcke seit dem letzten
+        Abruf — liest UND nullt; 0 wenn kein Block lief. */
+    [[nodiscard]] std::uint32_t consumeAverageLoadPermille() noexcept
+    {
+        const auto count = loadBlockCount.exchange (0, std::memory_order_relaxed);
+        const auto sum   = loadSumPermille.exchange (0, std::memory_order_relaxed);
+        return count > 0 ? static_cast<std::uint32_t> (sum / count) : 0;
+    }
+
 private:
     // [MT, Audio steht] geschrieben, [Audio] gelesen — Kontrakt wie die
     // übrigen prepare-Member des EngineProcessor
@@ -122,6 +141,8 @@ private:
     // Audio → UI
     std::atomic<std::uint32_t> xruns            { 0 };
     std::atomic<std::uint32_t> peakLoadPermille { 0 };
+    std::atomic<std::uint64_t> loadSumPermille  { 0 };
+    std::atomic<std::uint32_t> loadBlockCount   { 0 };
 };
 
 } // namespace conduit

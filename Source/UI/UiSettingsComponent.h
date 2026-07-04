@@ -18,6 +18,8 @@ namespace conduit
                       kontinuierliches Anwenden wäre eine Feedback-Schleife.
       - Schriftgröße: 80–140 % in 5er-Rastern, gleiches Commit-Muster.
       - Dev-Modus:    Toggle — zeigt die DEV-Buttons in den Modul-Köpfen.
+      - DSP-Meter:    Toggle — „DSP x % ⌀ / y % pk · N XRuns" im Transport,
+                      unabhängig vom Dev-Modus (Default an).
 
     Schreibt ausschließlich in UiSettings [Message Thread]; die ANWENDUNG
     (setGlobalScaleFactor, push::setFontScale + LnF-Kaskade) übernimmt der
@@ -34,7 +36,7 @@ public:
 
     void resized() override;
 
-    [[nodiscard]] static int preferredHeight() noexcept { return 170; }
+    [[nodiscard]] static int preferredHeight() noexcept { return 206; }
 
     //==========================================================================
     // Controls public für headless Tests
@@ -42,6 +44,7 @@ public:
     juce::Slider fontScaleSlider { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     // Text im ctor via String::fromUTF8 (MSVC-CP1252-Falle bei Umlaut-Literalen)
     juce::ToggleButton devModeToggle;
+    juce::ToggleButton dspMeterToggle;
 
     /** Slider-Werte (Prozent) in die Settings committen — Tests rufen direkt. */
     void applyUiScale();

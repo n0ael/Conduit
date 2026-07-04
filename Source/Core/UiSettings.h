@@ -13,6 +13,9 @@ namespace conduit
       - uiScale:   globale UI-Skalierung wie Ableton (0.5–2.0, Default 1.0)
       - fontScale: separater Schriftgrößen-Faktor (0.8–1.4, Default 1.0)
       - devMode:   erst wenn aktiv, zeigen Modul-Header ihren DEV-Toggle
+      - dspMeter:  DSP-/XRun-Anzeige in der TransportBar (Default an, wie
+                   Abletons CPU-Meter) — bewusst UNABHÄNGIG vom Dev-Modus
+                   (User-Entscheidung 04.07.2026)
 
     WICHTIG: diese Klasse SPEICHERT nur und broadcastet Änderungen — sie ruft
     nie juce::Desktop::setGlobalScaleFactor und fasst keine Fonts an. Die
@@ -49,13 +52,17 @@ public:
     [[nodiscard]] bool isDevModeEnabled() const noexcept { return devModeEnabled; }
     void setDevModeEnabled (bool enabled);
 
+    [[nodiscard]] bool isDspMeterEnabled() const noexcept { return dspMeterEnabled; }
+    void setDspMeterEnabled (bool enabled);
+
 private:
     void loadFromFile();
 
     juce::ApplicationProperties applicationProperties;
-    float uiScale        = defaultUiScale;
-    float fontScale      = defaultFontScale;
-    bool  devModeEnabled = false;
+    float uiScale         = defaultUiScale;
+    float fontScale       = defaultFontScale;
+    bool  devModeEnabled  = false;
+    bool  dspMeterEnabled = true;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UiSettings)
 };

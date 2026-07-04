@@ -63,6 +63,15 @@
   **Beide Diagnose-Anzeigen (XRuns/Load + Looper-Re-Syncs) sind an den
   Dev-Modus gekoppelt** (UiSettings::devMode, Settings-Tab „Oberfläche") —
   Dev-Modus aus = cleane Oberfläche, Zähler laufen intern weiter.
+- **Nachschärfung (04.07.2026, User-Feedback nach Smoke):** (1) Das
+  DSP-Meter hat jetzt einen **eigenen Settings-Schalter** (UiSettings::
+  dspMeter, Default an — wie Abletons CPU-Meter), entkoppelt vom Dev-Modus;
+  nur die Looper-Re-Syncs bleiben devMode-gegated. (2) Anzeige-Format
+  **„DSP x % ⌀ / y % pk · N XRuns"** — consumeAverageLoadPermille (Summe/
+  Blockzahl pro UI-Tick) neben dem Peak. (3) 18-%-Mysterium aufgeklärt:
+  Debug-Build (unoptimiert) + Peak-Semantik + Spektrum-FFT-Block; der
+  **Release-Build zeigt 2 % / 0 XRuns** — auf Ableton-Niveau, kein
+  Code-Übeltäter. CPU-Vergleiche künftig nur im Release-Build.
 
 **Looper Spektrum-View — FERTIG (04.07.2026, Bausteine S1–S2):**
 

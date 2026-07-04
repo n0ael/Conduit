@@ -47,6 +47,7 @@ TEST_CASE ("UiSettings: Defaults — Scale 1.0, FontScale 1.0, Dev Mode aus", "[
     REQUIRE (settings.getUiScale() == Approx (1.0f));
     REQUIRE (settings.getFontScale() == Approx (1.0f));
     REQUIRE_FALSE (settings.isDevModeEnabled());
+    REQUIRE (settings.isDspMeterEnabled());   // Default an (wie Abletons CPU-Meter)
 }
 
 TEST_CASE ("UiSettings: Setter clampen auf die erlaubten Bereiche", "[uisettings][io]")
@@ -76,12 +77,14 @@ TEST_CASE ("UiSettings: Werte überstehen den Roundtrip", "[uisettings][io]")
         settings.setUiScale (1.5f);
         settings.setFontScale (1.2f);
         settings.setDevModeEnabled (true);
+        settings.setDspMeterEnabled (false);   // gegen den Default
     }
 
     UiSettings reloaded (temp.options());
     REQUIRE (reloaded.getUiScale() == Approx (1.5f));
     REQUIRE (reloaded.getFontScale() == Approx (1.2f));
     REQUIRE (reloaded.isDevModeEnabled());
+    REQUIRE_FALSE (reloaded.isDspMeterEnabled());
 }
 
 TEST_CASE ("UiSettings: defekte Datei wird beim Laden geclamped", "[uisettings][io]")

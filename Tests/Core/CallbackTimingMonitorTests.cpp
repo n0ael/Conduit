@@ -97,6 +97,29 @@ TEST_CASE ("CallbackTimingMonitor: consumePeakLoadPermille ist peak-hold und nul
     CHECK (monitor.consumePeakLoadPermille() > 0);
 }
 
+TEST_CASE ("CallbackTimingMonitor: Durchschnitt mittelt alle Blöcke seit dem Abruf",
+           "[timing]")
+{
+    CallbackTimingMonitor monitor;
+    monitor.prepare (48000.0);
+
+    // Loads ~187 ‰, ~750 ‰, ~375 ‰ → Durchschnitt ~437 ‰ (Peak wäre ~750)
+    std::int64_t start = 1000;
+    monitor.noteBlock (start, start + 500,  blockSamples, ticksPerSecond); start += blockMicros;
+    monitor.noteBlock (start, start + 2000, blockSamples, ticksPerSecond); start += blockMicros;
+    monitor.noteBlock (start, start + 1000, blockSamples, ticksPerSecond); start += blockMicros;
+
+    const auto average = monitor.consumeAverageLoadPermille();
+    CHECK (average >= 425);
+    CHECK (average <= 450);
+
+    // konsumiert → 0 (kein Block gelaufen = kein Durchschnitt)
+    CHECK (monitor.consumeAverageLoadPermille() == 0);
+
+    // Peak-Pfad bleibt unabhängig konsumierbar
+    CHECK (monitor.consumePeakLoadPermille() >= 740);
+}
+
 TEST_CASE ("CallbackTimingMonitor: Überlast wird geclampt statt überzulaufen",
            "[timing]")
 {
@@ -125,6 +148,7 @@ TEST_CASE ("CallbackTimingMonitor: prepare setzt Zähler und Gap-Basis zurück",
     monitor.prepare (48000.0);
     CHECK (monitor.getXrunCount() == 0);
     CHECK (monitor.consumePeakLoadPermille() == 0);
+    CHECK (monitor.consumeAverageLoadPermille() == 0);
 
     monitor.noteBlock (start + 1'000'000'000LL, start + 1'000'000'500LL,
                        blockSamples, ticksPerSecond);
@@ -140,4 +164,5 @@ TEST_CASE ("CallbackTimingMonitor: ungültige Eingaben sind No-ops", "[timing]")
     monitor.noteBlock (1000, 2000, blockSamples, 0);     // ticksPerSecond 0
     CHECK (monitor.getXrunCount() == 0);
     CHECK (monitor.consumePeakLoadPermille() == 0);
+    CHECK (monitor.consumeAverageLoadPermille() == 0);
 }

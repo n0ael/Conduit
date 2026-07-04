@@ -8,6 +8,7 @@ namespace
     constexpr const char* uiScaleKey   = "uiScale";
     constexpr const char* fontScaleKey = "fontScale";
     constexpr const char* devModeKey   = "devModeEnabled";
+    constexpr const char* dspMeterKey  = "dspMeterEnabled";
 }
 
 //==============================================================================
@@ -45,7 +46,8 @@ void UiSettings::loadFromFile()
             static_cast<float> (file->getDoubleValue (uiScaleKey, defaultUiScale)));
         fontScale = juce::jlimit (minFontScale, maxFontScale,
             static_cast<float> (file->getDoubleValue (fontScaleKey, defaultFontScale)));
-        devModeEnabled = file->getBoolValue (devModeKey, false);
+        devModeEnabled  = file->getBoolValue (devModeKey, false);
+        dspMeterEnabled = file->getBoolValue (dspMeterKey, true);
     }
 }
 
@@ -95,6 +97,22 @@ void UiSettings::setDevModeEnabled (bool enabled)
     if (auto* file = applicationProperties.getUserSettings())
     {
         file->setValue (devModeKey, enabled);
+        file->saveIfNeeded();
+    }
+
+    sendChangeMessage();
+}
+
+void UiSettings::setDspMeterEnabled (bool enabled)
+{
+    if (enabled == dspMeterEnabled)
+        return;
+
+    dspMeterEnabled = enabled;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (dspMeterKey, enabled);
         file->saveIfNeeded();
     }
 
