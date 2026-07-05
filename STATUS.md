@@ -127,6 +127,35 @@ modul-ready).
   - Tests: LooperSettingsTests (Defaults, Roundtrip über Neuinstanz,
     Clamps/Out-of-range, Einmal-Migration), LooperSourceTests angepasst.
     426 Fälle grün.
+- **M6 (fertig, 05.07.2026):** UI-Rebuild der Looper-Page (Design-Mock,
+  Layout-Entscheidung: Looper NEBENEINANDER wie im Mock).
+  - **Neue Komponenten (Source/UI/):** `LooperTrackStrip` (+`LooperSlotCell`):
+    Header/LED, Volume-Fader OBEN mit VERTIKALEM Wischen (Anzeige
+    horizontal über Post-Fader-Meter), Pan-Zeile (Balance, DK = Mitte),
+    M/S (Umbruch bei Schmal-Spalten), Slot-Zellen (leer/Target-pulsierend/
+    Clip mit Progress-Sweep + Play-Dreieck + Rate-/◁-Badges + Aktiv-
+    Kontur), Stop + Takt-Pie. `LooperClipControlsRow`: ×2 ÷2 ◁, VARI-
+    Rotary in Oktaven (pure Helfer conduit::looperui: rateFromOctaves/
+    Detent/snapToSemitones — getestet), Rate-Anzeige, Frei/Gerastert-
+    Button, Sync-Reset, TARGET (HoldTile: Kurzklick = Track-Zyklus,
+    Halten = Aktiv-Auswahl). `LooperPanel`: Quellen-Combo + Strip +
+    Controls + Track-Spalten + „+"-Track. `LooperSettingsMenu`
+    (CallOutBox): alle 10 Menü-Optionen, bindet direkt an LooperSettings.
+    `LooperPage` = Container (Kopfzeile: − / + Looper, Output global,
+    Spectrum [schaltet ALLE Strips], ⚙, Stop; Panels nebeneinander).
+  - **EngineEditor:** refreshLooperStructure (Settings → Page, auch per
+    ChangeListener), wireLooperPanels (Strip-Tap pro Looper,
+    commitToTarget, Mixer → LooperSettings [ein Pfad], Clip-Controls →
+    Bank-Edits am Aktiv-Clip, VARI-Snap Halbtöne/Session-Skala via
+    scale::isInScale, TARGET-Hold-Zustand), handleLooperSlotTap
+    (leer = Target armen; spielend = Retrigger/Stop nach Menü; sonst
+    Start — Launch-Quant aus den Settings), refreshLooperStatus
+    (Meter/LEDs/Slots/Progress [clip->displayPhase01, vom Audio-Thread
+    publiziert]/Takt-Pie/Aktiv-Label/Puls-Phase). Looper-Schließen mit
+    Clips: Doppel-Klick-Bestätigung (Overlay kommt M7).
+  - Tests/UI/LooperPageTests komplett neu (Panel-Struktur, Track-Strip-
+    Hooks, Slot-Zustände, Controls-Dispatch + VARI-Mapping, Menü →
+    Settings, Kopfzeilen-Hooks). 431 Fälle grün.
 
 ---
 

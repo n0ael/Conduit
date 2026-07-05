@@ -961,6 +961,16 @@ void LooperBank::applyClipParams (LooperClip& clip, double blockStartBeat,
         }
     }
 
+    // Anzeige-Phase fürs UI (Progress-Sweep) — einmal pro Block
+    if (clip.activeLengthBeats > 0.0)
+        clip.displayPhase01.store (
+            static_cast<float> (looper::clipPhaseBeats (blockStartBeat,
+                                                        clip.activeAnchorBeat,
+                                                        clip.activeRate,
+                                                        clip.activeLengthBeats)
+                                / clip.activeLengthBeats),
+            std::memory_order_relaxed);
+
     // Block-Snapshot der Splice-Rampe fürs Rendering
     clip.spliceStartGain = clip.spliceGain;
     clip.spliceStep = (clip.splicePending ? -1.0f : 1.0f) * gainStep;

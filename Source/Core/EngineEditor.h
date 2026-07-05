@@ -11,6 +11,8 @@
 #include "UI/CapturePanel.h"
 #include "UI/CaptureToast.h"
 #include "UI/DevPanel.h"
+#include <array>
+
 #include "UI/LooperPage.h"
 #include "UI/NodeCanvas.h"
 #include "UI/PageHost.h"
@@ -78,10 +80,27 @@ private:
 
     void toggleBrowserPanel();
 
-    // Looper-Page (B3): Quellen-Liste (Master + Hardware-Paare + Taps)
+    // Looper-Page (B3/M6): Quellen-Liste (Master + Hardware-Paare + Taps)
     // neu aufbauen — bei Start, Tap-Änderungen und ChannelNames-Broadcasts
-    [[nodiscard]] std::vector<LooperPage::Source> buildLooperSources();
+    [[nodiscard]] std::vector<LooperPanel::Source> buildLooperSources();
     void rebuildLooperSources();
+
+    /** M6: Struktur der Page aus den LooperSettings ziehen (Looper-Zahl,
+        Tracks, sichtbare Slots, Quellen, Mix-Werte) — bei Start und jedem
+        LooperSettings-Broadcast. */
+    void refreshLooperStructure();
+
+    /** Panel-Hooks (Quelle/Commit/Slots/Mix/Clip-Controls) verdrahten —
+        nach jedem Panel-Neuaufbau (LooperPage::onPanelsChanged). */
+    void wireLooperPanels();
+
+    /** Slot-Tap-Semantik (Übergabe §2/§3): leer = Target armen, belegt =
+        Launch/Retrigger/Stop nach Settings; TARGET-Halten = nur Aktiv-
+        Auswahl. */
+    void handleLooperSlotTap (int looperIndex, int trackIndex, int slotIndex);
+
+    /** Looper-Status in die Page spiegeln (Editor-Timer, 30 Hz). */
+    void refreshLooperStatus (bool devMode);
 
     /** Labels der Hardware-Ausgangs-Paare (Kanäle 2n/2n+1) aus dem
         audio_out-Tree-Node + ChannelNames — Metronom-Ausgang (Link-Menü)
@@ -110,9 +129,16 @@ private:
 
     NodeCanvas canvas;
 
-    // Retro-Looper-Page (B3) — hinter der Tape-Kachel, VOR dem PageHost
+    // Retro-Looper-Page (B3/M6) — hinter der Tape-Kachel, VOR dem PageHost
     // deklariert (der hält eine Referenz darauf)
     LooperPage looperPage;
+
+    // TARGET-Halten pro Looper (Aktiv-Auswahl statt Launch, Übergabe §2)
+    std::array<bool, 4> looperTargetHold {};
+
+    // Doppel-Klick-Bestätigung fürs Looper-Schließen mit Clips (M6-
+    // Zwischenlösung; das Bestätigungs-Overlay kommt in M7)
+    juce::uint32 removeLooperConfirmTime = 0;
 
     // Nach Canvas + LooperPage deklariert (hält Referenzen darauf): die
     // Pages hinter den Push-Icons — Device = Canvas, Rest Platzhalter

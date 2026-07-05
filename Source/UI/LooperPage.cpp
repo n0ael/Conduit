@@ -1,160 +1,157 @@
 #include "LooperPage.h"
 
-#include "PushLookAndFeel.h"
-
 namespace conduit
 {
 
-LooperPage::LooperPage()
+namespace
 {
-    sourceCaption.setText ("Source", juce::dontSendNotification);
-    sourceCaption.setColour (juce::Label::textColourId, push::colours::textDim);
-    sourceCaption.setFont (push::scaledFont (13.0f));
-    addAndMakeVisible (sourceCaption);
-
-    sourceCombo.setTextWhenNothingSelected ("Quelle wählen …");
-    sourceCombo.setTooltip (juce::String::fromUTF8 (
-        "Looper-Quelle — der Capture-Kanal bleibt dauerhaft scharf (immer aufnehmend)"));
-    sourceCombo.onChange = [this]
-    {
-        const auto index = sourceCombo.getSelectedItemIndex();
-        if (onSourceSelected != nullptr
-            && juce::isPositiveAndBelow (index, (int) currentSources.size()))
-            onSourceSelected (currentSources[(size_t) index].key);
-    };
-    addAndMakeVisible (sourceCombo);
-
-    // Ausgabe-Paar (B6): Loop-Playback auf Kanäle 2n/2n+1 (Muster
-    // Metronom-Ausgang im Link-Menü), persistiert als looperAnchor
-    outputCaption.setText ("Output", juce::dontSendNotification);
-    outputCaption.setColour (juce::Label::textColourId, push::colours::textDim);
-    outputCaption.setFont (push::scaledFont (13.0f));
-    addAndMakeVisible (outputCaption);
-
-    outputCombo.setTooltip (juce::String::fromUTF8 (
-        "Ausgabe-Paar des Loop-Playbacks (Stereo-Kanäle des Interfaces)"));
-    outputCombo.onChange = [this]
-    {
-        const auto index = outputCombo.getSelectedItemIndex();
-        if (onOutputPairSelected != nullptr && index >= 0)
-            onOutputPairSelected (index);
-    };
-    addAndMakeVisible (outputCombo);
-
-    // Spektrum-View (S2): Toggle Wellenform ↔ Spektrogramm, Zustand
-    // persistiert der Editor (TransportSettings::looperSpectrum)
-    spectrumTile.setTooltip (juce::String::fromUTF8 (
-        "Spektrogramm statt Wellenform (Fire-Palette, gleiche Segment-Klicks)"));
-    spectrumTile.onClick = [this]
-    {
-        const auto spectrum = ! spectrumTile.isActive();
-        setSpectrumView (spectrum);
-        if (onViewToggled != nullptr)
-            onViewToggled (spectrum);
-    };
-    addAndMakeVisible (spectrumTile);
-
-    // Stop (B5): enabled nur bei laufendem Loop (Editor-Timer)
-    stopTile.setEnabled (false);
-    stopTile.setTooltip (juce::String::fromUTF8 ("Loop-Playback beenden (5-ms-Fade)"));
-    stopTile.onClick = [this]
-    {
-        if (onStop != nullptr)
-            onStop();
-    };
-    addAndMakeVisible (stopTile);
-
-    statusLabel.setColour (juce::Label::textColourId, push::colours::textDim);
-    statusLabel.setFont (push::scaledFont (15.0f));
-    statusLabel.setJustificationType (juce::Justification::centredLeft);
-    addAndMakeVisible (statusLabel);
-
-    addAndMakeVisible (strip);
+    constexpr int headerHeight = 44;
+    constexpr int statusHeight = 22;
+    constexpr int panelGap = 6;
 }
 
-//==============================================================================
-void LooperPage::setSources (std::vector<Source> sources, const juce::String& selectedKey)
+LooperPage::LooperPage()
 {
-    currentSources = std::move (sources);
+    setName ("looperPage");
 
-    sourceCombo.clear (juce::dontSendNotification);
+    removeTile.onClick = [this] { if (onRemoveLooper) onRemoveLooper(); };
+    addTile.onClick = [this] { if (onAddLooper) onAddLooper(); };
+    settingsTile.onClick = [this] { if (onOpenSettings) onOpenSettings(); };
+    stopTile.onClick = [this] { if (onStop) onStop(); };
 
-    int selectedItemId = 0;
-    for (size_t i = 0; i < currentSources.size(); ++i)
+    spectrumTile.onClick = [this]
     {
-        const auto itemId = (int) i + 1;  // ComboBox-Ids sind 1-basiert
-        sourceCombo.addItem (currentSources[i].label, itemId);
+        if (onViewToggled != nullptr)
+            onViewToggled (! spectrumTile.isActive());
+    };
 
-        if (currentSources[i].key == selectedKey)
-            selectedItemId = itemId;
+    outputCaption.setText ("Output", juce::dontSendNotification);
+    outputCaption.setColour (juce::Label::textColourId, push::colours::textDim);
+    outputCaption.setJustificationType (juce::Justification::centredRight);
+
+    outputCombo.setName ("looperOutput");
+    outputCombo.onChange = [this]
+    {
+        if (onOutputPairSelected != nullptr && outputCombo.getSelectedId() > 0)
+            onOutputPairSelected (outputCombo.getSelectedId() - 1);
+    };
+
+    statusLabel.setColour (juce::Label::textColourId, push::colours::textDim);
+    statusLabel.setJustificationType (juce::Justification::centredLeft);
+    statusLabel.setInterceptsMouseClicks (false, false);
+
+    addAndMakeVisible (removeTile);
+    addAndMakeVisible (addTile);
+    addAndMakeVisible (outputCaption);
+    addAndMakeVisible (outputCombo);
+    addAndMakeVisible (spectrumTile);
+    addAndMakeVisible (settingsTile);
+    addAndMakeVisible (stopTile);
+    addAndMakeVisible (statusLabel);
+
+    setLooperCount (1);
+}
+
+void LooperPage::setLooperCount (int count)
+{
+    count = juce::jlimit (1, 4, count);
+    if ((int) panels.size() == count)
+        return;
+
+    while ((int) panels.size() > count)
+        panels.pop_back();
+
+    while ((int) panels.size() < count)
+    {
+        auto panel = std::make_unique<LooperPanel> ((int) panels.size() + 1);
+        addAndMakeVisible (*panel);
+        panels.push_back (std::move (panel));
     }
 
-    // Unbekannter/leerer Schlüssel → erste Quelle (Master) als Anzeige,
-    // bewusst OHNE Notification: die Persistenz ändert nur der User-Klick
-    if (selectedItemId == 0 && ! currentSources.empty())
-        selectedItemId = 1;
+    removeTile.setAlpha (count > 1 ? 1.0f : 0.4f);
+    addTile.setAlpha (count < 4 ? 1.0f : 0.4f);
 
-    if (selectedItemId > 0)
-        sourceCombo.setSelectedId (selectedItemId, juce::dontSendNotification);
+    resized();
+
+    if (onPanelsChanged != nullptr)
+        onPanelsChanged();
+}
+
+LooperPanel& LooperPage::getPanel (int looperIndex)
+{
+    jassert (looperIndex >= 0 && looperIndex < (int) panels.size());
+    return *panels[(size_t) juce::jlimit (0, (int) panels.size() - 1, looperIndex)];
 }
 
 void LooperPage::setOutputPairs (const juce::StringArray& pairLabels, int selectedPair)
 {
     outputCombo.clear (juce::dontSendNotification);
+    for (int i = 0; i < pairLabels.size(); ++i)
+        outputCombo.addItem (pairLabels[i], i + 1);
 
-    for (int pair = 0; pair < pairLabels.size(); ++pair)
-        outputCombo.addItem (pairLabels[pair], pair + 1);  // Ids 1-basiert
-
-    // Out-of-range-Anker (Gerätewechsel) → erstes Paar als Anzeige, bewusst
-    // OHNE Notification: die Persistenz ändert nur der User-Klick
-    if (! pairLabels.isEmpty())
-        outputCombo.setSelectedId (
-            juce::jlimit (0, pairLabels.size() - 1, selectedPair) + 1,
-            juce::dontSendNotification);
+    if (pairLabels.size() > 0)
+        outputCombo.setSelectedId (juce::jlimit (0, pairLabels.size() - 1, selectedPair) + 1,
+                                   juce::dontSendNotification);
 }
 
 void LooperPage::setSpectrumView (bool spectrum)
 {
     spectrumTile.setActive (spectrum);
-    strip.setView (spectrum ? LooperWaveformStrip::View::spectrum
-                            : LooperWaveformStrip::View::waveform);
+    for (auto& panel : panels)
+        panel->getStrip().setView (spectrum ? LooperWaveformStrip::View::spectrum
+                                            : LooperWaveformStrip::View::waveform);
 }
 
 void LooperPage::setStatus (const juce::String& statusText)
 {
-    if (statusLabel.getText() != statusText)
-        statusLabel.setText (statusText, juce::dontSendNotification);
+    statusLabel.setText (statusText, juce::dontSendNotification);
 }
 
-//==============================================================================
+void LooperPage::setPulsePhase (float phase01)
+{
+    for (auto& panel : panels)
+        panel->setPulsePhase (phase01);
+}
+
 void LooperPage::paint (juce::Graphics& g)
 {
     g.fillAll (push::colours::background);
+
+    g.setColour (push::colours::text);
+    g.setFont (push::scaledFont (15.0f, true));
+    g.drawText ("FFT LOOPER",
+                getLocalBounds().removeFromTop (headerHeight).reduced (10, 0),
+                juce::Justification::centredLeft, false);
 }
 
 void LooperPage::resized()
 {
-    auto bounds = getLocalBounds().reduced (16);
+    auto bounds = getLocalBounds();
 
-    // Kopfzeile: Source + Output-Paar + Stop (Touch-Ziele ≥ 44 px)
-    auto header = bounds.removeFromTop (44);
-    sourceCaption.setBounds (header.removeFromLeft (64));
-    sourceCombo.setBounds (header.removeFromLeft (280).reduced (0, 4));
-    header.removeFromLeft (12);
-    outputCaption.setBounds (header.removeFromLeft (64));
-    outputCombo.setBounds (header.removeFromLeft (220).reduced (0, 4));
-    header.removeFromLeft (12);
-    spectrumTile.setBounds (header.removeFromLeft (100));
-    header.removeFromLeft (12);
-    stopTile.setBounds (header.removeFromLeft (88));
+    auto header = bounds.removeFromTop (headerHeight).reduced (4);
+    header.removeFromLeft (110);   // Titel (paint)
+    removeTile.setBounds (header.removeFromLeft (36).reduced (2));
+    addTile.setBounds (header.removeFromLeft (36).reduced (2));
 
-    bounds.removeFromTop (12);
+    stopTile.setBounds (header.removeFromRight (72).reduced (2));
+    spectrumTile.setBounds (header.removeFromRight (92).reduced (2));
+    settingsTile.setBounds (header.removeFromRight (44).reduced (2));
+    outputCombo.setBounds (header.removeFromRight (190).reduced (2, 6));
+    outputCaption.setBounds (header.removeFromRight (60));
 
-    // Waveform-Strip: volle Breite, großzügige Höhe (Segment-Klick = Commit)
-    strip.setBounds (bounds.removeFromTop (juce::jmax (120, bounds.getHeight() / 2)));
+    statusLabel.setBounds (bounds.removeFromBottom (statusHeight).reduced (10, 0));
 
-    bounds.removeFromTop (8);
-    statusLabel.setBounds (bounds.removeFromTop (24));
+    auto panelArea = bounds.reduced (4);
+    const auto count = (int) panels.size();
+    if (count > 0)
+    {
+        const auto panelWidth = (panelArea.getWidth() - panelGap * (count - 1)) / count;
+        for (int i = 0; i < count; ++i)
+        {
+            panels[(size_t) i]->setBounds (panelArea.removeFromLeft (panelWidth));
+            panelArea.removeFromLeft (panelGap);
+        }
+    }
 }
 
 } // namespace conduit

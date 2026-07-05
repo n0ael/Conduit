@@ -1,11 +1,12 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-#include "LooperWaveformStrip.h"
+#include "LooperPanel.h"
 #include "PushTiles.h"
 
 namespace conduit
@@ -13,22 +14,17 @@ namespace conduit
 
 //==============================================================================
 /**
-    Retro-Looper-Page (Looper-Baustein B3) — erreichbar über die Tape-Kachel
-    (oo) der TransportBar, Page-Index TransportBar::pageLooper.
-
-    Endlesss-Muster: der Looper nimmt immer auf (Capture-Ring), die Page
-    zeigt die letzten 8 Takte der gewählten Quelle als gestauchte Wellenform
-    (LooperWaveformStrip, B4) — ein Klick auf ein Segment committet
-    rückwirkend die letzten 8/4/2/1 Takte (Baustein B5).
+    Looper-Page — Vollausbau M6 (Design-Mock + Übergabe-Dokument
+    05.07.2026): bis zu 4 Looper-Fenster NEBENEINANDER (User-Entscheidung
+    „wie im Mock"), Kopfzeile mit − / + (Looper öffnen/schließen),
+    globalem Output-Paar, Spectrum-Umschalter (alle Strips), ⚙
+    (Einstellungs-Menü) und Stop (alle Tracks); Statuszeile unten.
 
     Wie die TransportBar besitzt die Page NUR UI-Zustand: Aktionen laufen
-    über std::function-Hooks (der EngineEditor verdrahtet Engine +
-    Persistenz), Status kommt über Setter vom Editor-Timer.
-
-    Quell-Schlüssel (persistiert in TransportSettings::looperSource):
-      "master"      — Session-Summe (Master-Output-Tap, B2)
-      "hw:{paar}"   — Hardware-Eingangs-Paar 2n/2n+1 (ChannelNames-Labels)
-      "tap:{name}"  — Capture-Tap eines Moduls (Basisname ohne _l/_r)
+    über std::function-Hooks bzw. die Hooks der LooperPanels (der
+    EngineEditor verdrahtet Modell/Bank/Settings/Taps und pollt den
+    Status über seinen Timer — inkl. der gemeinsamen Puls-Phase der
+    Target-Zellen).
 */
 class LooperPage final : public juce::Component
 {
@@ -36,70 +32,56 @@ public:
     LooperPage();
 
     //==========================================================================
-    struct Source
-    {
-        juce::String key;    // Schlüssel (siehe Klassendoku)
-        juce::String label;  // Anzeige, z. B. "Master", "In 1/2", "Tap: delay_1"
-    };
+    // Struktur [Editor]
 
-    /** [Editor] Quellen-Liste neu aufbauen; selectedKey = persistierte
-        Auswahl (unbekannter Schlüssel → erste Quelle, ohne Notification). */
-    void setSources (std::vector<Source> sources, const juce::String& selectedKey);
+    /** Panels neu aufbauen (1–4). Nach dem Aufbau verdrahtet der Editor
+        die Panel-Hooks neu (onPanelsChanged feuert am Ende). */
+    void setLooperCount (int count);
+    [[nodiscard]] int getLooperCount() const noexcept { return (int) panels.size(); }
+    [[nodiscard]] LooperPanel& getPanel (int looperIndex);
 
-    /** Klick-Auswahl einer Quelle — der Editor armt den Capture-Kanal und
-        persistiert den Schlüssel. */
-    std::function<void (const juce::String& sourceKey)> onSourceSelected;
-
-    /** [Editor] Ausgabe-Paar-Liste neu aufbauen (B6): Labels der Stereo-
-        Paare (Kanäle 2n/2n+1, ChannelNames — Muster Metronom-Ausgang im
-        Link-Menü); selectedPair = persistierter looperAnchor (out of
-        range → auf die Liste geclampt, ohne Notification). */
-    void setOutputPairs (const juce::StringArray& pairLabels, int selectedPair);
-
-    /** Klick-Auswahl des Ausgabe-Paars — der Editor routet die Engine um
-        und persistiert den Anker. */
-    std::function<void (int pairIndex)> onOutputPairSelected;
-
-    /** Stop-Kachel (B5) — der Editor beendet das Loop-Playback; die Kachel
-        ist nur bei laufendem Loop enabled (Editor-Timer). */
-    std::function<void()> onStop;
-
-    /** [Editor] Spektrum-View setzen (S2, persistierter looperSpectrum-
-        Zustand) — schaltet Strip-Ansicht und Kachel-LED, ohne Callback. */
-    void setSpectrumView (bool spectrum);
-
-    /** Klick auf die Spectrum-Kachel — der Editor persistiert den Zustand
-        (TransportSettings::setLooperSpectrumEnabled). */
-    std::function<void (bool spectrum)> onViewToggled;
-
-    /** [Editor-Timer] Statuszeile (B5: „spielt: 4 Bars" etc.). */
-    void setStatus (const juce::String& statusText);
+    /** Nach jedem Panel-Neuaufbau (Editor verdrahtet die Hooks). */
+    std::function<void()> onPanelsChanged;
 
     //==========================================================================
+    // Kopfzeile
+
+    std::function<void()> onAddLooper;
+    std::function<void()> onRemoveLooper;
+    std::function<void()> onOpenSettings;      // ⚙ → LooperSettingsMenu (Editor)
+    std::function<void()> onStop;              // Stop = alle Tracks
+    std::function<void (bool spectrum)> onViewToggled;
+    std::function<void (int pairIndex)> onOutputPairSelected;
+
+    void setOutputPairs (const juce::StringArray& pairLabels, int selectedPair);
+    void setSpectrumView (bool spectrum);
+    void setStatus (const juce::String& statusText);
+
+    /** [Editor-Timer] Gemeinsame Puls-Phase (Target-Zellen). */
+    void setPulsePhase (float phase01);
+
+    //==========================================================================
+    [[nodiscard]] juce::ComboBox& getOutputCombo() noexcept { return outputCombo; }
+    [[nodiscard]] push::TextTile& getSpectrumTile() noexcept { return spectrumTile; }
+    [[nodiscard]] push::TextTile& getStopTile() noexcept { return stopTile; }
+    [[nodiscard]] push::TextTile& getSettingsTile() noexcept { return settingsTile; }
+    [[nodiscard]] push::TextTile& getAddLooperTile() noexcept { return addTile; }
+    [[nodiscard]] push::TextTile& getRemoveLooperTile() noexcept { return removeTile; }
+
     void paint (juce::Graphics& g) override;
     void resized() override;
 
-    // Test-/Editor-Zugriff
-    [[nodiscard]] juce::ComboBox& getSourceCombo() noexcept { return sourceCombo; }
-    [[nodiscard]] juce::ComboBox& getOutputCombo() noexcept { return outputCombo; }
-    [[nodiscard]] push::TextTile& getStopTile() noexcept { return stopTile; }
-    [[nodiscard]] push::TextTile& getSpectrumTile() noexcept { return spectrumTile; }
-    [[nodiscard]] LooperWaveformStrip& getStrip() noexcept { return strip; }
-
 private:
-    juce::Label sourceCaption;
-    juce::ComboBox sourceCombo;
+    push::TextTile removeTile { juce::String::fromUTF8 ("−") };
+    push::TextTile addTile { "+" };
     juce::Label outputCaption;
     juce::ComboBox outputCombo;
     push::TextTile spectrumTile { "Spectrum", push::colours::ledOrange };
+    push::TextTile settingsTile { juce::String::fromUTF8 ("⚙") };
     push::TextTile stopTile { "Stop", push::colours::ledRed };
     juce::Label statusLabel;
 
-    std::vector<Source> currentSources;
-
-    // Gestauchte Wellenform der letzten 8 Takte (B4) — Segment-Klicks
-    // verdrahtet der Editor über strip.onSegmentClicked
-    LooperWaveformStrip strip;
+    std::vector<std::unique_ptr<LooperPanel>> panels;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LooperPage)
 };

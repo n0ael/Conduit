@@ -546,6 +546,7 @@ void EngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     for (auto& tap : looperWaveformTaps)
         tap.prepare (sampleRate);
     looperBank.prepare (sampleRate, samplesPerBlock);
+    looperSession.clearAllClips();   // Bank hat die Clips freigegeben (M6-Feld-Fund)
     applyLooperSourceArming();
     inputLevels.prepare  (sampleRate, getTotalNumInputChannels());
     outputLevels.prepare (sampleRate, getTotalNumOutputChannels());

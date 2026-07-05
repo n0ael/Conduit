@@ -336,6 +336,17 @@ juce::Result LooperSessionModel::deleteSlot (int looperIndex, int trackIndex,
     return juce::Result::ok();
 }
 
+void LooperSessionModel::clearAllClips() noexcept
+{
+    for (auto& looper : slots)
+        for (auto& track : looper)
+            track.fill (nullptr);
+    for (auto& looper : playingSlot)
+        looper.fill (-1);
+    target.fill (SlotAddress {});
+    active.fill (SlotAddress {});
+}
+
 int LooperSessionModel::getPlayingSlot (int looperIndex, int trackIndex) const noexcept
 {
     if (! validLooper (looperIndex)

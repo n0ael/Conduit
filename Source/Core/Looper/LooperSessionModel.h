@@ -122,6 +122,12 @@ public:
     /** Spielender Slot des Tracks (−1 = keiner) — Modell-Sicht (Intent). */
     [[nodiscard]] int getPlayingSlot (int looperIndex, int trackIndex) const noexcept;
 
+    /** [Message Thread] Alle Clip-Referenzen verwerfen — PFLICHT nach
+        LooperBank::prepare (SampleRate-Wechsel gibt die Clips frei; die
+        Slot-Pointer wären sonst dangling — Feld-Fund 05.07.2026:
+        Zombie-Zelle „Clip 7209 · 0.00ד nach Device-Restart). */
+    void clearAllClips() noexcept;
+
     //==========================================================================
     // Aktiv-Clip (Ziel der Clip-Controls-Leiste) [Message Thread]
 

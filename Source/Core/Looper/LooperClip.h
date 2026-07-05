@@ -88,6 +88,10 @@ struct LooperClip
     std::uint64_t lastSeenBlock = 0;  // Param-Apply genau einmal pro Block
 
     //==========================================================================
+    // Anzeige-Phase 0..1 [Audio schreibt einmal pro Block, UI liest] —
+    // Progress-Sweep/Takt-Anzeige (die Active-Felder sind Audio-only)
+    std::atomic<float> displayPhase01 { 0.0f };
+
     // Save-Geste (M9): > 0 = Export liest gerade aus dem Buffer
     std::atomic<int> exportPins { 0 };
 

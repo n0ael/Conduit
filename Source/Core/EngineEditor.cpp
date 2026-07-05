@@ -4,7 +4,9 @@
 #include "EngineProcessor.h"
 #include "Modules/LinkAudioSendModule.h"
 #include "UI/LinkSendCreateDialog.h"
+#include "UI/LooperSettingsMenu.h"
 #include "UI/SettingsWindow.h"
+#include "Util/ScaleQuantizer.h"
 
 namespace conduit
 {
@@ -158,47 +160,79 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
             }));
     };
 
-    // Looper-Quellen (Master + Hardware-Paare + Taps): Auswahl armt den
-    // Capture-Kanal und persistiert den Schlüssel (setLooperSource);
-    // Tap-/Label-Änderungen bauen die Liste neu (ChangeListener unten)
-    looperPage.onSourceSelected = [this] (const juce::String& sourceKey)
-    { engine.setLooperSource (sourceKey); };
-    rebuildLooperSources();
+    // ── Looper-Page (M6, Design-Mock 05.07.2026) ────────────────────────
+    // Panels folgen der Struktur in den LooperSettings; nach jedem
+    // Neuaufbau verdrahtet wireLooperPanels die Hooks neu
+    looperPage.onPanelsChanged = [this] { wireLooperPanels(); };
 
-    // Waveform-Strip (B4): Bins vom Engine-Tap (Konsumentenrolle exklusiv
-    // beim Strip), Beat-Achse von der LinkClock (inkl. Clock-Offset —
-    // dieselbe Basis wie die Audio-Seite)
-    looperPage.getStrip().setDataSource (&engine.getLooperWaveformTap());
-    looperPage.getStrip().getBeatNow = [this] { return linkClock.getBeatPosition(); };
-
-    // Segment-Klick = Commit der letzten N Takte (B5): spielt sofort
-    // phasenstarr; Fehlerfälle (zu wenig Historie, > 60 s, keine Quelle)
-    // kommen als Toast
-    looperPage.getStrip().onSegmentClicked = [this] (int bars)
+    looperPage.onAddLooper = [this]
     {
-        const auto result = engine.commitLooper (bars);
-        if (result.failed())
+        auto& settings = engine.getLooperSettings();
+        settings.setNumLoopers (settings.getNumLoopers() + 1);
+        refreshLooperStructure();
+    };
+
+    // Looper schließen: enthält er Clips, verlangt ein zweiter Klick
+    // binnen 3 s die Bestätigung (M6-Zwischenlösung — Overlay kommt M7)
+    looperPage.onRemoveLooper = [this]
+    {
+        auto& settings = engine.getLooperSettings();
+        auto& session = engine.getLooperSession();
+        const auto last = session.getNumLoopers() - 1;
+        if (last < 1)
+            return;
+
+        const auto now = juce::Time::getMillisecondCounter();
+        if (session.looperHasClips (last) && now - removeLooperConfirmTime > 3000)
+        {
+            removeLooperConfirmTime = now;
+            captureToast.show (juce::String::fromUTF8 (
+                "Looper enthält Clips — erneut klicken zum Verwerfen"));
+            return;
+        }
+
+        if (const auto result = session.removeLastLooper(); result.failed())
+        {
             captureToast.show (result.getErrorMessage());
+            return;
+        }
+
+        settings.setNumLoopers (settings.getNumLoopers() - 1);
+        refreshLooperStructure();
+    };
+
+    looperPage.onOpenSettings = [this]
+    {
+        auto menu = std::make_unique<LooperSettingsMenu> (engine.getLooperSettings());
+        juce::CallOutBox::launchAsynchronously (
+            std::move (menu),
+            looperPage.getSettingsTile().getScreenBounds(), nullptr);
     };
 
     looperPage.onStop = [this] { engine.stopLooper(); };
 
-    // Spektrum-View (S2): persistierter Zustand steuert Strip + Kachel-LED;
-    // der Klick schaltet die Page selbst um, hier nur Persistenz
-    // (M5: Looper-Zustand lebt in den LooperSettings, Looper 0)
-    looperPage.setSpectrumView (engine.getLooperSettings().isSpectrumView (0));
+    // Spectrum global: schaltet die Strips ALLER Looper (Settings pro
+    // Looper, Kachel wirkt auf alle — Mock-Semantik)
     looperPage.onViewToggled = [this] (bool spectrum)
-    { engine.getLooperSettings().setSpectrumView (0, spectrum); };
+    {
+        auto& settings = engine.getLooperSettings();
+        for (int l = 0; l < LooperSettings::maxLoopers; ++l)
+            settings.setSpectrumView (l, spectrum);
+        looperPage.setSpectrumView (spectrum);
+    };
 
     // Metronom-Ziel-Paare fürs Link-Menü: Labels aus den ChannelNames,
     // Kanalzahl aus dem audio_out-Tree-Node (folgt der Hardware)
     transportBar.metronomeTargetNames = [this] { return buildOutputPairNames(); };
 
-    // Ausgabe-Paar des Loop-Playbacks (B6): dieselbe Paar-Liste (Befüllung
-    // übernimmt rebuildLooperSources oben); Auswahl persistiert looperAnchor
-    // und routet die Engine sofort um
+    // Ausgabe-Paar des Loop-Playbacks (global, B6): Auswahl persistiert
+    // looperAnchor und routet die Bank sofort um
     looperPage.onOutputPairSelected = [this] (int pairIndex)
     { engine.setLooperAnchor (pairIndex); };
+
+    // Startzustand: Struktur + Quellen aus den Settings ziehen
+    refreshLooperStructure();
+    engine.getLooperSettings().addChangeListener (this);
 
     // -- Capture-Panel + Toast ------------------------------------------------
     capturePanel.setVisible (false);
@@ -240,6 +274,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
 
 EngineEditor::~EngineEditor()
 {
+    engine.getLooperSettings().removeChangeListener (this);
     engine.getChannelNames().removeChangeListener (this);
     engine.getCaptureService().removeChangeListener (this);
     engine.getUiSettings().removeChangeListener (this);
@@ -260,6 +295,14 @@ void EngineEditor::changeListenerCallback (juce::ChangeBroadcaster* source)
     if (source == &engine.getCaptureService() || source == &engine.getChannelNames())
     {
         rebuildLooperSources();
+        return;
+    }
+
+    // Looper-Settings (M6): Struktur/Slots/Mix können sich auch von
+    // außen ändern (Menü, spätere OSC-Wege) — Page nachziehen
+    if (source == &engine.getLooperSettings())
+    {
+        refreshLooperStructure();
         return;
     }
 
@@ -338,9 +381,9 @@ void EngineEditor::closeDevPanelAsync()
 
 //==============================================================================
 //==============================================================================
-std::vector<LooperPage::Source> EngineEditor::buildLooperSources()
+std::vector<LooperPanel::Source> EngineEditor::buildLooperSources()
 {
-    std::vector<LooperPage::Source> sources;
+    std::vector<LooperPanel::Source> sources;
 
     // Master zuerst — die Session-Summe (Master-Output-Tap, B2) ist die
     // naheliegendste Looper-Quelle und der Fallback unbekannter Schlüssel
@@ -391,12 +434,374 @@ std::vector<LooperPage::Source> EngineEditor::buildLooperSources()
 
 void EngineEditor::rebuildLooperSources()
 {
-    looperPage.setSources (buildLooperSources(),
-                           engine.getLooperSettings().getSourceKey (0));
+    // Dieselbe Quellen-Liste für alle Panels; Auswahl pro Looper aus den
+    // LooperSettings (M6)
+    const auto sources = buildLooperSources();
+    auto& settings = engine.getLooperSettings();
+
+    for (int l = 0; l < looperPage.getLooperCount(); ++l)
+        looperPage.getPanel (l).setSources (sources, settings.getSourceKey (l));
 
     // Ausgabe-Paare hängen an denselben Broadcasts (ChannelNames/Hardware)
     looperPage.setOutputPairs (buildOutputPairNames(),
                                engine.getTransportSettings().getLooperAnchor());
+}
+
+//==============================================================================
+void EngineEditor::refreshLooperStructure()
+{
+    auto& settings = engine.getLooperSettings();
+    auto& session = engine.getLooperSession();
+
+    // Panels folgen der Settings-Struktur; Hooks IMMER (re-)verdrahten —
+    // beim Startaufruf hat die Page ihr Panel schon aus dem ctor
+    // (setLooperCount wäre dann ein No-op ohne onPanelsChanged)
+    looperPage.setLooperCount (settings.getNumLoopers());
+    wireLooperPanels();
+
+    for (int l = 0; l < looperPage.getLooperCount(); ++l)
+    {
+        auto& panel = looperPage.getPanel (l);
+        panel.setTrackCount (settings.getNumTracks (l));
+        panel.setVisibleSlots (settings.getVisibleSlots());
+
+        for (int t = 0; t < panel.getTrackCount(); ++t)
+        {
+            auto& track = panel.getTrack (t);
+            track.setGain (settings.getTrackGain (l, t));
+            track.setPan (settings.getTrackPan (l, t));
+            track.setMute (settings.isTrackMuted (l, t));
+            track.setSolo (settings.isTrackSolo (l, t));
+        }
+
+        // VARI-Rast-Zustand der Controls: Scope-abhängig (Track des
+        // Aktiv-Clips bzw. Track 0 als Looper-Vertreter)
+        const auto active = session.getActiveSlot (l);
+        const auto rasterTrack = settings.getVariScope() == LooperSettings::VariScope::perTrack
+                               ? juce::jmax (0, active.track) : 0;
+        panel.getControls().setRasterQuantized (
+            settings.isTrackVariQuantized (l, rasterTrack));
+        panel.getControls().setTargetVisible (panel.getTrackCount() > 1);
+    }
+
+    looperPage.setSpectrumView (settings.isSpectrumView (0));
+    rebuildLooperSources();
+}
+
+void EngineEditor::wireLooperPanels()
+{
+    for (int l = 0; l < looperPage.getLooperCount(); ++l)
+    {
+        auto& panel = looperPage.getPanel (l);
+
+        // Strip: eigener Waveform-Tap pro Looper (M4), Beat-Achse LinkClock
+        panel.getStrip().setDataSource (&engine.getLooperWaveformTap (l));
+        panel.getStrip().getBeatNow = [this] { return linkClock.getBeatPosition(); };
+
+        panel.onSourceSelected = [this, l] (const juce::String& key)
+        { engine.setLooperSource (l, key); };
+
+        // Segment-Klick = Commit in den Target-Slot dieses Loopers
+        panel.onSegmentClicked = [this, l] (int bars)
+        {
+            const auto result = engine.commitToTarget (l, bars);
+            if (result.failed())
+                captureToast.show (result.getErrorMessage());
+        };
+
+        panel.onSlotTapped = [this, l] (int t, int s) { handleLooperSlotTap (l, t, s); };
+
+        // Mixer: Persistenz in die LooperSettings — die Engine folgt über
+        // applyLooperSettings (ein Pfad, keine Doppel-Writes)
+        panel.onTrackGain = [this, l] (int t, float gain)
+        { engine.getLooperSettings().setTrackGain (l, t, gain); };
+        panel.onTrackPan = [this, l] (int t, float pan)
+        { engine.getLooperSettings().setTrackPan (l, t, pan); };
+        panel.onTrackMute = [this, l] (int t, bool muted)
+        { engine.getLooperSettings().setTrackMuted (l, t, muted); };
+        panel.onTrackSolo = [this, l] (int t, bool solo)
+        { engine.getLooperSettings().setTrackSolo (l, t, solo); };
+
+        panel.onTrackStop = [this, l] (int t)
+        {
+            engine.getLooperSession().stopTrack (
+                l, t, launchQuantBeats (engine.getLooperSettings().getLaunchQuant()));
+        };
+
+        panel.onAddTrack = [this, l]
+        {
+            auto& looperSettings = engine.getLooperSettings();
+            looperSettings.setNumTracks (l, looperSettings.getNumTracks (l) + 1);
+            refreshLooperStructure();
+        };
+
+        // Track entfernen (Long-Press auf Header): nur der LETZTE Track
+        // (M4-Entscheidung — Bank-Player sind positional)
+        panel.onTrackHeaderLongPress = [this, l] (int t)
+        {
+            auto& looperSession = engine.getLooperSession();
+            if (t != looperSession.getNumTracks (l) - 1)
+            {
+                captureToast.show (juce::String::fromUTF8 (
+                    "Nur der letzte Track kann entfernt werden"));
+                return;
+            }
+
+            if (const auto result = looperSession.removeLastTrack (l); result.failed())
+            {
+                captureToast.show (result.getErrorMessage());
+                return;
+            }
+
+            engine.getLooperSettings().setNumTracks (l, looperSession.getNumTracks (l));
+            refreshLooperStructure();
+        };
+
+        // ── Clip-Controls (wirken auf den Aktiv-Clip, Übergabe §2) ──────
+        auto& controls = panel.getControls();
+
+        controls.onDoubleLength = [this, l]
+        {
+            if (auto* clip = engine.getLooperSession().getActiveClip (l))
+                engine.getLooperBank().multiplyClipLength (*clip, true,
+                                         engine.getLooperSettings().getHalveMode());
+        };
+        controls.onHalveLength = [this, l]
+        {
+            if (auto* clip = engine.getLooperSession().getActiveClip (l))
+                engine.getLooperBank().multiplyClipLength (*clip, false,
+                                         engine.getLooperSettings().getHalveMode());
+        };
+        controls.onReverseToggled = [this, l]
+        {
+            if (auto* clip = engine.getLooperSession().getActiveClip (l))
+                engine.getLooperBank().toggleClipReverse (*clip,
+                                        engine.getLooperSettings().getReverseMode()
+                                            == LooperSettings::ReverseMode::boundary);
+        };
+        controls.onRateChanged = [this, l] (double rate)
+        {
+            if (auto* clip = engine.getLooperSession().getActiveClip (l))
+                engine.getLooperBank().setClipRate (*clip, rate);
+        };
+        controls.onResetWithSync = [this, l]
+        {
+            if (auto* clip = engine.getLooperSession().getActiveClip (l))
+            {
+                engine.getLooperBank().resetClipWithSync (*clip);
+                looperPage.getPanel (l).getControls().setRate (1.0);
+            }
+        };
+
+        controls.onRasterToggled = [this, l] (bool quantized)
+        {
+            auto& looperSettings = engine.getLooperSettings();
+            if (looperSettings.getVariScope() == LooperSettings::VariScope::perLooper)
+            {
+                for (int t = 0; t < looperSettings.getNumTracks (l); ++t)
+                    looperSettings.setTrackVariQuantized (l, t, quantized);
+            }
+            else
+            {
+                const auto active = engine.getLooperSession().getActiveSlot (l);
+                looperSettings.setTrackVariQuantized (l, juce::jmax (0, active.track),
+                                                      quantized);
+            }
+            looperPage.getPanel (l).getControls().setRasterQuantized (quantized);
+        };
+
+        controls.onTargetCycle = [this, l]
+        { engine.getLooperSession().cycleTargetTrack (l); };
+        controls.onTargetHold = [this, l] (bool holding)
+        { looperTargetHold[(size_t) l] = holding; };
+
+        // Rast-Funktion: Halbtöne, optional auf die Session-Skala
+        // eingeschränkt (Intervall-Quantisierung über die Skala-Maske)
+        controls.snapFunction = [this] (double octaves)
+        {
+            const auto semis = (int) std::round (octaves * 12.0);
+            if (engine.getLooperSettings().getVariRaster()
+                    == LooperSettings::VariRaster::semitones)
+                return semis / 12.0;
+
+            const auto type = scaleTypeFromString (
+                engine.getRootState().getProperty (id::scaleType).toString());
+
+            for (int distance = 0; distance <= 6; ++distance)
+                for (const auto candidate : { semis - distance, semis + distance })
+                    if (scale::isInScale (candidate, type))
+                        return candidate / 12.0;
+
+            return semis / 12.0;
+        };
+    }
+
+    // Nach dem Neuaufbau Quellen-Listen + Zustände nachziehen
+    rebuildLooperSources();
+}
+
+void EngineEditor::handleLooperSlotTap (int looperIndex, int trackIndex, int slotIndex)
+{
+    auto& session = engine.getLooperSession();
+    auto& settings = engine.getLooperSettings();
+
+    // TARGET wird gehalten → nur Aktiv-Auswahl, kein Launch (Übergabe §2)
+    if (looperTargetHold[(size_t) juce::jlimit (0, 3, looperIndex)])
+    {
+        session.setActiveSlot (looperIndex, trackIndex, slotIndex);
+        return;
+    }
+
+    auto* clip = session.clipAt (looperIndex, trackIndex, slotIndex);
+    if (clip == nullptr)
+    {
+        // Leerer Slot: Target armen/disarmen
+        session.armTarget (looperIndex, trackIndex, slotIndex);
+        return;
+    }
+
+    const auto qBeats = launchQuantBeats (settings.getLaunchQuant());
+    juce::Result result = juce::Result::ok();
+
+    if (session.getPlayingSlot (looperIndex, trackIndex) == slotIndex)
+    {
+        // Tap auf den SPIELENDEN Clip: Verhalten aus dem Menü
+        if (settings.getTapMode() == LooperSettings::TapMode::toggleStop)
+            session.stopTrack (looperIndex, trackIndex, qBeats);
+        else
+            result = session.retriggerSlot (looperIndex, trackIndex, slotIndex, qBeats);
+    }
+    else
+    {
+        result = session.startSlot (looperIndex, trackIndex, slotIndex, qBeats);
+    }
+
+    if (result.failed())
+        captureToast.show (result.getErrorMessage());
+}
+
+void EngineEditor::refreshLooperStatus (bool devMode)
+{
+    auto& bank = engine.getLooperBank();
+    auto& session = engine.getLooperSession();
+
+    // Retire-Quittungen einsammeln (Clip-Freigabe, LooperBank-Doku)
+    bank.serviceMessageThread();
+
+    const auto playing = bank.isPlaying();
+    transportBar.setLooperStatus (pageHost.getPage() == TransportBar::pageLooper,
+                                  playing);
+    looperPage.getStopTile().setEnabled (playing);
+
+    // Gemeinsame Puls-Phase der Target-Zellen (1-Hz-Puls)
+    const auto pulse = (float) (juce::Time::getMillisecondCounter() % 1000u) / 1000.0f;
+    looperPage.setPulsePhase (pulse);
+
+    for (int l = 0; l < looperPage.getLooperCount(); ++l)
+    {
+        auto& panel = looperPage.getPanel (l);
+        bool anyAudible = false;
+
+        for (int t = 0; t < panel.getTrackCount(); ++t)
+        {
+            auto& track = panel.getTrack (t);
+            const auto& meter = bank.getTrackMeter (l, t);
+            const auto rmsLeft = meter.getRms (0);
+            const auto rmsRight = meter.getRms (1);
+            const auto audible = juce::jmax (rmsLeft, rmsRight) > 1.0e-3f;
+            anyAudible = anyAudible || audible;
+            track.setMeter (rmsLeft, rmsRight, audible);
+
+            const auto playingSlot = session.getPlayingSlot (l, t);
+            const auto target = session.getTarget (l);
+            const auto active = session.getActiveSlot (l);
+
+            float playingProgress = 0.0f;
+            double playingLength = 0.0;
+
+            for (int s = 0; s < track.getVisibleSlots(); ++s)
+            {
+                LooperSlotCell::State state;
+                if (auto* clip = session.clipAt (l, t, s))
+                {
+                    state.hasClip = true;
+                    state.playing = s == playingSlot;
+                    state.reversed = clip->stagedReversed.load (std::memory_order_relaxed);
+                    state.label = "Clip " + juce::String (clip->clipId) + juce::String::fromUTF8 (" · ")
+                                + juce::String (clip->commitBars)
+                                + (clip->commitBars == 1 ? " Bar" : " Bars");
+
+                    const auto rate = clip->stagedRate.load (std::memory_order_relaxed);
+                    if (std::abs (rate - 1.0) > 1.0e-3)
+                        state.rateBadge = juce::String (rate, 2) + juce::String::fromUTF8 ("×");
+
+                    if (state.playing)
+                    {
+                        state.progress01 = clip->displayPhase01.load (std::memory_order_relaxed);
+                        playingProgress = state.progress01;
+                        playingLength = clip->stagedLengthBeats.load (std::memory_order_relaxed);
+                    }
+                }
+                else
+                {
+                    state.target = target.track == t && target.slot == s;
+                }
+
+                state.active = active.track == t && active.slot == s && state.hasClip;
+                track.getSlotCell (s).setState (state);
+            }
+
+            // Takt-Anzeige: "aktueller Takt / Länge" des spielenden Clips
+            if (playingSlot >= 0 && playingLength > 0.0)
+            {
+                const auto totalBars = juce::jmax (1, (int) std::lround (playingLength / 4.0));
+                const auto currentBar = juce::jlimit (1, totalBars,
+                                                      1 + (int) std::floor (playingProgress
+                                                                            * (float) totalBars));
+                track.setBarDisplay (currentBar, totalBars, playingProgress);
+            }
+            else
+            {
+                track.setBarDisplay (0, 0, 0.0f);
+            }
+        }
+
+        panel.setAudible (anyAudible);
+
+        // Clip-Controls folgen dem Aktiv-Clip
+        auto& controls = panel.getControls();
+        if (auto* activeClip = session.getActiveClip (l))
+        {
+            controls.setClipControlsEnabled (true);
+            if (! controls.getVariKnob().isMouseButtonDown())
+                controls.setRate (activeClip->stagedRate.load (std::memory_order_relaxed));
+            controls.setReversed (activeClip->stagedReversed.load (std::memory_order_relaxed));
+            controls.setActiveLabel ("Clip " + juce::String (activeClip->clipId)
+                                     + juce::String::fromUTF8 (" · ")
+                                     + juce::String (activeClip->commitBars)
+                                     + (activeClip->commitBars == 1 ? " Bar" : " Bars"));
+        }
+        else
+        {
+            controls.setClipControlsEnabled (false);
+            controls.setActiveLabel ({});
+        }
+    }
+
+    // Statuszeile
+    if (playing)
+    {
+        auto status = juce::String ("spielt");
+        if (const auto snaps = bank.getSnapCount(); devMode && snaps > 0)
+            status << juce::String::fromUTF8 (" · ") << juce::String (snaps)
+                   << (snaps == 1 ? " Re-Sync" : " Re-Syncs");
+        looperPage.setStatus (status);
+    }
+    else
+    {
+        looperPage.setStatus (juce::String::fromUTF8 (
+            "bereit — Target wählen, Segment-Klick committet die letzten 8/4/2/1 Takte"));
+    }
 }
 
 juce::StringArray EngineEditor::buildOutputPairNames()
@@ -540,38 +945,8 @@ void EngineEditor::timerCallback()
     // Settings-Schalter (User-Entscheidung 04.07.2026)
     const auto devMode = engine.getUiSettings().isDevModeEnabled();
 
-    // Looper-Status (B5): Tape-LED (Page offen ODER Loop spielt), Stop-
-    // Kachel und Statuszeile der Looper-Page. serviceMessageThread sammelt
-    // die Retire-Quittungen der Bank ein (Clip-Freigabe, LooperBank-Doku).
-    {
-        auto& looper = engine.getLooperBank();
-        looper.serviceMessageThread();
-        const auto playing = looper.isPlaying();
-
-        transportBar.setLooperStatus (pageHost.getPage() == TransportBar::pageLooper,
-                                      playing);
-        looperPage.getStopTile().setEnabled (playing);
-
-        if (playing)
-        {
-            const auto bars = looper.getLoopBars();
-            auto looperStatus = "spielt: " + juce::String (bars)
-                              + (bars == 1 ? " Bar" : " Bars");
-
-            // Diagnose: Playhead-Re-Syncs (Duck-Snaps) — häufen sie sich,
-            // wackelt die Link-Achse oder der Audio-Callback (Engine-Doku)
-            if (const auto snaps = looper.getSnapCount(); devMode && snaps > 0)
-                looperStatus << juce::String::fromUTF8 (" · ") << juce::String (snaps)
-                             << (snaps == 1 ? " Re-Sync" : " Re-Syncs");
-
-            looperPage.setStatus (looperStatus);
-        }
-        else
-        {
-            looperPage.setStatus (juce::String::fromUTF8 (
-                "bereit — Segment-Klick committet die letzten 8/4/2/1 Takte"));
-        }
-    }
+    // Looper-Status (M6): Bank-Service, Tape-LED, Panels, Slots, Meter
+    refreshLooperStatus (devMode);
 
     // Callback-Timing (Settings-Schalter „DSP-Meter"): Durchschnitt wie
     // Abletons CPU-Meter, Peak als XRun-Frühwarner (schlimmster Block des

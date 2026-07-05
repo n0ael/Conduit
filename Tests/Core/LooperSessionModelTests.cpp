@@ -306,6 +306,25 @@ TEST_CASE ("LooperSessionModel: Struktur — Looper/Track-Grenzen und Guards", "
     }
 }
 
+TEST_CASE ("LooperSessionModel: clearAllClips nach Bank-Prepare (Zombie-Schutz)", "[looper]")
+{
+    ModelRig rig;
+
+    rig.model.armTarget (0, 0, 0);
+    REQUIRE (rig.commit (0).wasOk());
+    REQUIRE (rig.model.clipAt (0, 0, 0) != nullptr);
+
+    // prepareToPlay-Pfad: Bank verwirft die Clips → Modell MUSS folgen
+    // (Feld-Fund 05.07.2026: Zombie-Zelle nach Device-Restart)
+    rig.bank.prepare (testSampleRate, blockSize);
+    rig.model.clearAllClips();
+
+    REQUIRE (rig.model.clipAt (0, 0, 0) == nullptr);
+    REQUIRE (rig.model.getPlayingSlot (0, 0) == -1);
+    REQUIRE_FALSE (rig.model.getTarget (0).isValid());
+    REQUIRE_FALSE (rig.model.getActiveSlot (0).isValid());
+}
+
 TEST_CASE ("LooperSessionModel: Commits auf 4 Loopern parallel", "[looper]")
 {
     ModelRig rig;
