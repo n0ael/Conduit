@@ -79,6 +79,31 @@ modul-ready).
     Reverse-Richtungsstatistik (sofort/Boundary), ÷2-Hälften mit
     2-Takt-Content, ×2-Restore + Content-Clamp, Mix (Gain/Pan/Mute/
     Solo-Scopes/Meter), 16 Tracks parallel + RT-Audit. 414 Fälle grün.
+- **M4 (fertig, 05.07.2026):** Multi-Looper im Host + LooperSessionModel.
+  - **LooperSessionModel** (`Source/Core/Looper/LooperSessionModel`):
+    reiner MT-Zustand über der Bank — Slot-Grid (4×4×12), Target-Slot pro
+    Looper (armen/disarmen/TARGET-Kurzklick zykelt Tracks), Aktiv-Clip,
+    Auto-Advance (nächster freier Slot UNTERHALB, keiner frei → kein
+    Target), Overwrite belegter Targets (Auto-Advance aus), Looper-/
+    Track-Struktur. EngineProcessor-frei (module-ready) — Commit-Rohdaten
+    kommen pro Aufruf. ENTSCHEIDUNG: Looper/Track entfernen nur am ENDE
+    (removeLastLooper/removeLastTrack) — Tracks sind positional an die
+    Bank-Player gebunden, Mittel-Entfernen käme erst mit einem
+    Track-Umzug in der Bank.
+  - **Bank-Erweiterungen:** commitClip (ohne Replace — Slot-Modell),
+    deleteClip(LooperClip*), startClip/retriggerClip (expliziter Clip),
+    Clip-Edits per Pointer (Aktiv-Clip kann JEDER Clip sein, nicht nur
+    der spielende); commitAndPlay bleibt als Paritäts-Wrapper (altes UI).
+  - **EngineProcessor:** Quell-Schlüssel PRO LOOPER (setLooperSource(l,
+    key), Looper 0 weiter in TransportSettings bis M5); Arming folgt der
+    VEREINIGUNG aller Looper-Quellen mit Diff (Refcount-Semantik: geteilte
+    Quelle bleibt offen, bis der letzte Looper sie verlässt); 4 Waveform-
+    Taps (einer pro Looper, nach dem Master-Tap-Write — Resample Main
+    fängt Loops nie ein); commitToTarget(l, bars) = Modell-Pfad für die
+    neue Page (M6) und OSC (M8).
+  - Tests: LooperSessionModelTests (Target/Commit/Auto-Advance/Overwrite/
+    Launch/Delete/Struktur-Guards/4-Looper-Parallel), LooperSourceTests
+    um Refcount + Tap-Instanzen erweitert. 422 Fälle grün.
 
 ---
 

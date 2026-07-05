@@ -1,5 +1,7 @@
 #include "EngineProcessor.h"
 
+#include <algorithm>
+
 #include "EngineEditor.h"
 #include "Util/RtAllocationGuard.h"
 #include "Util/ScaleQuantizer.h"
@@ -172,10 +174,21 @@ void EngineProcessor::applyTransportSettings()
 
 juce::Result EngineProcessor::commitLooper (int bars)
 {
-    // M2-Parität: ein Loop auf Looper 0 / Track 0 — Slot-/Target-Logik
-    // kommt mit dem LooperSessionModel (M4)
+    // Paritäts-Pfad des alten UI: ein Loop auf Looper 0 / Track 0
     return looperBank.commitAndPlay (0, 0, bars, captureService,
-                                     looperLeftIndex, looperRightIndex, barAnchors);
+                                     looperLeftIndex[0], looperRightIndex[0],
+                                     barAnchors);
+}
+
+juce::Result EngineProcessor::commitToTarget (int looperIndex, int bars)
+{
+    if (looperIndex < 0 || looperIndex >= LooperBank::maxLoopers)
+        return juce::Result::fail ("Ungültiger Looper");
+
+    return looperSession.commit (looperIndex, bars, captureService,
+                                 looperLeftIndex[static_cast<std::size_t> (looperIndex)],
+                                 looperRightIndex[static_cast<std::size_t> (looperIndex)],
+                                 barAnchors);
 }
 
 void EngineProcessor::setLooperAnchor (int pairIndex)
@@ -185,74 +198,123 @@ void EngineProcessor::setLooperAnchor (int pairIndex)
 }
 
 //==============================================================================
-void EngineProcessor::setLooperSource (const juce::String& sourceKey)
+void EngineProcessor::setLooperSource (int looperIndex, const juce::String& sourceKey)
 {
-    transportSettings.setLooperSource (sourceKey);
+    if (looperIndex < 0 || looperIndex >= LooperBank::maxLoopers)
+        return;
+
+    // Looper 0 persistiert weiter in den TransportSettings (M5 migriert
+    // alle Looper in die LooperSettings)
+    if (looperIndex == 0)
+        transportSettings.setLooperSource (sourceKey);
+    else
+        looperSourceKeys[static_cast<std::size_t> (looperIndex)] = sourceKey;
+
     applyLooperSourceArming();
 }
+
+namespace
+{
+    /** Quell-Schlüssel ("master" | "hw:{paar}" | "tap:{name}") in Capture-
+        Indizes auflösen (B3-Logik unverändert, nur herausgelöst). */
+    void resolveLooperSourceKey (const conduit::CaptureService& capture,
+                                 const juce::String& key, int& left, int& right)
+    {
+        left = -1;
+        right = -1;
+
+        if (key == "master")
+        {
+            // Master-Output-Tap (B2): Registry-Slots 0/1; captureIndex ist −1,
+            // solange kein Puffersatz die Slots trägt (vor prepare)
+            left  = capture.getVirtualChannelUiInfo (0).captureIndex;
+            right = capture.getVirtualChannelUiInfo (1).captureIndex;
+        }
+        else if (key.startsWith ("hw:"))
+        {
+            // Hardware-Eingangs-Paar 2n/2n+1 — nur Kanäle, die der aktuelle
+            // Puffersatz tatsächlich trägt
+            const auto pair = key.substring (3).getIntValue();
+            const auto channels = capture.getRingNumChannels();
+            const auto leftChannel = pair * 2;
+
+            if (leftChannel < channels)
+                left = leftChannel;
+            if (leftChannel + 1 < channels)
+                right = leftChannel + 1;
+        }
+        else if (key.startsWith ("tap:"))
+        {
+            // Capture-Tap eines Moduls: Basisname → _l/_r-Paar (Stereo) bzw.
+            // exakter Name (Mono-Tap)
+            const auto baseName = key.substring (4);
+
+            for (int slot = 0; slot < conduit::CaptureService::MAX_VIRTUAL_CHANNELS; ++slot)
+            {
+                const auto info = capture.getVirtualChannelUiInfo (slot);
+                if (! info.inUse || info.captureIndex < 0)
+                    continue;
+
+                if (info.name == baseName + "_l" || info.name == baseName)
+                    left = info.captureIndex;
+                else if (info.name == baseName + "_r")
+                    right = info.captureIndex;
+            }
+        }
+
+        // Mono-Quelle: rechts folgt links (Commit/Waveform lesen beide Seiten)
+        if (right < 0)
+            right = left;
+    }
+} // namespace
 
 void EngineProcessor::applyLooperSourceArming()
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
-    // Vorherige Quelle entwaffnen — die normale Gate-Detektion übernimmt
-    // dort wieder (offenes Material schließt regulär über den Hold, B1)
-    captureService.setChannelArmed (looperLeftIndex, false);
-    captureService.setChannelArmed (looperRightIndex, false);
-    looperLeftIndex  = -1;
-    looperRightIndex = -1;
+    // Alle Looper-Quellen auflösen; das Arming folgt der VEREINIGUNG —
+    // Diff gegen den Vorzustand, damit eine GETEILTE Quelle offen bleibt,
+    // wenn nur EINER von zwei Loopern sie verlässt (Refcount-Semantik).
+    std::vector<int> nowArmed;
 
-    const auto key = transportSettings.getLooperSource();
-
-    if (key == "master")
+    for (int l = 0; l < LooperBank::maxLoopers; ++l)
     {
-        // Master-Output-Tap (B2): Registry-Slots 0/1; captureIndex ist −1,
-        // solange kein Puffersatz die Slots trägt (vor prepare)
-        looperLeftIndex  = captureService.getVirtualChannelUiInfo (0).captureIndex;
-        looperRightIndex = captureService.getVirtualChannelUiInfo (1).captureIndex;
-    }
-    else if (key.startsWith ("hw:"))
-    {
-        // Hardware-Eingangs-Paar 2n/2n+1 — nur Kanäle, die der aktuelle
-        // Puffersatz tatsächlich trägt
-        const auto pair = key.substring (3).getIntValue();
-        const auto channels = captureService.getRingNumChannels();
-        const auto leftChannel = pair * 2;
+        const auto key = l == 0 ? transportSettings.getLooperSource()
+                                : looperSourceKeys[static_cast<std::size_t> (l)];
 
-        if (leftChannel < channels)
-            looperLeftIndex = leftChannel;
-        if (leftChannel + 1 < channels)
-            looperRightIndex = leftChannel + 1;
-    }
-    else if (key.startsWith ("tap:"))
-    {
-        // Capture-Tap eines Moduls: Basisname → _l/_r-Paar (Stereo) bzw.
-        // exakter Name (Mono-Tap)
-        const auto baseName = key.substring (4);
+        auto& left  = looperLeftIndex[static_cast<std::size_t> (l)];
+        auto& right = looperRightIndex[static_cast<std::size_t> (l)];
 
-        for (int slot = 0; slot < CaptureService::MAX_VIRTUAL_CHANNELS; ++slot)
+        if (key.isEmpty())
         {
-            const auto info = captureService.getVirtualChannelUiInfo (slot);
-            if (! info.inUse || info.captureIndex < 0)
-                continue;
-
-            if (info.name == baseName + "_l" || info.name == baseName)
-                looperLeftIndex = info.captureIndex;
-            else if (info.name == baseName + "_r")
-                looperRightIndex = info.captureIndex;
+            left = -1;
+            right = -1;
         }
+        else
+        {
+            resolveLooperSourceKey (captureService, key, left, right);
+        }
+
+        for (const auto index : { left, right })
+            if (index >= 0 && std::find (nowArmed.begin(), nowArmed.end(), index)
+                                  == nowArmed.end())
+                nowArmed.push_back (index);
+
+        // Waveform-Binner folgt seiner Quelle (Reset + Backfill im Audio
+        // Thread, B4) — ein Tap pro Looper
+        looperWaveformTaps[static_cast<std::size_t> (l)].setSource (left, right);
     }
 
-    // Mono-Quelle: rechts folgt links (Commit/Waveform lesen beide Seiten)
-    if (looperRightIndex < 0)
-        looperRightIndex = looperLeftIndex;
+    // Diff: Verlassene entwaffnen (die normale Gate-Detektion übernimmt,
+    // B1), Neue armen (setChannelArmed ist idempotent)
+    for (const auto index : looperArmedIndices)
+        if (std::find (nowArmed.begin(), nowArmed.end(), index) == nowArmed.end())
+            captureService.setChannelArmed (index, false);
 
-    captureService.setChannelArmed (looperLeftIndex, true);
-    if (looperRightIndex != looperLeftIndex)
-        captureService.setChannelArmed (looperRightIndex, true);
+    for (const auto index : nowArmed)
+        captureService.setChannelArmed (index, true);
 
-    // Waveform-Binner folgt der Quelle (Reset + Backfill im Audio Thread, B4)
-    looperWaveformTap.setSource (looperLeftIndex, looperRightIndex);
+    looperArmedIndices = std::move (nowArmed);
 }
 
 void EngineProcessor::rebuildInputSends()
@@ -433,7 +495,8 @@ void EngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     // Looper-Quelle neu auflösen: der frische Puffersatz vergibt die
     // Capture-Indizes der virtuellen Slots neu (B3); Waveform-Binner und
     // Loop-Playback verwerfen ihren Stand (SampleClock-Reset, B4/B5)
-    looperWaveformTap.prepare (sampleRate);
+    for (auto& tap : looperWaveformTaps)
+        tap.prepare (sampleRate);
     looperBank.prepare (sampleRate, samplesPerBlock);
     applyLooperSourceArming();
     inputLevels.prepare  (sampleRate, getTotalNumInputChannels());
@@ -546,8 +609,9 @@ void EngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         const auto clockNow = captureService.getSampleClock().now();
         const auto blockSamples = static_cast<std::uint64_t> (buffer.getNumSamples());
         if (clockNow >= blockSamples)
-            looperWaveformTap.process (clockBus.current, captureService,
-                                       clockNow - blockSamples, buffer.getNumSamples());
+            for (auto& tap : looperWaveformTaps)
+                tap.process (clockBus.current, captureService,
+                             clockNow - blockSamples, buffer.getNumSamples());
 
         // Loop-Playback (B5): NACH dem Master-Tap (der Looper kann seine
         // eigene Ausgabe nie wieder einfangen) und VOR dem Metronom.

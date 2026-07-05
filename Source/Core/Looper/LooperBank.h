@@ -111,6 +111,30 @@ public:
                                               int leftIndex, int rightIndex,
                                               const BarSampleAnchors& anchors);
 
+    /** Wie commitAndPlay, aber OHNE den bisherigen Track-Clip zu löschen —
+        Slot-Modell (M4): der alte Clip gehört einem anderen Slot und
+        bleibt liegen (gestoppt). outClip erhält den neuen Clip; der
+        Besitz bleibt IMMER bei der Bank (Freigabe nur via deleteClip). */
+    [[nodiscard]] juce::Result commitClip (int looperIndex, int trackIndex, int bars,
+                                           const CaptureService& capture,
+                                           int leftIndex, int rightIndex,
+                                           const BarSampleAnchors& anchors,
+                                           LooperClip** outClip = nullptr);
+
+    /** [Message Thread] Clip endgültig löschen: Graveyard + deleteClip-
+        Kommando — die Freigabe folgt der Audio-Quittung (Klassendoku).
+        Slot-Bookkeeping macht das LooperSessionModel. */
+    [[nodiscard]] juce::Result deleteClip (LooperClip* clip);
+
+    /** Bestimmten Clip (Slot-Modell) auf einem Track starten — phasenstarr,
+        Anker bleibt. Der Clip wird zum (l,t)-Edit-Ziel (mtActiveClip). */
+    [[nodiscard]] juce::Result startClip (int looperIndex, int trackIndex,
+                                          LooperClip* clip, double qBeats);
+
+    /** Bestimmten Clip neu triggern (Phase 0 am Grid-Punkt). */
+    [[nodiscard]] juce::Result retriggerClip (int looperIndex, int trackIndex,
+                                              LooperClip* clip, double qBeats);
+
     /** Clip des Tracks (wieder) starten — phasenstarr, Anker bleibt.
         qBeats > 0: an der nächsten Grid-Grenze (sample-genau). */
     [[nodiscard]] juce::Result startTrack (int looperIndex, int trackIndex,
@@ -146,6 +170,16 @@ public:
 
     /** „Reset mit Sync": Rate 1× und Anker zurück aufs Commit-Taktraster. */
     [[nodiscard]] juce::Result resetClipWithSync (int looperIndex, int trackIndex);
+
+    //==========================================================================
+    // Clip-Edits per Pointer [MT] — für die Aktiv-Clip-Auswahl des Modells
+    // (TARGET-Halten kann JEDEN Clip wählen, nicht nur den spielenden)
+
+    void setClipRate (LooperClip& clip, double rate) noexcept;
+    void toggleClipReverse (LooperClip& clip, bool atBoundary) noexcept;
+    void multiplyClipLength (LooperClip& clip, bool doubleLength,
+                             looper::HalveMode halveMode) noexcept;
+    void resetClipWithSync (LooperClip& clip) noexcept;
 
     //==========================================================================
     // Track-Mix [Message Thread schreibt, Audio liest]

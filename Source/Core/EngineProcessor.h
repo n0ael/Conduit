@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <vector>
+
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "CallbackTimingMonitor.h"
@@ -8,6 +11,7 @@
 #include "ChannelNames.h"
 #include "Looper/BarSampleAnchors.h"
 #include "Looper/LooperBank.h"
+#include "Looper/LooperSessionModel.h"
 #include "Looper/LooperWaveformTap.h"
 #include "Metronome.h"
 #include "GraphFader.h"
@@ -162,28 +166,49 @@ public:
     [[nodiscard]] TransportSettings& getTransportSettings() noexcept;
 
     //==========================================================================
-    /** Looper-Quelle (B3) [Message Thread]: persistiert den Quell-Schlüssel
-        ("master" | "hw:{paar}" | "tap:{name}") in den TransportSettings,
-        löst ihn in Capture-Indizes auf und armt die Kanäle (Vorgänger
-        entwaffnet) — das Gate der Quelle bleibt damit garantiert offen (B1).
-        Re-Apply nach prepareToPlay (Puffersatz-Indizes) übernimmt der
-        Processor selbst. */
-    void setLooperSource (const juce::String& sourceKey);
+    /** Looper-Quelle (B3/M4) [Message Thread]: Quell-Schlüssel
+        ("master" | "hw:{paar}" | "tap:{name}") PRO LOOPER auflösen und
+        armen. Das Arming ist refcount-artig über die VEREINIGUNG aller
+        Looper-Quellen: teilen sich zwei Looper eine Quelle, bleibt das
+        Gate offen, bis der letzte sie verlässt. Looper 0 persistiert
+        weiterhin in den TransportSettings (Migration → LooperSettings M5).
+        Re-Apply nach prepareToPlay übernimmt der Processor selbst. */
+    void setLooperSource (int looperIndex, const juce::String& sourceKey);
+    void setLooperSource (const juce::String& sourceKey) { setLooperSource (0, sourceKey); }
 
-    /** Aufgelöste Capture-Indizes der Looper-Quelle (links/rechts; Mono =
-        beide gleich, −1 = nicht auflösbar) — Waveform-Tap (B4) und
-        Commit (B5) lesen sie; Tests prüfen das Arming. Message Thread. */
-    [[nodiscard]] int getLooperLeftIndex() const noexcept  { return looperLeftIndex; }
-    [[nodiscard]] int getLooperRightIndex() const noexcept { return looperRightIndex; }
+    /** Aufgelöste Capture-Indizes der Looper-Quellen (links/rechts; Mono =
+        beide gleich, −1 = nicht auflösbar). Message Thread. */
+    [[nodiscard]] int getLooperLeftIndex (int looperIndex = 0) const noexcept
+    {
+        return looperIndex >= 0 && looperIndex < LooperBank::maxLoopers
+             ? looperLeftIndex[static_cast<std::size_t> (looperIndex)] : -1;
+    }
+    [[nodiscard]] int getLooperRightIndex (int looperIndex = 0) const noexcept
+    {
+        return looperIndex >= 0 && looperIndex < LooperBank::maxLoopers
+             ? looperRightIndex[static_cast<std::size_t> (looperIndex)] : -1;
+    }
 
-    /** Waveform-Datenpfad der Looper-Page (B4): der LooperWaveformStrip
-        holt die Bins per pop() ab (Konsumentenrolle exklusiv). */
-    [[nodiscard]] LooperWaveformTap& getLooperWaveformTap() noexcept { return looperWaveformTap; }
+    /** Waveform-Datenpfad der Looper-Page (B4/M4): ein Tap pro Looper —
+        jeder Strip holt die Bins seines Taps per pop() ab
+        (Konsumentenrolle exklusiv pro Strip). */
+    [[nodiscard]] LooperWaveformTap& getLooperWaveformTap (int looperIndex = 0) noexcept
+    {
+        return looperWaveformTaps[static_cast<std::size_t> (
+            juce::jlimit (0, LooperBank::maxLoopers - 1, looperIndex))];
+    }
 
-    /** Looper-Commit (B5) [Message Thread]: die letzten `bars` kompletten
-        Takte der gewählten Quelle committen und sofort phasenstarr
-        abspielen — Fehlermeldung für den Toast bei fail. */
+    /** Looper-Commit (B5) [Message Thread]: Paritäts-Pfad des alten UI —
+        committet auf Looper 0/Track 0 (ersetzt dessen Loop). */
     [[nodiscard]] juce::Result commitLooper (int bars);
+
+    /** Slot-Modell-Commit (M4): in den Target-Slot des Loopers, über das
+        LooperSessionModel — Pfad der neuen Page (M6) und der OSC-Actions
+        (M8). */
+    [[nodiscard]] juce::Result commitToTarget (int looperIndex, int bars);
+
+    /** Session-Modell (Slots/Target/Aktiv-Clip) — UI/OSC binden hier an. */
+    [[nodiscard]] LooperSessionModel& getLooperSession() noexcept { return looperSession; }
 
     /** [Message Thread] Loop-Playback mit 5-ms-Fade beenden. */
     void stopLooper() noexcept { looperBank.stopAll(); }
@@ -303,16 +328,30 @@ private:
 
     // Looper-Quelle (B3): aufgelöste Capture-Indizes der gearmten Kanäle
     // (nur Message Thread; −1 = nicht auflösbar, z. B. vor prepare)
-    int looperLeftIndex  = -1;
-    int looperRightIndex = -1;
+    std::array<int, static_cast<std::size_t> (LooperBank::maxLoopers)> looperLeftIndex {
+        -1, -1, -1, -1 };
+    std::array<int, static_cast<std::size_t> (LooperBank::maxLoopers)> looperRightIndex {
+        -1, -1, -1, -1 };
+
+    // Quell-Schlüssel pro Looper (Looper 0 lebt in den TransportSettings,
+    // M5 migriert alles in die LooperSettings); leerer Schlüssel = keine Quelle
+    std::array<juce::String, static_cast<std::size_t> (LooperBank::maxLoopers)> looperSourceKeys;
+
+    // Zuletzt gearmter Kanalsatz (Vereinigung aller Looper-Quellen) —
+    // Basis des Diff beim Re-Arming (geteilte Quellen bleiben offen)
+    std::vector<int> looperArmedIndices;
 
     // Waveform-Binner der Looper-Page (B4): läuft am Block-Ende nach dem
     // Master-Tap-Write; die Quelle speist applyLooperSourceArming
-    LooperWaveformTap looperWaveformTap;
+    std::array<LooperWaveformTap, static_cast<std::size_t> (LooperBank::maxLoopers)>
+        looperWaveformTaps;
 
     // Loop-Playback (B5): nach Master-Tap/Binner, vor dem Metronom auf
     // das Anker-Paar der TransportSettings (looperAnchor)
     LooperBank looperBank;
+
+    // Slot-/Target-Modell über der Bank (M4) — reiner MT-Zustand
+    LooperSessionModel looperSession { looperBank };
 
     // Callback-Timing-Diagnose (Dev-Modus): XRun-/Load-Messung um den
     // gesamten processBlock — begin als erste, end als letzte Operation

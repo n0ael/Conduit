@@ -94,3 +94,65 @@ TEST_CASE ("Looper-Quelle (B3): Schlüssel-Auflösung, Arming und Persistenz", "
         REQUIRE (engine.getLooperRightIndex() == -1);
     }
 }
+
+//==============================================================================
+TEST_CASE ("Looper-Quellen (M4): Arming-Refcount über mehrere Looper", "[looper]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    conduit::test::ScopedSettingsFolder settingsFolder;
+    conduit::EngineProcessor engine { settingsFolder.folder };
+    auto& capture = engine.getCaptureService();
+
+    engine.setPlayConfigDetails (2, 2, 48000.0, 480);
+    engine.prepareToPlay (48000.0, 480);
+
+    SECTION ("Geteilte Quelle bleibt gearmt, bis der LETZTE Looper sie verlässt")
+    {
+        engine.setLooperSource (0, "hw:0");
+        engine.setLooperSource (1, "hw:0");
+        REQUIRE (engine.getLooperLeftIndex (0) == 0);
+        REQUIRE (engine.getLooperLeftIndex (1) == 0);
+        REQUIRE (capture.isChannelArmed (0));
+        REQUIRE (capture.isChannelArmed (1));
+
+        // Looper 1 wechselt weg — Looper 0 nutzt hw:0 weiter: Gate offen!
+        engine.setLooperSource (1, "master");
+        REQUIRE (capture.isChannelArmed (0));
+        REQUIRE (capture.isChannelArmed (1));
+        REQUIRE (capture.isChannelArmed (2));   // master_l dazu
+        REQUIRE (capture.isChannelArmed (3));
+
+        // Jetzt verlässt auch Looper 0 → hw:0 wird entwaffnet
+        engine.setLooperSource (0, "master");
+        REQUIRE_FALSE (capture.isChannelArmed (0));
+        REQUIRE_FALSE (capture.isChannelArmed (1));
+        REQUIRE (capture.isChannelArmed (2));
+        REQUIRE (capture.isChannelArmed (3));
+    }
+
+    SECTION ("Leerer Schlüssel = keine Quelle; unabhängige Auflösung pro Looper")
+    {
+        REQUIRE (engine.getLooperLeftIndex (1) == -1);
+        REQUIRE (engine.getLooperLeftIndex (3) == -1);
+
+        engine.setLooperSource (2, "hw:0");
+        REQUIRE (engine.getLooperLeftIndex (2) == 0);
+        REQUIRE (engine.getLooperRightIndex (2) == 1);
+
+        // Looper 0 (Default master) blieb unberührt
+        REQUIRE (engine.getLooperLeftIndex (0) == 2);
+        REQUIRE (capture.isChannelArmed (2));
+
+        engine.setLooperSource (2, "");
+        REQUIRE (engine.getLooperLeftIndex (2) == -1);
+        REQUIRE_FALSE (capture.isChannelArmed (0));
+    }
+
+    SECTION ("Vier Taps: jeder Looper hat seinen eigenen Waveform-Binner")
+    {
+        // Verschiedene Instanzen — Strip-Kontrakt (ein Strip pro Tap)
+        REQUIRE (&engine.getLooperWaveformTap (0) != &engine.getLooperWaveformTap (1));
+        REQUIRE (&engine.getLooperWaveformTap (1) != &engine.getLooperWaveformTap (2));
+        REQUIRE (&engine.getLooperWaveformTap (2) != &engine.getLooperWaveformTap (3));
+    }
+}
