@@ -115,6 +115,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/OscSendSettings.cpp
     Source/Core/PadGridLayout.cpp
     Source/Core/RemoteModuleBinder.cpp
+    Source/Core/RingTouchModel.cpp
     Source/Core/SourceNameResolver.cpp
     Source/Core/TransportSettings.cpp
     Source/Core/UiSettings.cpp
@@ -277,6 +278,7 @@ target_sources(Conduit PRIVATE
     Source/Core/OscSendSettings.h
     Source/Core/PadGridLayout.h
     Source/Core/RemoteModuleBinder.h
+    Source/Core/RingTouchModel.h
     Source/Core/SourceNameResolver.h
     Source/Core/TransportSettings.h
     Source/Core/VoiceAllocator.h
@@ -515,6 +517,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/GraphManagerTests.cpp
         Tests/Core/GridVoiceEngineTests.cpp
         Tests/Core/PadGridLayoutTests.cpp
+        Tests/Core/RingTouchModelTests.cpp
         Tests/Core/LevelMeterTests.cpp
         Tests/Core/InputLinkSendTests.cpp
         Tests/Core/LinkAudioSendTests.cpp
@@ -589,6 +592,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/OscSendSettings.cpp
         Source/Core/PadGridLayout.cpp
         Source/Core/RemoteModuleBinder.cpp
+        Source/Core/RingTouchModel.cpp
         Source/Core/SourceNameResolver.cpp
         Source/Core/TransportSettings.cpp
         Source/Core/UiSettings.cpp

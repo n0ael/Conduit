@@ -6,6 +6,7 @@
 
 #include "Core/GridVoiceEngine.h"
 #include "Core/PadGridLayout.h"
+#include "Core/RingTouchModel.h"
 
 namespace conduit
 {
@@ -17,12 +18,16 @@ namespace conduit
     Standard-Maus-/Touch-Callbacks — jeder JUCE-Touch-Source liefert ein
     eigenes event.source.
 
-    Erster Ton, bewusst reduziert (Scope M1 Teil 3): nur Note + Pitch-Bend
-    über X + EINE Ausdrucksachse über Y (Pressure). Kein zweiter Finger,
-    kein Slide, keine Ribbons/Drone/Latch — das sind eigene Meilensteine.
+    Note + Pitch-Bend über X + Pressure über Y (M1 Teil 3) plus Ring-
+    Mechanik als zweite Ausdrucksachse (M1b-2): ein zweiter Finger im
+    Greifband eines liegenden primären Fingers wird dessen Ring-Finger,
+    sein Abstand moduliert setSlide des primären Fingers (RingTouchModel).
+    Bewusst weiterhin ohne Drone/Latch, Pinch, Doppeltipp, Drift-über-Rand,
+    Rand-Ribbons, Release-All — eigene Meilensteine.
 
-    Hält keinen eigenen Zustand außer der Per-Finger-Zuordnung; ruft die
-    GridVoiceEngine& direkt (Message Thread, CLAUDE.md 4.2 ITouchMacro).
+    Hält keinen eigenen Zustand außer der Per-Finger-Zuordnung (primär) und
+    dem RingTouchModel; ruft die GridVoiceEngine& direkt (Message Thread,
+    CLAUDE.md 4.2 ITouchMacro).
 */
 class GridKeyboardComponent final : public juce::Component
 {
@@ -48,6 +53,7 @@ private:
 
     grid::GridVoiceEngine& engine;
     grid::PadGridLayout    layout;
+    grid::RingTouchModel   ring;
 
     std::map<int, FingerState> fingers;
 

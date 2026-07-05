@@ -31,13 +31,25 @@ int GridKeyboardComponent::fingerIdFor (const juce::MouseEvent& event) noexcept
 
 void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
 {
+    const auto fingerId = fingerIdFor (event);
+    const auto downResult = ring.onDown (static_cast<uint32_t> (fingerId), event.position);
+
+    if (downResult.kind == grid::RingTouchModel::TouchKind::Ring)
+    {
+        const auto moveResult = ring.onMove (static_cast<uint32_t> (fingerId), event.position);
+        if (moveResult.hasSlide)
+            engine.setSlide (moveResult.owner, moveResult.slide01);
+
+        repaint();
+        return;
+    }
+
     const auto pos = normalisedPosition (event);
     const auto pad = layout.padIndexAt (pos.x, pos.y);
 
     if (pad < 0)
         return;
 
-    const auto fingerId = fingerIdFor (event);
     fingers[fingerId] = { pos.x, pad };
 
     engine.noteOn (static_cast<uint32_t> (fingerId), layout.noteForPad (pad), 100);
@@ -47,6 +59,15 @@ void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
 void GridKeyboardComponent::mouseDrag (const juce::MouseEvent& event)
 {
     const auto fingerId = fingerIdFor (event);
+    const auto moveResult = ring.onMove (static_cast<uint32_t> (fingerId), event.position);
+
+    if (moveResult.hasSlide)
+    {
+        engine.setSlide (moveResult.owner, moveResult.slide01);
+        repaint();
+        return;
+    }
+
     const auto it = fingers.find (fingerId);
     if (it == fingers.end())
         return;
@@ -63,11 +84,21 @@ void GridKeyboardComponent::mouseDrag (const juce::MouseEvent& event)
 void GridKeyboardComponent::mouseUp (const juce::MouseEvent& event)
 {
     const auto fingerId = fingerIdFor (event);
-    if (fingers.erase (fingerId) == 0)
-        return;
+    const auto upResult = ring.onUp (static_cast<uint32_t> (fingerId));
 
-    engine.noteOff (static_cast<uint32_t> (fingerId), 0);
-    repaint();
+    if (upResult.wasRing)
+    {
+        engine.setSlide (upResult.ringOwner, 0.0f);
+        repaint();
+        return;
+    }
+
+    if (upResult.wasPrimary)
+    {
+        fingers.erase (fingerId);
+        engine.noteOff (static_cast<uint32_t> (upResult.primaryFinger), 0);
+        repaint();
+    }
 }
 
 void GridKeyboardComponent::paint (juce::Graphics& g)
@@ -104,6 +135,13 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
             g.setColour (isActive ? push::colours::ledCyan : push::colours::outline);
             g.drawRoundedRectangle (padBounds, 4.0f, isActive ? 2.0f : 1.0f);
         }
+    }
+
+    g.setColour (push::colours::ledCyan);
+    for (const auto& circle : ring.activeCircles())
+    {
+        const auto diameter = circle.radiusPx * 2.0f;
+        g.drawEllipse (juce::Rectangle<float> (diameter, diameter).withCentre (circle.center), 1.5f);
     }
 }
 
