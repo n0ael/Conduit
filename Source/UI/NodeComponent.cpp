@@ -998,6 +998,13 @@ juce::uint32 NodeComponent::nodeColourRgb() const
     return (juce::uint32) (int) nodeTree.getProperty (id::nodeColour, 0);
 }
 
+void NodeComponent::setFlowColour (juce::uint32 rgb)
+{
+    if (colourDot != nullptr)
+        colourDot->setDotColour (rgb != 0 ? juce::Colour (0xff000000u | (rgb & 0x00ffffffu))
+                                          : push::colours::ledGreen);
+}
+
 juce::Colour NodeComponent::dotColourForNode() const
 {
     const auto rgb = nodeColourRgb();

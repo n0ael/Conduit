@@ -68,6 +68,8 @@ void NodeCanvas::rebuildAll()
 
     for (int i = 0; i < nodesTree.getNumChildren(); ++i)
         addComponentFor (nodesTree.getChild (i));
+
+    refreshFlowColours();  // effektive Farben nach dem Voll-Rebuild
 }
 
 void NodeCanvas::addComponentFor (juce::ValueTree nodeTree)
@@ -109,11 +111,17 @@ void NodeCanvas::removeComponentFor (const juce::String& nodeUuid)
 //==============================================================================
 void NodeCanvas::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // Kabel folgen bewegten Nodes; Node-Farbe färbt die Quell-Kabel um (M-B)
-    if (property == id::positionX || property == id::positionY
-        || property == id::nodeColour)
+    // Kabel folgen bewegten Nodes
+    if (property == id::positionX || property == id::positionY)
     {
         repaint();
+        return;
+    }
+
+    // Node-Farbe geändert → effektive Farben (inkl. Downstream-Vererbung) neu
+    if (property == id::nodeColour)
+    {
+        refreshFlowColours();
         return;
     }
 
@@ -121,17 +129,23 @@ void NodeCanvas::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Id
     // der Graph-Swap setzt ihn auf Active — jetzt UI nachziehen.
     if (property == id::nodeState && tree.hasType (id::node)
         && tree.getProperty (id::nodeState).toString() == toString (NodeState::active))
+    {
         addComponentFor (tree);
+        refreshFlowColours();
+    }
 }
 
 void NodeCanvas::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
 {
     if (parent.hasType (id::nodes) && child.hasType (id::node))
+    {
         addComponentFor (child);
+        refreshFlowColours();
+    }
     else if (child.hasType (id::nodes))
         rebuildAll();  // Container-Austausch (Preset-Load)
     else if (parent.hasType (id::connections) || child.hasType (id::connections))
-        repaint();  // neues Kabel
+        refreshFlowColours();  // neues Kabel → Vererbung neu
 }
 
 void NodeCanvas::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
@@ -140,11 +154,14 @@ void NodeCanvas::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree
     // sofort zerstören — der reguläre Delete-Pfad hat die Component an
     // dieser Stelle bereits über den Teardown abgebaut.
     if (parent.hasType (id::nodes) && child.hasType (id::node))
+    {
         removeComponentFor (child.getProperty (id::nodeId).toString());
+        refreshFlowColours();
+    }
     else if (child.hasType (id::nodes))
         rebuildAll();
     else if (parent.hasType (id::connections) || child.hasType (id::connections))
-        repaint();  // Kabel entfernt
+        refreshFlowColours();  // Kabel entfernt → Vererbung neu
 }
 
 void NodeCanvas::valueTreeRedirected (juce::ValueTree&)
@@ -154,8 +171,8 @@ void NodeCanvas::valueTreeRedirected (juce::ValueTree&)
 
 void NodeCanvas::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    // ChannelNames-Farbe/Pairing hat sich geändert → Input-Kabel neu einfärben
-    repaint();
+    // ChannelNames-Farbe/Pairing geändert → Vererbung + Input-Kabel neu
+    refreshFlowColours();
 }
 
 //==============================================================================
@@ -313,23 +330,129 @@ void NodeCanvas::paint (juce::Graphics& g)
 juce::Colour NodeCanvas::cableColourFor (const juce::String& sourceUuid, int sourceChannel) const
 {
     const juce::Colour defaultCable (0xff8fd0a0);
-
-    const auto sourceNode = rootState.getChildWithName (id::nodes)
-                                .getChildWithProperty (id::nodeId, sourceUuid);
-    if (! sourceNode.isValid())
-        return defaultCable;
-
-    juce::uint32 rgb = 0;
-
-    // audio_in: die Farbe lebt pro Kanal in ChannelNames (App-Zustand). Der
-    // Endpunkt trägt den Factory-Key "audio_input" (moduleId ist "audio_in")
-    if (channelNames != nullptr
-        && GraphManager::factoryKeyOf (sourceNode) == audioInputModuleId)
-        rgb = channelNames->getColour (ChannelNames::Direction::input, sourceChannel);
-    else
-        rgb = (juce::uint32) (int) sourceNode.getProperty (id::nodeColour, 0);
-
+    const auto rgb = lookupSourceRgb (sourceUuid, sourceChannel);
     return rgb != 0 ? juce::Colour (0xff000000u | (rgb & 0x00ffffffu)) : defaultCable;
+}
+
+//==============================================================================
+juce::uint32 NodeCanvas::blendRgb (const std::vector<juce::uint32>& colours)
+{
+    if (colours.empty())
+        return 0;
+
+    juce::uint64 r = 0, g = 0, b = 0;
+    for (const auto c : colours)
+    {
+        r += (c >> 16) & 0xffu;
+        g += (c >> 8)  & 0xffu;
+        b += c         & 0xffu;
+    }
+
+    const auto n = (juce::uint64) colours.size();
+    const auto rgb = (juce::uint32) (((r / n) << 16) | ((g / n) << 8) | (b / n));
+    return rgb == 0 ? 0x010101u : rgb;  // 0 ist der „keine"-Sentinel
+}
+
+juce::uint32 NodeCanvas::computeEffectiveRgb (const juce::String& nodeUuid,
+                                              std::set<juce::String>& visiting)
+{
+    if (const auto it = flowColours.find (nodeUuid); it != flowColours.end())
+        return it->second;  // memoisiert
+
+    const auto node = rootState.getChildWithName (id::nodes)
+                          .getChildWithProperty (id::nodeId, nodeUuid);
+    if (! node.isValid())
+        return 0;
+
+    // audio_in ist reine Quelle (Farbe pro Kanal) — kein Einzel-Node-Wert
+    if (GraphManager::factoryKeyOf (node) == audioInputModuleId)
+        return 0;
+
+    // Explizite Node-Farbe gewinnt IMMER (bewusstes Label)
+    if (const auto explicitRgb = (juce::uint32) (int) node.getProperty (id::nodeColour, 0);
+        explicitRgb != 0)
+    {
+        flowColours[nodeUuid] = explicitRgb;
+        return explicitRgb;
+    }
+
+    if (visiting.count (nodeUuid) > 0)
+        return 0;  // Zyklus — Zweig nicht weiter verfolgen (nicht cachen)
+    visiting.insert (nodeUuid);
+
+    // Gemischte Farbe aller eingehenden Kabel (0/keine übersprungen)
+    std::vector<juce::uint32> incoming;
+    const auto connections = rootState.getChildWithName (id::connections);
+    for (int i = 0; i < connections.getNumChildren(); ++i)
+    {
+        const auto conn = connections.getChild (i);
+        if (conn.getProperty (id::destNodeId).toString() != nodeUuid)
+            continue;
+
+        const auto srcUuid = conn.getProperty (id::sourceNodeId).toString();
+        const auto srcCh   = (int) conn.getProperty (id::sourceChannel);
+
+        if (const auto rgb = sourceChannelRgb (srcUuid, srcCh, visiting); rgb != 0)
+            incoming.push_back (rgb);
+    }
+
+    visiting.erase (nodeUuid);
+
+    const auto result = blendRgb (incoming);
+    flowColours[nodeUuid] = result;
+    return result;
+}
+
+juce::uint32 NodeCanvas::sourceChannelRgb (const juce::String& sourceUuid, int channel,
+                                           std::set<juce::String>& visiting)
+{
+    const auto node = rootState.getChildWithName (id::nodes)
+                          .getChildWithProperty (id::nodeId, sourceUuid);
+    if (! node.isValid())
+        return 0;
+
+    if (channelNames != nullptr && GraphManager::factoryKeyOf (node) == audioInputModuleId)
+        return channelNames->getColour (ChannelNames::Direction::input, channel);
+
+    return computeEffectiveRgb (sourceUuid, visiting);
+}
+
+juce::uint32 NodeCanvas::lookupSourceRgb (const juce::String& sourceUuid, int channel) const
+{
+    const auto node = rootState.getChildWithName (id::nodes)
+                          .getChildWithProperty (id::nodeId, sourceUuid);
+    if (! node.isValid())
+        return 0;
+
+    // audio_in: Farbe pro Kanal (ChannelNames)
+    if (channelNames != nullptr && GraphManager::factoryKeyOf (node) == audioInputModuleId)
+        return channelNames->getColour (ChannelNames::Direction::input, channel);
+
+    if (const auto it = flowColours.find (sourceUuid); it != flowColours.end())
+        return it->second;
+
+    return 0;
+}
+
+void NodeCanvas::refreshFlowColours()
+{
+    flowColours.clear();
+
+    const auto nodes = rootState.getChildWithName (id::nodes);
+    for (int i = 0; i < nodes.getNumChildren(); ++i)
+    {
+        std::set<juce::String> visiting;
+        computeEffectiveRgb (nodes.getChild (i).getProperty (id::nodeId).toString(), visiting);
+    }
+
+    // Effektive Farbe in die Header-Punkte schieben (audio_in hat keinen)
+    for (auto& comp : nodeComponents)
+    {
+        const auto it = flowColours.find (comp->getNodeUuid());
+        comp->setFlowColour (it != flowColours.end() ? it->second : 0);
+    }
+
+    repaint();  // Kabel folgen der neuen Farbe
 }
 
 void NodeCanvas::mouseDown (const juce::MouseEvent& event)

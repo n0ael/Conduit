@@ -82,6 +82,11 @@ public:
     [[nodiscard]] const juce::String& getNodeUuid() const noexcept { return nodeUuid; }
     [[nodiscard]] bool isTearingDown() const noexcept              { return tearingDown; }
 
+    /** Effektive (ggf. geerbte) Farbe für den Header-Punkt — vom NodeCanvas
+        gesetzt (Signal-Flow-Farbvererbung); 0 = keine → Default-Grün. No-op
+        an I/O-Endpunkten (kein Punkt). */
+    void setFlowColour (juce::uint32 rgb);
+
     /** Canvas-Callback: Teardown abgeschlossen — Component jetzt zerstören.
         Nach dem Aufruf darf die Component nicht mehr angefasst werden. */
     std::function<void (NodeComponent&)> onTeardownFinished;
