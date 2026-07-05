@@ -484,7 +484,9 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/InputLinkSendTests.cpp
         Tests/Core/LinkAudioSendTests.cpp
         Tests/Core/LinkSendTapsTests.cpp
+        Tests/Core/LaunchQuantizationTests.cpp
         Tests/Core/LooperMathTests.cpp
+        Tests/Core/LooperClipMathTests.cpp
         Tests/Core/BarSampleAnchorsTests.cpp
         Tests/Core/LooperSourceTests.cpp
         Tests/Core/LooperWaveformTapTests.cpp
