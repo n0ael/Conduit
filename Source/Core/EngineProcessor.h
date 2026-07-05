@@ -26,6 +26,7 @@
 #include "OscSendService.h"
 #include "OscSendSettings.h"
 #include "TransportSettings.h"
+#include "LooperSettings.h"
 #include "RemoteModuleBinder.h"
 #include "Interfaces/IClockSource.h"
 #include "Modules/ConduitModule.h"
@@ -165,6 +166,12 @@ public:
         lauscht und speist die LinkClock (applyTransportSettings). */
     [[nodiscard]] TransportSettings& getTransportSettings() noexcept;
 
+    /** Looper-Page-Zustand (M5): Struktur, Quellen, Mixer, Menü-Optionen —
+        App-Zustand in eigener Datei (Conduit/Looper.settings); der
+        EngineProcessor lauscht und spiegelt in Bank/Modell
+        (applyLooperSettings). */
+    [[nodiscard]] LooperSettings& getLooperSettings() noexcept { return looperSettings; }
+
     //==========================================================================
     /** Looper-Quelle (B3/M4) [Message Thread]: Quell-Schlüssel
         ("master" | "hw:{paar}" | "tap:{name}") PRO LOOPER auflösen und
@@ -261,6 +268,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
     void applyMeterSettings();
     void applyTransportSettings();  // TransportSettings → LinkClock
+    void applyLooperSettings();     // LooperSettings → Bank/Modell/Arming (M5)
 
     /** Looper-Quelle (B3): Schlüssel aus den TransportSettings in
         Capture-Indizes auflösen und Arming nachziehen — bei Quellwahl und
@@ -333,10 +341,6 @@ private:
     std::array<int, static_cast<std::size_t> (LooperBank::maxLoopers)> looperRightIndex {
         -1, -1, -1, -1 };
 
-    // Quell-Schlüssel pro Looper (Looper 0 lebt in den TransportSettings,
-    // M5 migriert alles in die LooperSettings); leerer Schlüssel = keine Quelle
-    std::array<juce::String, static_cast<std::size_t> (LooperBank::maxLoopers)> looperSourceKeys;
-
     // Zuletzt gearmter Kanalsatz (Vereinigung aller Looper-Quellen) —
     // Basis des Diff beim Re-Arming (geteilte Quellen bleiben offen)
     std::vector<int> looperArmedIndices;
@@ -376,6 +380,10 @@ private:
     // ChangeListener speist LinkClock (Start/Stop-Sync, Clock-Offset) und
     // Metronom (Enable, Ziel-Anker)
     TransportSettings transportSettings;
+
+    // Looper-Page-Zustand (M5): Struktur/Quellen/Mixer/Menü-Optionen in
+    // eigener Datei; Quell-Schlüssel aller Looper leben HIER
+    LooperSettings looperSettings;
 
     // Link-synchroner Click — läuft nach dem GraphFader auf die Anker-Kanäle
     Metronome metronome;

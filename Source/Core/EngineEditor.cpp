@@ -185,9 +185,10 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
 
     // Spektrum-View (S2): persistierter Zustand steuert Strip + Kachel-LED;
     // der Klick schaltet die Page selbst um, hier nur Persistenz
-    looperPage.setSpectrumView (engine.getTransportSettings().isLooperSpectrumEnabled());
+    // (M5: Looper-Zustand lebt in den LooperSettings, Looper 0)
+    looperPage.setSpectrumView (engine.getLooperSettings().isSpectrumView (0));
     looperPage.onViewToggled = [this] (bool spectrum)
-    { engine.getTransportSettings().setLooperSpectrumEnabled (spectrum); };
+    { engine.getLooperSettings().setSpectrumView (0, spectrum); };
 
     // Metronom-Ziel-Paare fürs Link-Menü: Labels aus den ChannelNames,
     // Kanalzahl aus dem audio_out-Tree-Node (folgt der Hardware)
@@ -391,7 +392,7 @@ std::vector<LooperPage::Source> EngineEditor::buildLooperSources()
 void EngineEditor::rebuildLooperSources()
 {
     looperPage.setSources (buildLooperSources(),
-                           engine.getTransportSettings().getLooperSource());
+                           engine.getLooperSettings().getSourceKey (0));
 
     // Ausgabe-Paare hängen an denselben Broadcasts (ChannelNames/Hardware)
     looperPage.setOutputPairs (buildOutputPairNames(),

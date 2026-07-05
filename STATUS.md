@@ -104,6 +104,29 @@ modul-ready).
   - Tests: LooperSessionModelTests (Target/Commit/Auto-Advance/Overwrite/
     Launch/Delete/Struktur-Guards/4-Looper-Parallel), LooperSourceTests
     um Refcount + Tap-Instanzen erweitert. 422 Fälle grün.
+- **M5 (fertig, 05.07.2026):** LooperSettings (strukturierte Persistenz).
+  - **`Source/Core/LooperSettings`**: eigene Conduit/Looper.settings,
+    ValueTree↔XML im PropertiesFile (Muster ChannelNames). Globale
+    Menü-Optionen (launchQuant, tapMode retrigger|stop, halveMode,
+    reverseMode, variRaster semi|scale, variScope track|looper, soloScope,
+    visibleSlots 4–12 [reine Anzeige-Größe], deleteLatch, autoAdvance,
+    numLoopers) + pro Looper (sourceKey, spectrum, numTracks) + pro Track
+    (gain, pan, mute, solo, variQuantized [Default frei]). Clips bleiben
+    bewusst session-flüchtig (Save-Geste M9).
+  - **Migration:** Einmal-Übernahme der Legacy-Schlüssel
+    TransportSettings::looperSource/looperSpectrum → Looper 0 (nur ohne
+    gespeicherten Zustand); die alten Keys bleiben liegen, werden nicht
+    mehr geschrieben. looperAnchor (Output global) bleibt in den
+    TransportSettings.
+  - **EngineProcessor:** looperSettings-Member + applyLooperSettings()
+    (ChangeListener): Struktur-Sync ins Modell (idempotent), autoAdvance,
+    soloScope → Bank, Mix-Werte → Bank, Quellen → Arming. Quell-Schlüssel
+    aller Looper leben jetzt in den LooperSettings (setLooperSource
+    schreibt dorthin). EngineEditor liest Spektrum/Quelle aus den
+    LooperSettings (Looper 0).
+  - Tests: LooperSettingsTests (Defaults, Roundtrip über Neuinstanz,
+    Clamps/Out-of-range, Einmal-Migration), LooperSourceTests angepasst.
+    426 Fälle grün.
 
 ---
 

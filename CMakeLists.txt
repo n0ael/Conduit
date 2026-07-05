@@ -121,6 +121,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/Capture/BufferPool.cpp
     Source/Core/Capture/CaptureChannel.cpp
     Source/Core/Capture/CaptureService.cpp
+    Source/Core/LooperSettings.cpp
     Source/Core/Looper/LooperBank.cpp
     Source/Core/Looper/LooperSessionModel.cpp
     Source/Core/Looper/LooperWaveformTap.cpp
@@ -493,6 +494,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/LooperWaveformTapTests.cpp
         Tests/Core/LooperBankTests.cpp
         Tests/Core/LooperSessionModelTests.cpp
+        Tests/Core/LooperSettingsTests.cpp
         Tests/Core/MasterTapTests.cpp
         Tests/Core/MeterSettingsTests.cpp
         Tests/Core/MetronomeTests.cpp
@@ -555,6 +557,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/Capture/BufferPool.cpp
         Source/Core/Capture/CaptureChannel.cpp
         Source/Core/Capture/CaptureService.cpp
+        Source/Core/LooperSettings.cpp
         Source/Core/Looper/LooperBank.cpp
         Source/Core/Looper/LooperSessionModel.cpp
         Source/Core/Looper/LooperWaveformTap.cpp

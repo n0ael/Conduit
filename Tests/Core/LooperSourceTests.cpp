@@ -16,7 +16,8 @@ TEST_CASE ("Looper-Quelle (B3): Schlüssel-Auflösung, Arming und Persistenz", "
 
     SECTION ("Default 'master': prepareToPlay armt die Master-Tap-Kanäle")
     {
-        REQUIRE (engine.getTransportSettings().getLooperSource() == "master");
+        // M5: Quelle lebt in den LooperSettings (Migration vom Transport-Default)
+        REQUIRE (engine.getLooperSettings().getSourceKey (0) == "master");
         REQUIRE (engine.getLooperLeftIndex() == 2);   // hinter 2 Hardware-Kanälen
         REQUIRE (engine.getLooperRightIndex() == 3);
         REQUIRE (capture.isChannelArmed (2));
@@ -34,8 +35,8 @@ TEST_CASE ("Looper-Quelle (B3): Schlüssel-Auflösung, Arming und Persistenz", "
         REQUIRE_FALSE (capture.isChannelArmed (2));
         REQUIRE_FALSE (capture.isChannelArmed (3));
 
-        // Persistenz: der Schlüssel liegt in den TransportSettings
-        REQUIRE (engine.getTransportSettings().getLooperSource() == "hw:0");
+        // Persistenz: der Schlüssel liegt in den LooperSettings (M5)
+        REQUIRE (engine.getLooperSettings().getSourceKey (0) == "hw:0");
     }
 
     SECTION ("Hardware-Paar außerhalb der Kanalzahl bleibt unaufgelöst")

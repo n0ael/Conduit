@@ -41,6 +41,7 @@ EngineProcessor::EngineProcessor (const juce::File& settingsFolder)
       uiSettings       (redirectSettings (UiSettings::defaultOptions(),       settingsFolder)),
       moduleUiDefaults (redirectSettings (ModuleUiDefaults::defaultOptions(), settingsFolder)),
       transportSettings (redirectSettings (TransportSettings::defaultOptions(), settingsFolder)),
+      looperSettings   (redirectSettings (LooperSettings::defaultOptions(),   settingsFolder)),
       oscSendSettings  (redirectSettings (OscSendSettings::defaultOptions(),  settingsFolder))
 {
     // Schema 6.2 — die drei Top-Level-Container des Root-Trees
@@ -101,6 +102,15 @@ EngineProcessor::EngineProcessor (const juce::File& settingsFolder)
     transportSettings.addChangeListener (this);
     applyTransportSettings();
 
+    // Looper-Settings (M5): Einmal-Migration der Legacy-Schlüssel
+    // (looperSource/looperSpectrum aus den TransportSettings — die alten
+    // Keys bleiben dort, werden aber nicht mehr geschrieben), dann in
+    // Bank/Modell spiegeln
+    looperSettings.migrateFromLegacy (transportSettings.getLooperSource(),
+                                      transportSettings.isLooperSpectrumEnabled());
+    looperSettings.addChangeListener (this);
+    applyLooperSettings();
+
     // Eingebetteter Input-Link-Send (7.2): Zustand lebt in channelNames —
     // jeder Broadcast (Enable-Toggle, Pairing, Label-Rename, Device-Wechsel
     // via setActiveDevice) zieht den Diff nach
@@ -149,6 +159,7 @@ EngineProcessor::~EngineProcessor()
     channelNames.removeChangeListener (this);
     meterSettings.removeChangeListener (this);
     transportSettings.removeChangeListener (this);
+    looperSettings.removeChangeListener (this);
     rootState.removeListener (this);
 }
 
@@ -159,8 +170,50 @@ void EngineProcessor::changeListenerCallback (juce::ChangeBroadcaster* source)
         applyMeterSettings();
     else if (source == &transportSettings)
         applyTransportSettings();
+    else if (source == &looperSettings)
+        applyLooperSettings();
     else if (source == &channelNames)
         rebuildInputSends();
+}
+
+void EngineProcessor::applyLooperSettings()
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    // Struktur-Sync (idempotent, best effort): Modell folgt den Settings.
+    // Beim Start sind keine Clips da — remove kann nicht scheitern;
+    // zur Laufzeit hält das UI beide ohnehin synchron (M6).
+    while (looperSession.getNumLoopers() < looperSettings.getNumLoopers())
+        if (! looperSession.addLooper())
+            break;
+    while (looperSession.getNumLoopers() > looperSettings.getNumLoopers())
+        if (looperSession.removeLastLooper().failed())
+            break;
+
+    for (int l = 0; l < looperSession.getNumLoopers(); ++l)
+    {
+        while (looperSession.getNumTracks (l) < looperSettings.getNumTracks (l))
+            if (! looperSession.addTrack (l))
+                break;
+        while (looperSession.getNumTracks (l) > looperSettings.getNumTracks (l))
+            if (looperSession.removeLastTrack (l).failed())
+                break;
+    }
+
+    looperSession.setAutoAdvance (looperSettings.isAutoAdvanceEnabled());
+    looperBank.setSoloScopeGlobal (looperSettings.getSoloScope()
+                                   == LooperSettings::SoloScope::globalScope);
+
+    for (int l = 0; l < LooperBank::maxLoopers; ++l)
+        for (int t = 0; t < LooperBank::maxTracks; ++t)
+        {
+            looperBank.setTrackGain (l, t, looperSettings.getTrackGain (l, t));
+            looperBank.setTrackPan  (l, t, looperSettings.getTrackPan (l, t));
+            looperBank.setTrackMute (l, t, looperSettings.isTrackMuted (l, t));
+            looperBank.setTrackSolo (l, t, looperSettings.isTrackSolo (l, t));
+        }
+
+    applyLooperSourceArming();
 }
 
 void EngineProcessor::applyTransportSettings()
@@ -203,13 +256,9 @@ void EngineProcessor::setLooperSource (int looperIndex, const juce::String& sour
     if (looperIndex < 0 || looperIndex >= LooperBank::maxLoopers)
         return;
 
-    // Looper 0 persistiert weiter in den TransportSettings (M5 migriert
-    // alle Looper in die LooperSettings)
-    if (looperIndex == 0)
-        transportSettings.setLooperSource (sourceKey);
-    else
-        looperSourceKeys[static_cast<std::size_t> (looperIndex)] = sourceKey;
-
+    // Persistenz in den LooperSettings (M5) — der Broadcast läuft async,
+    // das Arming folgt hier sofort (Muster setLooperAnchor)
+    looperSettings.setSourceKey (looperIndex, sourceKey);
     applyLooperSourceArming();
 }
 
@@ -279,8 +328,7 @@ void EngineProcessor::applyLooperSourceArming()
 
     for (int l = 0; l < LooperBank::maxLoopers; ++l)
     {
-        const auto key = l == 0 ? transportSettings.getLooperSource()
-                                : looperSourceKeys[static_cast<std::size_t> (l)];
+        const auto key = looperSettings.getSourceKey (l);
 
         auto& left  = looperLeftIndex[static_cast<std::size_t> (l)];
         auto& right = looperRightIndex[static_cast<std::size_t> (l)];
