@@ -43,15 +43,15 @@ TEST_CASE ("PadGridLayout: pitchBendSemitones — Skala und Clamp", "[grid]")
 {
     grid::PadGridLayout layout;
 
-    REQUIRE (layout.pitchBendSemitones (0.3f, 0.3f) == 0.0f);
+    REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.3f, 0.3f), 0.0f));
 
     // Eine Pad-Breite (1/cols) nach rechts -> +semitonesPerPadWidth
     const auto padWidth = 1.0f / (float) layout.cols();
-    REQUIRE (layout.pitchBendSemitones (0.0f, padWidth) == 2.0f);
+    REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.0f, padWidth), 2.0f));
 
     // Große Bewegung -> Clamp auf +48
-    REQUIRE (layout.pitchBendSemitones (0.0f, 10.0f) == 48.0f);
-    REQUIRE (layout.pitchBendSemitones (10.0f, 0.0f) == -48.0f);
+    REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.0f, 10.0f), 48.0f));
+    REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (10.0f, 0.0f), -48.0f));
 }
 
 TEST_CASE ("PadGridLayout: expressionInPad — vertikale Position innerhalb des Pads", "[grid]")
@@ -59,9 +59,9 @@ TEST_CASE ("PadGridLayout: expressionInPad — vertikale Position innerhalb des 
     grid::PadGridLayout layout;
 
     // Oberste Reihe (padIndex 0): normY 0.0 = Pad-Oberkante -> 1.0
-    REQUIRE (layout.expressionInPad (0, 0.0f) == 1.0f);
+    REQUIRE (juce::exactlyEqual (layout.expressionInPad (0, 0.0f), 1.0f));
 
     // Unteres Ende des Pads (normY == Pad-Höhe) -> 0.0
     const auto padHeight = 1.0f / (float) layout.rows();
-    REQUIRE (layout.expressionInPad (0, padHeight) == 0.0f);
+    REQUIRE (juce::exactlyEqual (layout.expressionInPad (0, padHeight), 0.0f));
 }

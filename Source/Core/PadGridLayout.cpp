@@ -5,6 +5,10 @@
 namespace conduit::grid
 {
 
+PadGridLayout::PadGridLayout() noexcept : PadGridLayout (Config{})
+{
+}
+
 PadGridLayout::PadGridLayout (const Config& cfg) noexcept : config (cfg)
 {
 }

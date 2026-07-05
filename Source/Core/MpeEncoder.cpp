@@ -5,6 +5,10 @@
 namespace conduit::grid
 {
 
+MpeEncoder::MpeEncoder() noexcept : MpeEncoder (Config{})
+{
+}
+
 MpeEncoder::MpeEncoder (const Config& cfg) noexcept
     : config (cfg)
 {

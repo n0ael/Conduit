@@ -21,7 +21,12 @@ public:
         float semitonesPerPadWidth     = 2.0f;  // horizontale Bewegung: 1 Pad-Breite = 2 HT Bend
     };
 
-    explicit PadGridLayout (const Config& cfg = {}) noexcept;
+    // Clang lehnt eine verschachtelte Config mit In-Class-Defaults als
+    // Default-Argument ab ("needed within definition of enclosing class
+    // ... outside of member functions") — Default-Ctor delegiert stattdessen
+    // in der .cpp, wo PadGridLayout schon vollständig ist.
+    PadGridLayout() noexcept;
+    explicit PadGridLayout (const Config& cfg) noexcept;
 
     /** Pad-Index [0, cols*rows) aus normalisierter Position, oder -1 außerhalb.
         Index = row*cols + col, row 0 = OBERSTE Zeile. */

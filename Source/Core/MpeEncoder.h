@@ -23,7 +23,12 @@ public:
         float pitchBendRangeSemitones = 48.0f; // MPE-Default pro Member-Kanal
     };
 
-    explicit MpeEncoder (const Config& cfg = {}) noexcept;
+    // Clang lehnt eine verschachtelte Config mit In-Class-Defaults als
+    // Default-Argument ab ("needed within definition of enclosing class
+    // ... outside of member functions") — Default-Ctor delegiert stattdessen
+    // in der .cpp, wo MpeEncoder schon vollständig ist.
+    MpeEncoder() noexcept;
+    explicit MpeEncoder (const Config& cfg) noexcept;
 
     int channelForVoice (int voiceIndex) const noexcept; // 1-basierter MIDI-Kanal
 
