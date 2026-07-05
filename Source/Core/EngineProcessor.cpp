@@ -167,19 +167,21 @@ void EngineProcessor::applyTransportSettings()
     linkClock.setClockOffsetMs (transportSettings.getClockOffsetMs());
     metronome.setEnabled (transportSettings.isMetronomeEnabled());
     metronome.setAnchor (transportSettings.getMetronomeAnchor());
-    looperEngine.setAnchor (transportSettings.getLooperAnchor());
+    looperBank.setAnchor (transportSettings.getLooperAnchor());
 }
 
 juce::Result EngineProcessor::commitLooper (int bars)
 {
-    return looperEngine.commit (bars, captureService,
-                                looperLeftIndex, looperRightIndex, barAnchors);
+    // M2-Parität: ein Loop auf Looper 0 / Track 0 — Slot-/Target-Logik
+    // kommt mit dem LooperSessionModel (M4)
+    return looperBank.commitAndPlay (0, 0, bars, captureService,
+                                     looperLeftIndex, looperRightIndex, barAnchors);
 }
 
 void EngineProcessor::setLooperAnchor (int pairIndex)
 {
     transportSettings.setLooperAnchor (pairIndex);
-    looperEngine.setAnchor (transportSettings.getLooperAnchor());
+    looperBank.setAnchor (transportSettings.getLooperAnchor());
 }
 
 //==============================================================================
@@ -432,7 +434,7 @@ void EngineProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     // Capture-Indizes der virtuellen Slots neu (B3); Waveform-Binner und
     // Loop-Playback verwerfen ihren Stand (SampleClock-Reset, B4/B5)
     looperWaveformTap.prepare (sampleRate);
-    looperEngine.prepare (sampleRate);
+    looperBank.prepare (sampleRate);
     applyLooperSourceArming();
     inputLevels.prepare  (sampleRate, getTotalNumInputChannels());
     outputLevels.prepare (sampleRate, getTotalNumOutputChannels());
@@ -550,9 +552,9 @@ void EngineProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         // Loop-Playback (B5): NACH dem Master-Tap (der Looper kann seine
         // eigene Ausgabe nie wieder einfangen) und VOR dem Metronom.
         // Block-Start + Anker speisen den jitter-freien Beat-Playhead.
-        looperEngine.process (buffer, getTotalNumOutputChannels(), clockBus.current,
-                              clockNow >= blockSamples ? clockNow - blockSamples : 0,
-                              barAnchors);
+        looperBank.process (buffer, getTotalNumOutputChannels(), clockBus.current,
+                            clockNow >= blockSamples ? clockNow - blockSamples : 0,
+                            barAnchors);
     }
 
     // Metronom NACH dem Fader (Click faded bei Graph-Swaps nicht mit) und

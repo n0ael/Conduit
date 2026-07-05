@@ -7,13 +7,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "Core/Looper/BarSampleAnchors.h"
-#include "Core/Looper/LooperEngine.h"
+#include "Core/Looper/LooperBank.h"
 #include "Util/RtAllocationGuard.h"
 
 using conduit::BarSampleAnchors;
 using conduit::CaptureService;
 using conduit::CaptureSettings;
-using conduit::LooperEngine;
+using conduit::LooperBank;
 
 namespace
 {
@@ -26,13 +26,13 @@ struct TempCaptureSettings
 {
     TempCaptureSettings()
         : folder (juce::File::getSpecialLocation (juce::File::tempDirectory)
-                      .getChildFile ("ConduitLooperEngineTests")
+                      .getChildFile ("ConduitLooperBankTests")
                       .getChildFile (juce::Uuid().toString()))
     {
         folder.createDirectory();
 
         juce::PropertiesFile::Options options;
-        options.applicationName = "ConduitLooperEngineTests";
+        options.applicationName = "ConduitLooperBankTests";
         options.filenameSuffix  = ".settings";
         options.folderName      = folder.getFullPathName();
         settings = std::make_unique<CaptureSettings> (options);
@@ -48,15 +48,16 @@ struct TempCaptureSettings
     std::unique_ptr<CaptureSettings> settings;
 };
 
-/** Audio-Callback-Surrogat: Input-Tap → Takt-Anker → Loop-Playback laufen
-    synchron wie im EngineProcessor; das Eingangssignal ist eine Funktion
-    der ABSOLUTEN SampleClock-Position (Loop-Inhalt nachrechenbar). */
-struct EngineRig
+/** Audio-Callback-Surrogat (1:1 aus den LooperEngineTests portiert):
+    Input-Tap → Takt-Anker → Loop-Playback laufen synchron wie im
+    EngineProcessor; das Eingangssignal ist eine Funktion der ABSOLUTEN
+    SampleClock-Position (Loop-Inhalt nachrechenbar). */
+struct BankRig
 {
-    EngineRig()
+    BankRig()
     {
         service.prepare (testSampleRate, blockSize, 2);
-        engine.prepare (testSampleRate);
+        bank.prepare (testSampleRate);
         service.setChannelArmed (0, true);
         service.setChannelArmed (1, true);
 
@@ -90,13 +91,19 @@ struct EngineRig
             anchors.process (clock, blockStart, blockSize);
 
             output.clear();
-            engine.process (output, 2, clock, blockStart, anchors);
+            bank.process (output, 2, clock, blockStart, anchors);
 
             beat += clock.beatsPerSample() * blockSize;
         }
     }
 
     void feedBars (double bars) { feedBlocks ((int) std::lround (bars * 4.0 * 24000.0 / blockSize)); }
+
+    /** Commit auf Looper 0 / Track 0 (Paritäts-Semantik der M2-Stufe). */
+    [[nodiscard]] juce::Result commit (int bars, int looper = 0, int track = 0)
+    {
+        return bank.commitAndPlay (looper, track, bars, service, 0, 1, anchors);
+    }
 
     /** Wall-Clock-Jitter des realen captureClockState: bipolares LCG-
         Rauschen ±clockJitterBeats auf dem Block-Beat (0 = jitter-frei). */
@@ -114,7 +121,7 @@ struct EngineRig
     TempCaptureSettings temp;
     CaptureService service { *temp.settings };
     BarSampleAnchors anchors;
-    LooperEngine engine;
+    LooperBank bank;
     juce::AudioBuffer<float> input  { 2, blockSize };
     juce::AudioBuffer<float> output { 2, blockSize };
     double beat = 0.0;
@@ -125,8 +132,7 @@ struct EngineRig
     std::function<float (std::uint64_t)> signal;
 };
 
-/** Blockweises Stetigkeits-Monitoring des Looper-Outputs (Kanal 0):
-    größter Sample-zu-Sample-Sprung inklusive Blockgrenzen. */
+/** Blockweises Stetigkeits-Monitoring des Looper-Outputs (Kanal 0). */
 struct ContinuityMonitor
 {
     void observe (const juce::AudioBuffer<float>& output, int numSamples)
@@ -149,9 +155,9 @@ struct ContinuityMonitor
 } // namespace
 
 //==============================================================================
-TEST_CASE ("LooperEngine: Commit ist sample-exakt und phasenstarr zum Session-Beat", "[looper]")
+TEST_CASE ("LooperBank: Commit ist sample-exakt und phasenstarr zum Session-Beat", "[looper]")
 {
-    EngineRig rig;
+    BankRig rig;
 
     // Sägezahn mit Perioden-Länge 1 Beat, phasenstarr zur SampleClock:
     // an Taktgrenzen (Vielfache von 96 000) startet die Periode bei 0 —
@@ -162,9 +168,9 @@ TEST_CASE ("LooperEngine: Commit ist sample-exakt und phasenstarr zum Session-Be
     rig.feedBars (2.5);
     REQUIRE (rig.anchors.latestBoundaryBar() >= 2);
 
-    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
-    REQUIRE (rig.engine.isPlaying());
-    REQUIRE (rig.engine.getLoopBars() == 1);
+    REQUIRE (rig.commit (1).wasOk());
+    REQUIRE (rig.bank.isPlaying());
+    REQUIRE (rig.bank.getLoopBars() == 1);
 
     // Fade-In (240 Samples) ausklingen lassen, dann prüfen
     rig.feedBlocks (2);
@@ -179,9 +185,6 @@ TEST_CASE ("LooperEngine: Commit ist sample-exakt und phasenstarr zum Session-Be
         {
             const auto beatAt = blockStartBeat + (120.0 / (60.0 * testSampleRate)) * i;
 
-            // Erwartung: Loop-Länge 4 Beats, Ende an einer Taktgrenze
-            // (endBeat ≡ 0 mod 4) → Output = 0.5·frac(beat), außerhalb
-            // von Perioden-Sprung und Wrap-Zone
             const auto fracBeat = beatAt - std::floor (beatAt);
             const auto beatInBar = beatAt - std::floor (beatAt / 4.0) * 4.0;
             if (fracBeat < 0.05 || fracBeat > 0.95)
@@ -199,9 +202,9 @@ TEST_CASE ("LooperEngine: Commit ist sample-exakt und phasenstarr zum Session-Be
     REQUIRE (checked > 1'500);
 }
 
-TEST_CASE ("LooperEngine: Wrap-Crossfade hält den Übergang stetig", "[looper]")
+TEST_CASE ("LooperBank: Wrap-Crossfade hält den Übergang stetig", "[looper]")
 {
-    EngineRig rig;
+    BankRig rig;
 
     // Periode bewusst NICHT bar-synchron: am Wrap springt das Material um
     // ~0.58 — ohne Crossfade wäre der Sprung 1:1 hörbar
@@ -213,11 +216,9 @@ TEST_CASE ("LooperEngine: Wrap-Crossfade hält den Übergang stetig", "[looper]"
     };
 
     rig.feedBars (2.5);
-    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
+    REQUIRE (rig.commit (1).wasOk());
     rig.feedBlocks (2);  // Fade-In vorbei
 
-    // Über mehrere Loop-Durchläufe: maximale Sample-zu-Sample-Differenz —
-    // deckt insbesondere die Wraps ab (alle 96 000 Samples = 200 Blöcke)
     float previous = 0.0f;
     bool havePrevious = false;
     float maxDelta = 0.0f;
@@ -235,25 +236,16 @@ TEST_CASE ("LooperEngine: Wrap-Crossfade hält den Übergang stetig", "[looper]"
         }
     }
 
-    // Signal-Steigung ≈ 2π·0.8/70000·1 ≈ 7e-5/Sample; der 0.58-Sprung über
-    // 240 Crossfade-Samples ≈ 2.4e-3 + Blende — alles weit unter 0.05
     REQUIRE (maxDelta < 0.05f);
 }
 
-TEST_CASE ("LooperEngine: Wall-Clock-Jitter erreicht den Lesekopf nicht", "[looper]")
+TEST_CASE ("LooperBank: Wall-Clock-Jitter erreicht den Lesekopf nicht", "[looper]")
 {
-    EngineRig rig;
-
-    // Reales Symptom (B5-Ohr-Abnahme 07/2026): beatAtBlockStart stammt aus
-    // der Link-Wall-Clock und jittert um den Callback-Scheduling-Versatz —
-    // als direkte Lese-Basis sprang der Lesekopf pro Block um Dutzende
-    // Samples (körnige "falsche Samplerate"-Verzerrung). ±0.002 Beats
-    // ≈ ±1 ms ≈ ±48 Samples @ 120 BPM / 48 kHz.
+    BankRig rig;
     rig.clockJitterBeats = 0.002;
 
-    // 100-Hz-Sinus (Periode 480 Samples): steil genug, dass Lesekopf-
-    // Sprünge als große Sample-Deltas sichtbar würden (max. Steigung
-    // ≈ 2π·0.8/480 ≈ 0.0105/Sample)
+    // 100-Hz-Sinus (Periode 480 Samples): Lesekopf-Sprünge wären als
+    // große Sample-Deltas sichtbar (v1-Lektion, LooperEngine-Historie)
     rig.signal = [] (std::uint64_t pos)
     {
         return 0.8f * static_cast<float> (
@@ -262,8 +254,8 @@ TEST_CASE ("LooperEngine: Wall-Clock-Jitter erreicht den Lesekopf nicht", "[loop
     };
 
     rig.feedBars (2.5);
-    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
-    rig.feedBlocks (2);  // Fade-In vorbei
+    REQUIRE (rig.commit (1).wasOk());
+    rig.feedBlocks (2);
 
     float previous = 0.0f;
     bool havePrevious = false;
@@ -282,83 +274,110 @@ TEST_CASE ("LooperEngine: Wall-Clock-Jitter erreicht den Lesekopf nicht", "[loop
         }
     }
 
-    // Kontinuierlicher Playhead: Deltas bleiben bei Signal-Steigung ×
-    // (1 + maxSlewRatio) plus Wrap-Blende — ein roher Wall-Clock-Lesekopf
-    // läge mit ±48-Sample-Sprüngen um Größenordnungen darüber (> 0.3)
     REQUIRE (maxDelta < 0.02f);
 }
 
-TEST_CASE ("LooperEngine: Re-Commit wechselt glitch-frei, Stop blendet aus", "[looper]")
+TEST_CASE ("LooperBank: Re-Commit wechselt glitch-frei, Stop blendet aus", "[looper]")
 {
-    EngineRig rig;
+    BankRig rig;
     rig.signal = [] (std::uint64_t) { return 0.4f; };  // konstant → Pegel-Checks
 
     rig.feedBars (4.5);
-    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
+    REQUIRE (rig.commit (1).wasOk());
     rig.feedBlocks (4);
 
-    // Konstantes Material: der Loop liefert stabil 0.4
     REQUIRE (std::abs (rig.output.getSample (0, 100) - 0.4f) < 1.0e-3f);
 
     // Re-Commit auf 2 Takte: während des Voice-Crossfades bleibt die Summe
     // beschränkt (beide Voices tragen dasselbe Material)
-    REQUIRE (rig.engine.commit (2, rig.service, 0, 1, rig.anchors).wasOk());
+    REQUIRE (rig.commit (2).wasOk());
     float maxSum = 0.0f;
     for (int block = 0; block < 4; ++block)
     {
         rig.feedBlocks (1);
         maxSum = juce::jmax (maxSum, rig.output.getMagnitude (0, blockSize));
     }
-    REQUIRE (maxSum < 0.81f);  // nie > Summe beider Voices bei Vollpegel
-    REQUIRE (rig.engine.getLoopBars() == 2);
+    REQUIRE (maxSum < 0.81f);
+    REQUIRE (rig.bank.getLoopBars() == 2);
 
-    // Nach den Fades: wieder exakt eine Voice
     rig.feedBlocks (4);
     REQUIRE (std::abs (rig.output.getSample (0, 100) - 0.4f) < 1.0e-3f);
 
     // Stop: 5-ms-Fade, danach Stille und kein isPlaying mehr
-    rig.engine.stop();
-    rig.feedBlocks (2);
-    rig.feedBlocks (1);
+    rig.bank.stopAll();
+    rig.feedBlocks (3);
     REQUIRE (rig.output.getMagnitude (0, blockSize) < 1.0e-6f);
-    REQUIRE_FALSE (rig.engine.isPlaying());
-    REQUIRE (rig.engine.getLoopBars() == 0);
+    REQUIRE_FALSE (rig.bank.isPlaying());
+    REQUIRE (rig.bank.getLoopBars() == 0);
 }
 
-TEST_CASE ("LooperEngine: Anker-Routing — OOB-Paar schreibt nicht, Rückkehr spielt weiter", "[looper]")
+TEST_CASE ("LooperBank: Re-Commit gibt den alten Clip frei (Retire-Protokoll)", "[looper]")
 {
-    EngineRig rig;
+    BankRig rig;
+    rig.feedBars (4.5);
+
+    REQUIRE (rig.commit (1).wasOk());
+    const auto oneClip = rig.bank.getRamBytesUsed();
+    REQUIRE (oneClip > 0);
+
+    REQUIRE (rig.commit (1).wasOk());
+    REQUIRE (rig.bank.getRamBytesUsed() >= 2 * oneClip);
+
+    // Audio verarbeitet deleteClip + Voice-Fade, quittiert den alten Clip;
+    // serviceMessageThread gibt ihn frei — RAM fällt auf einen Clip zurück
+    rig.feedBlocks (4);
+    rig.bank.serviceMessageThread();
+    REQUIRE (rig.bank.getRamBytesUsed() == oneClip);
+    REQUIRE (rig.bank.isPlaying());
+}
+
+TEST_CASE ("LooperBank: RAM-Budget begrenzt Commits sauber", "[looper]")
+{
+    BankRig rig;
+    rig.feedBars (2.5);
+
+    rig.bank.setRamBudgetBytes (1000);  // unter jeder Clip-Größe
+
+    const auto result = rig.commit (1);
+    REQUIRE (result.failed());
+    REQUIRE (result.getErrorMessage().contains ("RAM"));
+    REQUIRE_FALSE (rig.bank.isPlaying());
+
+    // Budget zurück → derselbe Commit geht durch
+    rig.bank.setRamBudgetBytes (LooperBank::defaultRamBudgetBytes);
+    REQUIRE (rig.commit (1).wasOk());
+}
+
+TEST_CASE ("LooperBank: Anker-Routing — OOB-Paar schreibt nicht, Rückkehr spielt weiter", "[looper]")
+{
+    BankRig rig;
     rig.signal = [] (std::uint64_t) { return 0.4f; };
 
     rig.feedBars (2.5);
-    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
-    rig.feedBlocks (2);  // Fade-In vorbei
+    REQUIRE (rig.commit (1).wasOk());
+    rig.feedBlocks (2);
     REQUIRE (std::abs (rig.output.getSample (0, 100) - 0.4f) < 1.0e-3f);
 
     // Anker-Paar 3 = Kanäle 6/7, der Testbuffer hat 2 → kein Write, aber
     // die Voice läuft weiter (Gerätewechsel lässt keine Zombies zurück)
-    rig.engine.setAnchor (3);
+    rig.bank.setAnchor (3);
     rig.feedBlocks (2);
     REQUIRE (rig.output.getMagnitude (0, blockSize) < 1.0e-6f);
     REQUIRE (rig.output.getMagnitude (1, blockSize) < 1.0e-6f);
-    REQUIRE (rig.engine.isPlaying());
+    REQUIRE (rig.bank.isPlaying());
 
-    // Zurück auf Paar 0: der Loop ist sofort wieder da (Gain stand voll)
-    rig.engine.setAnchor (0);
+    rig.bank.setAnchor (0);
     rig.feedBlocks (1);
     REQUIRE (std::abs (rig.output.getSample (0, 100) - 0.4f) < 1.0e-3f);
     REQUIRE (std::abs (rig.output.getSample (1, 100) - 0.4f) < 1.0e-3f);
 }
 
-TEST_CASE ("LooperEngine: Beat-Achsen-Sprung (Link-Re-Sync) re-synct klickfrei", "[looper]")
+TEST_CASE ("LooperBank: Beat-Achsen-Sprung (Link-Re-Sync) re-synct klickfrei", "[looper]")
 {
-    EngineRig rig;
+    BankRig rig;
 
     // 100-Hz-Sinus: 96 000 Samples/Takt = exakt 200 Perioden → der Loop
-    // wrappt nahtlos, jede Diskontinuität stammt vom Playback selbst.
-    // Feld-Befund 04.07.2026 (Parallel-Aufnahme): Link-Grid-Re-Syncs
-    // ließen die Anker-Messung pro Takt springen — jeder Snap war ein
-    // voller Splice-Klick im Loop.
+    // wrappt nahtlos, jede Diskontinuität stammt vom Playback selbst
     rig.signal = [] (std::uint64_t pos)
     {
         return 0.5f * static_cast<float> (
@@ -367,34 +386,27 @@ TEST_CASE ("LooperEngine: Beat-Achsen-Sprung (Link-Re-Sync) re-synct klickfrei",
     };
 
     rig.feedBars (2.5);
-    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
-    rig.feedBlocks (2);  // Fade-In vorbei
+    REQUIRE (rig.commit (1).wasOk());
+    rig.feedBlocks (2);
 
-    // Grid-Shift: die Beat-Achse springt +0.3 Beats (Peer-Re-Sync) und
-    // BLEIBT dort — die nächste Taktgrenze ankert auf der neuen Achse,
-    // die Messung springt, der Playhead muss folgen
     ContinuityMonitor monitor;
     rig.beatAxisOffset = 0.3;
 
-    for (int block = 0; block < 3 * 200; ++block)   // 3 Takte überwachen
+    for (int block = 0; block < 3 * 200; ++block)
     {
         rig.feedBlocks (1);
         monitor.observe (rig.output, blockSize);
     }
 
-    // Sinus-Steigung ≈ 0.0065/Sample, Duck-Rampe ≤ 0.5/240 ≈ 0.0021 —
-    // ein harter Splice läge bei bis zu ~1.0
     REQUIRE (monitor.maxDelta < 0.02f);
-
-    // Genau EIN Re-Sync (Duck-Snap), danach ist die neue Achse gelockt
-    REQUIRE (rig.engine.getSnapCount() == 1);
-    REQUIRE (rig.engine.isPlaying());
-    REQUIRE (rig.output.getMagnitude (0, blockSize) > 0.1f);  // Loop hörbar
+    REQUIRE (rig.bank.getSnapCount() == 1);
+    REQUIRE (rig.bank.isPlaying());
+    REQUIRE (rig.output.getMagnitude (0, blockSize) > 0.1f);
 }
 
-TEST_CASE ("LooperEngine: kurzer Wall-Clock-Spike wird OHNE Re-Sync absorbiert", "[looper]")
+TEST_CASE ("LooperBank: kurzer Wall-Clock-Spike wird OHNE Re-Sync absorbiert", "[looper]")
 {
-    EngineRig rig;
+    BankRig rig;
     rig.signal = [] (std::uint64_t pos)
     {
         return 0.5f * static_cast<float> (
@@ -403,15 +415,9 @@ TEST_CASE ("LooperEngine: kurzer Wall-Clock-Spike wird OHNE Re-Sync absorbiert",
     };
 
     rig.feedBars (2.5);
-    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
+    REQUIRE (rig.commit (1).wasOk());
     rig.feedBlocks (2);
 
-    // Bis kurz vor die nächste Taktgrenze laufen, dann GENAU die Grenz-
-    // Blöcke mit einem Wall-Clock-Spike (+0.25 Beats) ankern lassen.
-    // Erwartung: der Offset-Clamp der BarSampleAnchors begrenzt den
-    // Anker-Fehler auf ≤ 1 Block (~0.02 Beats) — der Slew trägt das
-    // lautlos ab, KEIN Re-Sync nötig (nur anhaltende Achsen-Shifts
-    // snappen, siehe Test oben).
     const auto beatsPerBlock = (120.0 / (60.0 * testSampleRate)) * blockSize;
     while (std::floor ((rig.beat + 2.0 * beatsPerBlock) / 4.0)
                <= std::floor (rig.beat / 4.0))
@@ -433,44 +439,48 @@ TEST_CASE ("LooperEngine: kurzer Wall-Clock-Spike wird OHNE Re-Sync absorbiert",
     }
 
     REQUIRE (monitor.maxDelta < 0.02f);
-    REQUIRE (rig.engine.getSnapCount() == 0);   // absorbiert, nicht gesnappt
-    REQUIRE (rig.engine.isPlaying());
+    REQUIRE (rig.bank.getSnapCount() == 0);   // absorbiert, nicht gesnappt
+    REQUIRE (rig.bank.isPlaying());
 }
 
-TEST_CASE ("LooperEngine: Fehlerfälle — Historie, Quelle, Länge", "[looper]")
+TEST_CASE ("LooperBank: Fehlerfälle — Historie, Quelle, Länge, Indizes", "[looper]")
 {
-    EngineRig rig;
+    BankRig rig;
 
     // Session-Anfang: noch kein kompletter Takt
-    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).failed());
+    REQUIRE (rig.commit (1).failed());
 
     rig.feedBars (2.5);
 
     // Keine Quelle aufgelöst
-    REQUIRE (rig.engine.commit (1, rig.service, -1, -1, rig.anchors).failed());
+    REQUIRE (rig.bank.commitAndPlay (0, 0, 1, rig.service, -1, -1, rig.anchors).failed());
+
+    // Ungültige Looper-/Track-Indizes
+    REQUIRE (rig.commit (1, -1, 0).failed());
+    REQUIRE (rig.commit (1, LooperBank::maxLoopers, 0).failed());
+    REQUIRE (rig.commit (1, 0, LooperBank::maxTracks).failed());
 
     // Grenzen 1+2 vorhanden (1-Takt-Commit ok), 4 Takte brauchen Grenze 5
-    REQUIRE (rig.engine.commit (4, rig.service, 0, 1, rig.anchors).failed());
-    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
+    REQUIRE (rig.commit (4).failed());
+    REQUIRE (rig.commit (1).wasOk());
 
     SECTION ("Loop über maxLoopSeconds schlägt fehl (tiefes Tempo)")
     {
-        // 30 BPM: 8 Takte = 102.4 s > 60 s (1 Beat = 96 000 Samples)
-        rig.engine.stop();
+        rig.bank.stopAll();
         rig.bpm = 30.0;
         rig.feedBlocks (8 * 4 * 96'000 / blockSize + 200);
 
-        const auto result = rig.engine.commit (8, rig.service, 0, 1, rig.anchors);
+        const auto result = rig.commit (8);
         REQUIRE (result.failed());
         REQUIRE (result.getErrorMessage().contains ("60"));
     }
 }
 
-TEST_CASE ("LooperEngine: process ist allocation-free (RT-Audit)", "[looper]")
+TEST_CASE ("LooperBank: process ist allocation-free (RT-Audit)", "[looper]")
 {
-    EngineRig rig;
+    BankRig rig;
     rig.feedBars (2.5);
-    REQUIRE (rig.engine.commit (1, rig.service, 0, 1, rig.anchors).wasOk());
+    REQUIRE (rig.commit (1).wasOk());
 
     const auto violationsBefore = conduit::rt::getAllocationViolations();
 
@@ -484,28 +494,29 @@ TEST_CASE ("LooperEngine: process ist allocation-free (RT-Audit)", "[looper]")
 }
 
 //==============================================================================
-TEST_CASE ("LooperEngine: nebenläufige Commits gegen laufendes Audio (Stress)", "[looper][stress]")
+TEST_CASE ("LooperBank: nebenläufige Commits gegen laufendes Audio (Stress)", "[looper][stress]")
 {
-    EngineRig rig;
+    BankRig rig;
     rig.signal = [] (std::uint64_t) { return 0.4f; };
     rig.feedBars (4.5);
 
     std::atomic<bool> stop { false };
     std::atomic<int> commits { 0 };
 
-    // Message-Thread-Surrogat: Commits + Stops hämmern
+    // Message-Thread-Surrogat: Commits + Stops hämmern (commitAndPlay ruft
+    // serviceMessageThread intern — Retire-Konsument bleibt dieser Thread)
     std::thread committer ([&]
     {
         int bars = 1;
         while (! stop.load (std::memory_order_relaxed))
         {
-            if (rig.engine.commit (bars, rig.service, 0, 1, rig.anchors).wasOk())
+            if (rig.commit (bars).wasOk())
                 commits.fetch_add (1, std::memory_order_relaxed);
 
             bars = bars == 1 ? 2 : 1;
 
             if ((commits.load (std::memory_order_relaxed) % 7) == 6)
-                rig.engine.stop();
+                rig.bank.stopAll();
 
             std::this_thread::yield();
         }
@@ -524,4 +535,15 @@ TEST_CASE ("LooperEngine: nebenläufige Commits gegen laufendes Audio (Stress)",
 
     REQUIRE (bounded);
     REQUIRE (commits.load() > 0);
+
+    // Aufräumen konvergiert: alles quittiert und freigegeben bis auf den
+    // zuletzt aktiven Clip (Store) — kein Leak im Graveyard. Service pro
+    // Block interleaved, damit die Retire-Queue den Drain nie blockiert.
+    rig.bank.stopAll();
+    for (int block = 0; block < 8; ++block)
+    {
+        rig.feedBlocks (1);
+        rig.bank.serviceMessageThread();
+    }
+    REQUIRE (rig.bank.getRamBytesUsed() < 3 * 2 * 4 * (2 * 96'000 + 240 + 4096));
 }

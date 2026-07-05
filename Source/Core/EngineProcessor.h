@@ -7,7 +7,7 @@
 #include "Capture/LevelMeter.h"
 #include "ChannelNames.h"
 #include "Looper/BarSampleAnchors.h"
-#include "Looper/LooperEngine.h"
+#include "Looper/LooperBank.h"
 #include "Looper/LooperWaveformTap.h"
 #include "Metronome.h"
 #include "GraphFader.h"
@@ -186,15 +186,17 @@ public:
     [[nodiscard]] juce::Result commitLooper (int bars);
 
     /** [Message Thread] Loop-Playback mit 5-ms-Fade beenden. */
-    void stopLooper() noexcept { looperEngine.stop(); }
+    void stopLooper() noexcept { looperBank.stopAll(); }
 
     /** Ausgabe-Paar des Loop-Playbacks (B6) [Message Thread]: persistiert
         looperAnchor (Clamp in den Settings) und routet die Engine sofort
         auf die Kanäle 2n/2n+1. */
     void setLooperAnchor (int pairIndex);
 
-    /** Status fürs UI (Tape-LED, Stop-Kachel, Statuszeile). */
-    [[nodiscard]] const LooperEngine& getLooperEngine() const noexcept { return looperEngine; }
+    /** Status fürs UI (Tape-LED, Stop-Kachel, Statuszeile) — außerdem
+        Ziel des serviceMessageThread()-Aufrufs im Editor-Timer
+        (Retire-Quittungen der Bank, LooperBank-Doku). */
+    [[nodiscard]] LooperBank& getLooperBank() noexcept { return looperBank; }
 
     /** Callback-Timing-Diagnose (XRuns/Load) für die Dev-Modus-Anzeige. */
     [[nodiscard]] CallbackTimingMonitor& getTimingMonitor() noexcept { return timingMonitor; }
@@ -310,7 +312,7 @@ private:
 
     // Loop-Playback (B5): nach Master-Tap/Binner, vor dem Metronom auf
     // das Anker-Paar der TransportSettings (looperAnchor)
-    LooperEngine looperEngine;
+    LooperBank looperBank;
 
     // Callback-Timing-Diagnose (Dev-Modus): XRun-/Load-Messung um den
     // gesamten processBlock — begin als erste, end als letzte Operation

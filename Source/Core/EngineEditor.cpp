@@ -540,9 +540,11 @@ void EngineEditor::timerCallback()
     const auto devMode = engine.getUiSettings().isDevModeEnabled();
 
     // Looper-Status (B5): Tape-LED (Page offen ODER Loop spielt), Stop-
-    // Kachel und Statuszeile der Looper-Page
+    // Kachel und Statuszeile der Looper-Page. serviceMessageThread sammelt
+    // die Retire-Quittungen der Bank ein (Clip-Freigabe, LooperBank-Doku).
     {
-        const auto& looper = engine.getLooperEngine();
+        auto& looper = engine.getLooperBank();
+        looper.serviceMessageThread();
         const auto playing = looper.isPlaying();
 
         transportBar.setLooperStatus (pageHost.getPage() == TransportBar::pageLooper,

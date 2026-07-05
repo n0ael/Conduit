@@ -16,7 +16,43 @@
 
 ## Aktueller Meilenstein (Juli 2026 — in Arbeit)
 
-**Browser-Panel (M1–M6, Branch `feature/browser-panel`) — M1 FERTIG (04.07.2026):**
+**Looper-Page Vollausbau (Endless-Modell, M1–M10) — M2 FERTIG (05.07.2026):**
+
+Vollausbau des Retro-Loopers nach Design-Mock + Übergabe-Dokument
+(05.07.2026): bis 4 Looper (eigene Quelle) × bis 4 Tracks × Clip-Slots
+(Session-Verhalten, ein spielender Clip pro Track), Endless-Modell bleibt
+(immer-aufnehmend + Commit 8/4/2/1). Plan + sämtliche User-Entscheidungen:
+`~/.claude/plans/wir-bleiben-beim-endless-typed-conway.md` (Kurzfassung:
+Undo → Delete-Geste im Header, fast alle Verhaltens-Fragen als Menü-
+Optionen, VARI-Knob 0.25×–4× mit Rast-Button + Reset-mit-Sync, TARGET-
+Kurzklick = Track-Zyklus, Save-Geste = Clips antippen → BWF, OSC-Actions
+jetzt / MIDI später, LooperModule als Folge-Meilenstein — Engine bleibt
+modul-ready).
+
+- **M1 (fertig, 4448e71):** `Source/Core/LaunchQuantization.h` — app-weites
+  Launch-Quant-Enum (None/8–1 Bars/1/2…1/32, qBeats + Persist-Keys; existierte
+  noch nirgends). `Source/Core/Looper/LooperClipMath.h` — beat-abgeleitete
+  Clip-Phase mit Anker (Verallgemeinerung von loopPhaseBeats auf Varispeed/
+  Reverse/÷2-Fenster), positions-kontinuierliche Re-Anker-Formeln,
+  `gridCrossingOffset` mit FP-Epsilon (Grenze am Blockstoß rastete sonst
+  1 Sample zu spät — vom Test aufgedeckt). Paritätsbeweis gegen
+  loopPhaseBeats.
+- **M2 (fertig, 05.07.2026):** `LooperBank` + `LooperClip` ersetzen die
+  LooperEngine (Dateien gelöscht, Playhead/Wrap-Crossfade/Commit-Pfad 1:1
+  weitergezogen). Voices ([4][4]×3) REFERENZIEREN right-sized Clips statt
+  60-s-Prealloc (−46 MB); MT→Audio via SpscQueue<ClipCommand>
+  (activate/deleteClip/stopTrack) + Atomics, Audio→MT via Retire-Queue —
+  ein Delete wandert IMMER durch den Audio-Thread, erst dessen Quittung
+  gibt frei (serviceMessageThread im Editor-Timer; free nie im Audio-
+  Thread). Drain-Guard verhindert Retire-Überlauf. RAM-Konto (Default
+  1,5 GB) statt Prealloc — Commit über Budget schlägt sauber fehl.
+  EngineProcessor committet auf Looper 0/Track 0 (Paritätsverhalten).
+  Tests portiert + neu: Retire-Protokoll (RAM fällt nach Re-Commit auf
+  einen Clip zurück), RAM-Budget, Handoff-Stress. 404 Fälle grün.
+
+---
+
+**Browser-Panel — Verlaufsnotizen (ABGESCHLOSSEN 04.07.2026, auf master; Abschlussbericht siehe unten):**
 
 Kontextsensitiver, touch-first Browser als rechts angedocktes Panel
 (User-Prompt 04.07. mit fixer Informationsarchitektur: PROJEKTE · AUDIO
