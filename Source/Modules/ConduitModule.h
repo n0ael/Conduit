@@ -41,7 +41,8 @@ namespace id
     // Conduit-Patch als Node-Property) — nur so finden sich Device und
     // Node nach Neustarts beider Seiten wieder.
     inline const juce::Identifier remoteId      { "remoteId" };
-    inline const juce::Identifier tintColour    { "tintColour" };  // Track-Farbe (0x00RRGGBB)
+    inline const juce::Identifier tintColour    { "tintColour" };  // Track-Farbe (0x00RRGGBB, M4L-Announce)
+    inline const juce::Identifier nodeColour    { "nodeColour" };  // user-Node-Farbe (0x00RRGGBB, M-B) — Kabel-Quellfarbe
 
     // Inputs (Multi-Input Link Audio Send, 7.2) — pro Eingang ein Kanal-Slot
     inline const juce::Identifier inputs            { "Inputs" };

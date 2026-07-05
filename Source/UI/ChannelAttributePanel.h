@@ -7,6 +7,7 @@
 
 #include "Core/ChannelNames.h"
 #include "Core/InputLinkSend.h"
+#include "UI/ColourSwatchStrip.h"
 #include "UI/InputSendButton.h"
 
 namespace conduit
@@ -43,18 +44,8 @@ public:
 
     void paint (juce::Graphics& g) override;
     void resized() override;
-    void mouseDown (const juce::MouseEvent& event) override;
 
 private:
-    /** Farb-Swatch: Zielfarbe (0 = „keine"). */
-    struct Swatch
-    {
-        juce::uint32 colour = 0;         // 0x00RRGGBB, 0 = keine
-        juce::Rectangle<int> bounds;
-    };
-
-    [[nodiscard]] juce::uint32 currentColour() const;
-
     ChannelNames& channelNames;
     const int portIndex;
     const bool hasNextNeighbour;
@@ -63,11 +54,10 @@ private:
     juce::Label nameCaption;
     juce::Label nameEditor;            // editierbar → setUserLabel
     juce::Label colourCaption;
+    ColourSwatchStrip colourStrip;     // geteilt mit NodeAttributePanel
     juce::ToggleButton stereoToggle;   // nur sichtbar mit Partner-Kanal
     juce::Label sendCaption;
     std::unique_ptr<InputSendButton> sendButton;
-
-    std::vector<Swatch> swatches;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChannelAttributePanel)
 };

@@ -7,6 +7,7 @@
 #include "Modules/ScopeModule.h"
 #include "Modules/StepSequencerModule.h"
 #include "UI/ChannelAttributePanel.h"
+#include "UI/NodeAttributePanel.h"
 #include "PushLookAndFeel.h"
 
 namespace conduit
@@ -85,6 +86,17 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
     // weitergeleitete Events landen in mouseDown/mouseDrag (getEventRelativeTo
     // rechnet um), Doppelklick-Rename bleibt unberührt
     titleLabel.addMouseListener (this, false);
+
+    // Header-Farbpunkt (M-B): nur echte Module (keine I/O-Endpunkte). Standard
+    // grün, trägt die Node-Farbe sobald gesetzt (Quellfarbe der Kabel). Als
+    // eigenes Child fängt er die Maus ab — Drücken verschiebt den Node nicht.
+    if (! isExternalEndpoint)
+    {
+        colourDot = std::make_unique<NodeColourDot>();
+        colourDot->setDotColour (dotColourForNode());
+        colourDot->onLongPress = [this] { openNodeAttributePanel(); };
+        addAndMakeVisible (*colourDot);
+    }
 
     // Ports aus den persistierten Kanalzahlen (Schema 6.2); Kanal-Labels der
     // I/O-Endpunkte zieht rebuildPorts() gleich mit nach
@@ -297,6 +309,14 @@ void NodeComponent::valueTreePropertyChanged (juce::ValueTree& tree, const juce:
             beginTeardown();
         else if (property == id::nodeError || property == id::tintColour)
             repaint();
+        else if (property == id::nodeColour)  // Node-Farbe (auch Undo/Redo)
+        {
+            if (colourDot != nullptr)
+                colourDot->setDotColour (dotColourForNode());
+
+            if (auto* parent = getParentComponent())
+                parent->repaint();  // Kabel des Canvas folgen der Quellfarbe
+        }
         else if (property == id::moduleId)  // Rename (auch Undo/OSC-extern)
             titleLabel.setText (tree.getProperty (id::moduleId).toString(),
                                 juce::dontSendNotification);
@@ -810,7 +830,12 @@ void NodeComponent::resized()
     if (isChassisNode && devButton.isVisible())
         devButton.setBounds (header.removeFromRight (touchTarget).reduced (2, 8));
 
-    titleLabel.setBounds (header.withTrimmedLeft (8));
+    // Farbpunkt links: Touch-Area = ganze Header-Ecke (44×44), visuell klein
+    // (der Punkt zeichnet sich zentriert und kompakt); Titel folgt
+    if (colourDot != nullptr)
+        colourDot->setBounds (header.removeFromLeft (touchTarget));
+
+    titleLabel.setBounds (header.withTrimmedLeft (colourDot != nullptr ? 4 : 8));
 
     // Eingerückt, damit die Slider nicht unter den Port-Hit-Zonen liegen
     if (parameterPanel != nullptr)
@@ -966,6 +991,40 @@ void NodeComponent::openChannelAttributePanel (int channel)
         juce::Rectangle<int> (0, rowY - 12, getWidth(), 24));
 
     juce::CallOutBox::launchAsynchronously (std::move (panel), rowArea, nullptr);
+}
+
+juce::uint32 NodeComponent::nodeColourRgb() const
+{
+    return (juce::uint32) (int) nodeTree.getProperty (id::nodeColour, 0);
+}
+
+juce::Colour NodeComponent::dotColourForNode() const
+{
+    const auto rgb = nodeColourRgb();
+    return rgb != 0 ? juce::Colour (0xff000000u | (rgb & 0x00ffffffu))
+                    : push::colours::ledGreen;  // Default: leuchtendes Grün
+}
+
+void NodeComponent::openNodeAttributePanel()
+{
+    if (tearingDown)
+        return;
+
+    auto panel = std::make_unique<NodeAttributePanel> (
+        nodeTree.getProperty (id::moduleId).toString(), nodeColourRgb());
+
+    panel->onRename = [this] (juce::String name)
+    {
+        return graphManager.renameNode (nodeUuid, name);
+    };
+    panel->onColour = [this] (juce::uint32 colour)
+    {
+        graphManager.setNodeColour (nodeUuid, colour);
+    };
+
+    const auto anchor = colourDot != nullptr ? colourDot->getScreenBounds()
+                                             : getScreenBounds();
+    juce::CallOutBox::launchAsynchronously (std::move (panel), anchor, nullptr);
 }
 
 } // namespace conduit

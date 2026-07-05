@@ -112,6 +112,39 @@ TEST_CASE ("renameNode: OSC-Adresse folgt, Undo stellt sie wieder her", "[namedi
 }
 
 //==============================================================================
+TEST_CASE ("setNodeColour: Property, No-op, Undo/Redo, Entfernen", "[namedid]")
+{
+    NamedIdRig rig;
+    const auto node = rig.manager.addModuleNode (attenuatorId, {});
+    const auto uuid = uuidOf (node);
+
+    // Default: keine Farbe (keine Property)
+    REQUIRE_FALSE (node.hasProperty (conduit::id::nodeColour));
+
+    // Setzen
+    REQUIRE (rig.manager.setNodeColour (uuid, 0x00ff453au));
+    REQUIRE ((juce::uint32) (int) node.getProperty (conduit::id::nodeColour, 0) == 0x00ff453au);
+
+    // No-op bei gleicher Farbe (kein neuer Undo-Schritt)
+    REQUIRE (rig.manager.setNodeColour (uuid, 0x00ff453au));
+
+    // Undo → zurück auf keine
+    REQUIRE (rig.undoManager.undo());
+    REQUIRE_FALSE (node.hasProperty (conduit::id::nodeColour));
+
+    // Redo → Farbe wieder da
+    REQUIRE (rig.undoManager.redo());
+    REQUIRE ((juce::uint32) (int) node.getProperty (conduit::id::nodeColour, 0) == 0x00ff453au);
+
+    // 0 entfernt die Property (zurück zu keine)
+    REQUIRE (rig.manager.setNodeColour (uuid, 0));
+    REQUIRE_FALSE (node.hasProperty (conduit::id::nodeColour));
+
+    // Unbekannter Node
+    REQUIRE_FALSE (rig.manager.setNodeColour ("unbekannte-uuid", 0x00abcdefu));
+}
+
+//==============================================================================
 TEST_CASE ("renameNode validiert: Sanitizing, Kollision, Leername", "[namedid]")
 {
     NamedIdRig rig;

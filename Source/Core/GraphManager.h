@@ -101,6 +101,11 @@ public:
         unbekanntem Node. Message Thread. */
     bool renameNode (const juce::String& nodeUuid, const juce::String& requestedName);
 
+    /** Patch-Aktion (M-B): Node-Farbe (0x00RRGGBB, 0 = keine) — Quellfarbe der
+        ausgehenden Kabel. Undo-fähig, patch-persistent; NICHT tintColour (die
+        gehört dem M4L-Announce). false bei unbekanntem Node. Message Thread. */
+    bool setNodeColour (const juce::String& nodeUuid, juce::uint32 colour);
+
     /** Patch-Aktion (FX-Chassis 4.6): Link-Send-Tap eines Processor-Nodes
         an/aus — undo-fähig; der Property-Listener leitet live ans Modul
         weiter (create/retire ohne Rebuild). false bei unbekanntem Node.

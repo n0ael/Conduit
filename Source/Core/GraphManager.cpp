@@ -461,6 +461,30 @@ bool GraphManager::renameParameterButton (const juce::String& nodeUuid, const ju
     return true;
 }
 
+bool GraphManager::setNodeColour (const juce::String& nodeUuid, juce::uint32 colour)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    auto nodeTree = rootState.getChildWithName (id::nodes)
+                        .getChildWithProperty (id::nodeId, nodeUuid);
+
+    if (! nodeTree.isValid())
+        return false;
+
+    if ((juce::uint32) (int) nodeTree.getProperty (id::nodeColour, 0) == colour)
+        return true;  // No-op
+
+    undoManager.beginNewTransaction (colour != 0 ? "Modul-Farbe ändern"
+                                                 : "Modul-Farbe entfernen");
+
+    if (colour != 0)
+        nodeTree.setProperty (id::nodeColour, (int) colour, &undoManager);
+    else
+        nodeTree.removeProperty (id::nodeColour, &undoManager);  // 0 = keine Property
+
+    return true;
+}
+
 bool GraphManager::setLinkSendEnabled (const juce::String& nodeUuid, bool enabled)
 {
     JUCE_ASSERT_MESSAGE_THREAD

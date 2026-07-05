@@ -27,11 +27,20 @@ NodeCanvas::NodeCanvas (juce::ValueTree rootTree,
       uiSettings (uiSettingsToUse)
 {
     rootState.addListener (this);
+
+    // Input-Kanal-Farben leben in ChannelNames (App-Zustand) — Änderungen
+    // dort müssen die Kabel neu einfärben (M-B)
+    if (channelNames != nullptr)
+        channelNames->addChangeListener (this);
+
     rebuildAll();  // Tree kann schon Nodes tragen (Session-Restore)
 }
 
 NodeCanvas::~NodeCanvas()
 {
+    if (channelNames != nullptr)
+        channelNames->removeChangeListener (this);
+
     rootState.removeListener (this);
 }
 
@@ -100,8 +109,9 @@ void NodeCanvas::removeComponentFor (const juce::String& nodeUuid)
 //==============================================================================
 void NodeCanvas::valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property)
 {
-    // Kabel folgen bewegten Nodes
-    if (property == id::positionX || property == id::positionY)
+    // Kabel folgen bewegten Nodes; Node-Farbe färbt die Quell-Kabel um (M-B)
+    if (property == id::positionX || property == id::positionY
+        || property == id::nodeColour)
     {
         repaint();
         return;
@@ -140,6 +150,12 @@ void NodeCanvas::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree
 void NodeCanvas::valueTreeRedirected (juce::ValueTree&)
 {
     rebuildAll();
+}
+
+void NodeCanvas::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    // ChannelNames-Farbe/Pairing hat sich geändert → Input-Kabel neu einfärben
+    repaint();
 }
 
 //==============================================================================
@@ -251,39 +267,69 @@ void NodeCanvas::paint (juce::Graphics& g)
         g.drawRect (getLocalBounds(), 2);
     }
 
-    // Kabel aus Connections[] (Schema 6.2) — unter den Node-Kacheln
+    // Kabel aus Connections[] (Schema 6.2) — unter den Node-Kacheln, jedes
+    // in der Farbe seiner Quelle (M-B)
     const juce::PathStrokeType cableStroke (3.0f, juce::PathStrokeType::curved,
                                             juce::PathStrokeType::rounded);
     const auto connectionsTree = rootState.getChildWithName (id::connections);
-
-    g.setColour (juce::Colour (0xff8fd0a0));
 
     for (int i = 0; i < connectionsTree.getNumChildren(); ++i)
     {
         const auto connection = connectionsTree.getChild (i);
 
-        const auto start = getPortCentreInCanvas (connection.getProperty (id::sourceNodeId).toString(),
-                                                  false, (int) connection.getProperty (id::sourceChannel));
+        const auto sourceUuid    = connection.getProperty (id::sourceNodeId).toString();
+        const auto sourceChannel = (int) connection.getProperty (id::sourceChannel);
+
+        const auto start = getPortCentreInCanvas (sourceUuid, false, sourceChannel);
         const auto end   = getPortCentreInCanvas (connection.getProperty (id::destNodeId).toString(),
                                                   true,  (int) connection.getProperty (id::destChannel));
 
         if (start && end)
+        {
+            g.setColour (cableColourFor (sourceUuid, sourceChannel));
             g.strokePath (makeCablePath (start->toFloat(), end->toFloat()), cableStroke);
+        }
     }
 
-    // Kabel-Vorschau während des Drags
+    // Kabel-Vorschau während des Drags — Farbe der (Output-)Quelle
     if (activeCableDrag)
     {
         if (const auto origin = getPortCentreInCanvas (activeCableDrag->from.nodeUuid,
                                                        activeCableDrag->from.isInput,
                                                        activeCableDrag->from.channel))
         {
-            g.setColour (juce::Colour (0xff8fd0a0).withAlpha (0.5f));
+            const auto previewColour = activeCableDrag->from.isInput
+                ? juce::Colour (0xff8fd0a0)
+                : cableColourFor (activeCableDrag->from.nodeUuid, activeCableDrag->from.channel);
+
+            g.setColour (previewColour.withAlpha (0.5f));
             g.strokePath (makeCablePath (origin->toFloat(),
                                          activeCableDrag->currentPosition.toFloat()),
                           cableStroke);
         }
     }
+}
+
+juce::Colour NodeCanvas::cableColourFor (const juce::String& sourceUuid, int sourceChannel) const
+{
+    const juce::Colour defaultCable (0xff8fd0a0);
+
+    const auto sourceNode = rootState.getChildWithName (id::nodes)
+                                .getChildWithProperty (id::nodeId, sourceUuid);
+    if (! sourceNode.isValid())
+        return defaultCable;
+
+    juce::uint32 rgb = 0;
+
+    // audio_in: die Farbe lebt pro Kanal in ChannelNames (App-Zustand). Der
+    // Endpunkt trägt den Factory-Key "audio_input" (moduleId ist "audio_in")
+    if (channelNames != nullptr
+        && GraphManager::factoryKeyOf (sourceNode) == audioInputModuleId)
+        rgb = channelNames->getColour (ChannelNames::Direction::input, sourceChannel);
+    else
+        rgb = (juce::uint32) (int) sourceNode.getProperty (id::nodeColour, 0);
+
+    return rgb != 0 ? juce::Colour (0xff000000u | (rgb & 0x00ffffffu)) : defaultCable;
 }
 
 void NodeCanvas::mouseDown (const juce::MouseEvent& event)

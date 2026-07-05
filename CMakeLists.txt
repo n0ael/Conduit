@@ -211,6 +211,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/CaptureSettingsComponent.cpp
     Source/UI/CaptureToast.cpp
     Source/UI/ChannelAttributePanel.cpp
+    Source/UI/ColourSwatchStrip.cpp
     Source/UI/CurveEditor.cpp
     Source/UI/FxModulePanel.cpp
     Source/UI/GainFaderMeter.cpp
@@ -225,6 +226,8 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/OscSettingsComponent.cpp
     Source/UI/LooperPage.cpp
     Source/UI/LooperWaveformStrip.cpp
+    Source/UI/NodeAttributePanel.cpp
+    Source/UI/NodeColourDot.cpp
     Source/UI/PageHost.cpp
     Source/UI/ParameterPanel.cpp
     Source/UI/PortComponent.cpp
@@ -367,6 +370,7 @@ target_sources(Conduit PRIVATE
     Source/UI/CapturePanel.h
     Source/UI/CaptureToast.h
     Source/UI/ChannelAttributePanel.h
+    Source/UI/ColourSwatchStrip.h
     Source/UI/CurveEditor.h
     Source/UI/CurvedSlider.h
     Source/UI/FxModulePanel.h
@@ -376,7 +380,9 @@ target_sources(Conduit PRIVATE
     Source/UI/LinkAudioStatusBadge.h
     Source/UI/LinkMenuPanel.h
     Source/UI/LinkSendCreateDialog.h
+    Source/UI/NodeAttributePanel.h
     Source/UI/NodeCanvas.h
+    Source/UI/NodeColourDot.h
     Source/UI/NodeComponent.h
     Source/UI/OscSettingsComponent.h
     Source/UI/PageHost.h
@@ -655,6 +661,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/CaptureSettingsComponent.cpp
         Source/UI/CaptureToast.cpp
         Source/UI/ChannelAttributePanel.cpp
+        Source/UI/ColourSwatchStrip.cpp
         Source/UI/CurveEditor.cpp
         Source/UI/FxModulePanel.cpp
         Source/UI/GainFaderMeter.cpp
@@ -669,6 +676,8 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/OscSettingsComponent.cpp
         Source/UI/LooperPage.cpp
         Source/UI/LooperWaveformStrip.cpp
+        Source/UI/NodeAttributePanel.cpp
+        Source/UI/NodeColourDot.cpp
         Source/UI/PageHost.cpp
         Source/UI/ParameterPanel.cpp
         Source/UI/PortComponent.cpp

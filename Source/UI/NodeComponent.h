@@ -16,6 +16,7 @@
 #include "UI/InputSendButton.h"
 #include "UI/LevelMeterBar.h"
 #include "UI/LinkAudioSendPanel.h"
+#include "UI/NodeColourDot.h"
 #include "UI/ParameterPanel.h"
 #include "UI/PortComponent.h"
 #include "UI/ScopeDisplay.h"
@@ -155,6 +156,15 @@ private:
     /** Öffnet das ChannelAttributePanel als CallOutBox über der Kanalzeile. */
     void openChannelAttributePanel (int channel);
 
+    /** Öffnet das NodeAttributePanel (Rename + Farbe) am Header-Farbpunkt. */
+    void openNodeAttributePanel();
+
+    /** Node-Farbe aus dem Tree (0x00RRGGBB, 0 = keine). */
+    [[nodiscard]] juce::uint32 nodeColourRgb() const;
+
+    /** Punktfarbe: Node-Farbe, sonst Default-Grün (Push ledGreen). */
+    [[nodiscard]] juce::Colour dotColourForNode() const;
+
     /** Richtung der Kanal-Labels dieses Endpunkts; nullopt = kein Endpunkt
         oder keine ChannelNames-Quelle. */
     [[nodiscard]] std::optional<ChannelNames::Direction> portLabelDirection() const;
@@ -214,6 +224,7 @@ private:
 
     juce::Label titleLabel;  // named_id — Doppelklick benennt um (renameNode)
     juce::TextButton deleteButton;
+    std::unique_ptr<NodeColourDot> colourDot;  // Header-Farbpunkt (M-B, nur Module)
     juce::ComponentDragger dragger;
 
     std::vector<std::unique_ptr<PortComponent>> inputPorts;

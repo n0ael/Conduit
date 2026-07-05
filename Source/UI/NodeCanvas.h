@@ -41,7 +41,8 @@ namespace conduit
 */
 class NodeCanvas final : public juce::Component,
                          public juce::DragAndDropTarget,
-                         private juce::ValueTree::Listener
+                         private juce::ValueTree::Listener,
+                         private juce::ChangeListener
 {
 public:
     /** channelNamesToUse darf nullptr sein (Tests) — die NodeComponents
@@ -91,6 +92,14 @@ private:
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int formerIndex) override;
     void valueTreeRedirected (juce::ValueTree& tree) override;
+
+    // juce::ChangeListener [Message Thread] — ChannelNames-Farben (Input-Kabel)
+    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+
+    /** Quellfarbe eines Kabels: Input-Kanal-Farbe (ChannelNames) am audio_in
+        bzw. Node-Farbe des Quellmoduls; 0/keine → Default-Kabelfarbe. */
+    [[nodiscard]] juce::Colour cableColourFor (const juce::String& sourceUuid,
+                                               int sourceChannel) const;
 
     void rebuildAll();
     void addComponentFor (juce::ValueTree nodeTree);
