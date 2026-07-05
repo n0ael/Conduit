@@ -881,19 +881,26 @@ void EngineEditor::refreshLooperStatus (bool devMode)
         }
     }
 
-    // Statuszeile
+    // Statuszeile (Dev-Modus ergänzt Re-Syncs + RAM-Konto der Clips)
     if (playing)
     {
         auto status = juce::String ("spielt");
         if (const auto snaps = bank.getSnapCount(); devMode && snaps > 0)
             status << juce::String::fromUTF8 (" · ") << juce::String (snaps)
                    << (snaps == 1 ? " Re-Sync" : " Re-Syncs");
+        if (devMode)
+            status << juce::String::fromUTF8 (" · RAM ")
+                   << juce::String (bank.getRamBytesUsed() / 1'000'000) << " MB";
         looperPage.setStatus (status);
     }
     else
     {
-        looperPage.setStatus (juce::String::fromUTF8 (
-            "bereit — Target wählen, Segment-Klick committet die letzten 8/4/2/1 Takte"));
+        auto status = juce::String::fromUTF8 (
+            "bereit — Target wählen, Segment-Klick committet die letzten 8/4/2/1 Takte");
+        if (devMode && bank.getRamBytesUsed() > 0)
+            status << juce::String::fromUTF8 (" · RAM ")
+                   << juce::String (bank.getRamBytesUsed() / 1'000'000) << " MB";
+        looperPage.setStatus (status);
     }
 }
 

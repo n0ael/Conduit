@@ -708,6 +708,49 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
     ring-adressiertes Beat-Raum-Image + Segment-Blits (Fire-Palette);
     Segment-Klicks/Commit identisch in beiden Views.
 
+- **Looper-Vollausbau (M1–M10, 07/2026 — ersetzt das Ein-Loop-MVP oben;
+  dessen Lektionen [Playhead, Snap-Duck, Anker] gelten unverändert):**
+  - **Struktur:** bis 4 Looper (eigene Quelle + eigener WaveformTap) ×
+    bis 4 Tracks × 12 Clip-Slots (sichtbar 4–12 im Menü), Endless-Modell
+    (immer-aufnehmend, Segment-Klick committet 8/4/2/1 Takte in den
+    Target-Slot). Ein spielender Clip pro Track (Session-Verhalten).
+  - **Engine:** `LooperBank` (ersetzt LooperEngine) — Voices REFERENZIEREN
+    right-sized `LooperClip`s (RAM-Konto statt Prealloc, Default 1,5 GB);
+    MT→Audio via SpscQueue<ClipCommand>, Audio→MT via Retire-Queue
+    (Delete wandert IMMER durch den Audio-Thread, free nie im Callback,
+    exportPins verzögern die Freigabe). Clip-Parameter als Staged/Active-
+    Protokoll: der Audio-Thread wendet mit SEINEM Playhead positions-
+    kontinuierlich an (LooperClipMath, geschlossene Re-Anker-Formeln);
+    inhärente Lese-Sprünge deckt ein 5-ms-Splice-Duck pro Clip.
+    Quantisierte Aktionen (Start phasenstarr / Retrigger Anker=Grid /
+    Stop) als Pending-Action pro Track, sample-genau am Grid
+    (`LaunchQuantization.h` = app-weites Enum, 4.5). Track-Mix: Gain-Slew,
+    Balance-Pan (Mitte Unity), Mute/Solo (Scope pro Looper/global),
+    Post-Fader-Meter. `LooperSessionModel` = MT-Slot-/Target-/Aktiv-
+    Zustand über der Bank (EngineProcessor-frei, module-ready — einzige
+    Lücke fürs LooperModule: BarSampleAnchors-Injektion). WICHTIG:
+    prepareToPlay → `clearAllClips()` (Zombie-Pointer-Feld-Fund 05.07.).
+  - **Persistenz:** `LooperSettings` (Conduit/Looper.settings, ValueTree↔
+    XML): Struktur/Quellen/Mixer + alle Menü-Optionen (Quantisierung,
+    Tap-Modus, ÷2-Hälfte, Reverse-Punkt, VARI-Raster Halbtöne|Session-
+    Skala, VARI-Scope, Solo-Scope, sichtbare Slots, Delete-Latch,
+    Auto-Advance). Clips selbst session-flüchtig (Save-Geste exportiert).
+    Arming = VEREINIGUNG aller Looper-Quellen (Refcount-Diff — geteilte
+    Quelle bleibt offen, bis der letzte Looper sie verlässt).
+  - **UI:** Looper NEBENEINANDER (Mock-Layout); Fader OBEN mit vertikalem
+    Wischen; VARI-Rotary in Oktaven (Detent 1×, DK-Reset, Rast-Button,
+    Sync-Reset); TARGET-Kurzklick zykelt Tracks, Halten+Tap = Aktiv-
+    Auswahl. Header-Kontext (nur Looper-Page): DELETE-/SAVE-HoldTiles
+    (halten + Ziel antippen; Delete-Latch-Option) — Session-Save liegt
+    im Browser (PROJEKTE → „Session speichern…").
+  - **OSC-Actions** (`/conduit/looper/…`, Indizes 1-basiert): stop |
+    {n}/commit i:bars | {n}/stop | {n}/track/{t}/stop | {n}/target
+    i:track i:slot — Muster /conduit/sync (Erkennung vor Endpoint-Lookup,
+    AsyncUpdater → onLooperAction), fire-and-forget.
+  - **Clip-Export** (Save-Geste): `LooperClipExporter` → CaptureWriter-Job
+    (_l/_r, eingefrorene TrackSource, startPosition = commitStartSample →
+    bext-align zu Capture-Exports; `CaptureService::enqueueExternalJob`).
+
 - Touch-first Design: `setAcceptsTouchEvents(true)`
 - Minimale Touch-Target-Größe: 44px
 - Vollständig Mouse/Keyboard-kompatibel — kein Touch-only Code
@@ -753,7 +796,8 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
 | Euclid-/Turing-Module | v2.x | v1-Engines als Referenz (Launch-Quant, parametrischer Swing, Scale-Quantize) |
 | Push-3-Transport-Header (TransportBar, Metronom, globaler Swing) | v2.0 | erledigt 07/2026 — 10.0 |
 | FX-Chassis-Standard (I/O-Gains+Meter, CV/Parameter, Link-Send, Dev-Modus, Kurven, Control-Links, Defaults) | v2.0 | erledigt 07/2026 — 4.6 |
-| Looper-Page (Retro-Looper, Endlesss-Stil, MVP ein Loop) | v2.0 | erledigt 07/2026 — 10.0; Multi-Layer/Riff-Historie + LooperModule später |
+| Looper-Page (Retro-Looper, Endlesss-Stil, MVP ein Loop) | v2.0 | erledigt 07/2026 — 10.0 |
+| Looper-Vollausbau (4 Looper × 4 Tracks × Slots, Clip-Grid, VARI/Reverse/×2÷2, Delete/Save-Gesten, OSC-Actions, Clip-Export) | v2.0 | erledigt 07/2026 — 10.0; LooperModule + MIDI-Input + Drag-to-DAW später |
 | Mixer-Page | v2.x | ∥∥-Icon, Channel-Strips (Capture-Buttons wandern dorthin) |
 | Grid-Page (AbletonOSC-Remote) | v2.x | Ω-Icon, Remote-Steuerung von Live |
 | Clip-Page (Fugue-Machine-Sequencer) | v2.x | ▷▭-Icon, immer aktiv, CV- UND MIDI-Ziele |

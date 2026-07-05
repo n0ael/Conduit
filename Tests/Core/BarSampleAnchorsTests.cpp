@@ -234,6 +234,19 @@ TEST_CASE ("BarSampleAnchors: nebenläufige Lookups liefern nie Falschwerte (Str
         samplePos += 480;
     }
 
+    // Release-Flake-Fix (05.07.2026): der Reader-Thread kann später
+    // anlaufen, als der Writer für 200 Takte braucht (Thread-Start-Latenz
+    // > optimierte Schleife) — weiterschreiben, bis der Reader
+    // nachweislich getroffen hat, statt auf Scheduling-Glück zu bauen
+    const auto deadline = juce::Time::getMillisecondCounterHiRes() + 2000.0;
+    while (hits.load (std::memory_order_relaxed) == 0
+           && juce::Time::getMillisecondCounterHiRes() < deadline)
+    {
+        anchors.process (makeClock (beat), samplePos, 480);
+        beat += beatsPerSample * 480;
+        samplePos += 480;
+    }
+
     stop.store (true, std::memory_order_relaxed);
     reader.join();
 

@@ -210,6 +210,21 @@ modul-ready).
   - Tests: makeJob (Tasks/Pins/sample-exakte Reads/Grenzen), End-to-End
     (BWF-Datei sample-exakt zurückgelesen), Pin-vs-Delete am Bank-Rig
     (Graveyard wartet auf Unpin). 439 Fälle grün, ASan [looper] grün.
+- **M10 (fertig, 05.07.2026):** Härtung + Doku — MEILENSTEIN KOMPLETT.
+  - Release-Build der Tests verifiziert (Codegen-Härtung, 8× grün nach
+    Fix); dabei einen BESTEHENDEN Release-Flake gefixt:
+    BarSampleAnchors-Nebenläufigkeits-Test verlor das Scheduling-Rennen
+    (Thread-Start-Latenz > optimierte Writer-Schleife) — Writer schreibt
+    jetzt weiter, bis der Reader nachweislich getroffen hat.
+  - Dev-Diagnose: Looper-Statuszeile zeigt im Dev-Modus Re-Syncs + das
+    RAM-Konto der Clips („· RAM x MB").
+  - CLAUDE.md 10.0: Looper-Vollausbau-Absatz (Struktur/Engine/Persistenz/
+    UI/OSC/Export) + Roadmap-Zeile (erledigt; LooperModule + MIDI-Input +
+    Drag-to-DAW später). CI M6–M8 grün (TSan+ASan Ubuntu), M9 lief bei
+    Redaktionsschluss noch.
+  - OFFEN für den User-Endtest am Touchscreen: kompletter Live-Durchlauf
+    (Commit/Launch/VARI/Delete/Save, 4 Looper, Link-Session mit Live,
+    128er-Buffer — Release-Build für CPU-Vergleiche).
 
 ---
 
