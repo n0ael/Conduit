@@ -72,4 +72,9 @@ void MpeMidiSink::allNotesOff()
     }
 }
 
+void MpeMidiSink::setGlobalVolume (float value)
+{
+    target.send (encoder.masterVolume (value));
+}
+
 } // namespace conduit::grid

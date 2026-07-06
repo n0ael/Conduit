@@ -47,14 +47,9 @@ float PadGridLayout::pitchBendSemitones (float startNormX, float currentNormX) c
     return juce::jlimit (-config.pitchBendRangeSemitones, config.pitchBendRangeSemitones, semitones);
 }
 
-float PadGridLayout::expressionInPad (int padIndex, float normY) const noexcept
+float PadGridLayout::expressionFromDrag (float startNormY, float currentNormY) const noexcept
 {
-    const auto padHeight  = 1.0f / (float) config.rows;
-    const auto rowFromTop = padIndex / config.cols;
-    const auto top        = (float) rowFromTop * padHeight;
-    const auto withinFromTop = juce::jlimit (0.0f, 1.0f, (normY - top) / padHeight);
-
-    return 1.0f - withinFromTop;
+    return 0.5f + (startNormY - currentNormY) / config.yRangeNorm;
 }
 
 } // namespace conduit::grid

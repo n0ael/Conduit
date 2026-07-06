@@ -31,6 +31,8 @@ public:
     void voiceSlide     (int voiceIndex, float value) override;
     void allNotesOff    () override;
 
+    void setGlobalVolume (float value) override;
+
 private:
     IMidiOutputTarget& target;
     MpeEncoder         encoder;

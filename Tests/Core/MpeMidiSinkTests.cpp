@@ -76,3 +76,17 @@ TEST_CASE ("MpeMidiSink: allNotesOff beendet alle aktiven Stimmen", "[grid]")
     REQUIRE (fake.messages[1].getChannel() == 3);
     REQUIRE (fake.messages[1].getNoteNumber() == 64);
 }
+
+TEST_CASE ("MpeMidiSink: setGlobalVolume sendet CC7 auf Kanal 1", "[grid]")
+{
+    grid::FakeMidiTarget fake;
+    grid::MpeMidiSink sink (fake);
+
+    sink.setGlobalVolume (1.0f);
+
+    REQUIRE (fake.messages.size() == 1);
+    REQUIRE (fake.messages[0].isController());
+    REQUIRE (fake.messages[0].getChannel() == 1);
+    REQUIRE (fake.messages[0].getControllerNumber() == 7);
+    REQUIRE (fake.messages[0].getControllerValue() == 127);
+}

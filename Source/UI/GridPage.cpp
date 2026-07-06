@@ -3,14 +3,24 @@
 namespace conduit
 {
 
-GridPage::GridPage (grid::GridVoiceEngine& engine, grid::MidiDeviceTarget& midiTargetToUse)
-    : midiTarget (midiTargetToUse), keyboard (engine)
+GridPage::GridPage (grid::GridVoiceEngine& engineToUse, grid::MidiDeviceTarget& midiTargetToUse)
+    : engine (engineToUse), midiTarget (midiTargetToUse), keyboard (engineToUse)
 {
     addAndMakeVisible (outputCombo);
+    addAndMakeVisible (releaseAllButton);
+    addAndMakeVisible (volumeRibbon);
+    addAndMakeVisible (atOffsetRibbon);
     addAndMakeVisible (keyboard);
 
     rebuildDeviceList();
     outputCombo.onChange = [this] { handleDeviceSelected(); };
+
+    releaseAllButton.onClick = [this] { engine.allNotesOff(); };
+
+    volumeRibbon.onValueChanged = [this] (float value) { engine.setGlobalVolume (value); };
+
+    // Bipolar: Mitte (value01 == 0.5) -> Offset 0, oben -> +1, unten -> -1.
+    atOffsetRibbon.onValueChanged = [this] (float value) { engine.setPressureOffset ((value - 0.5f) * 2.0f); };
 }
 
 void GridPage::rebuildDeviceList()
@@ -44,7 +54,14 @@ void GridPage::handleDeviceSelected()
 void GridPage::resized()
 {
     auto bounds = getLocalBounds();
-    outputCombo.setBounds (bounds.removeFromTop (32).reduced (8, 4));
+
+    auto topRow = bounds.removeFromTop (32);
+    outputCombo.setBounds (topRow.removeFromLeft (200).reduced (8, 4));
+    releaseAllButton.setBounds (topRow.removeFromRight (120).reduced (8, 4));
+
+    constexpr int ribbonWidth = 48;
+    volumeRibbon.setBounds   (bounds.removeFromLeft  (ribbonWidth));
+    atOffsetRibbon.setBounds (bounds.removeFromRight (ribbonWidth));
     keyboard.setBounds (bounds);
 }
 

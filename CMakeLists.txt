@@ -220,6 +220,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/ChannelAttributePanel.cpp
     Source/UI/ColourSwatchStrip.cpp
     Source/UI/CurveEditor.cpp
+    Source/UI/ExpressionRibbon.cpp
     Source/UI/FxModulePanel.cpp
     Source/UI/GainFaderMeter.cpp
     Source/UI/GridKeyboardComponent.cpp
@@ -391,6 +392,7 @@ target_sources(Conduit PRIVATE
     Source/UI/ColourSwatchStrip.h
     Source/UI/CurveEditor.h
     Source/UI/CurvedSlider.h
+    Source/UI/ExpressionRibbon.h
     Source/UI/FxModulePanel.h
     Source/UI/GainFaderMeter.h
     Source/UI/GridKeyboardComponent.h
@@ -697,6 +699,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/ChannelAttributePanel.cpp
         Source/UI/ColourSwatchStrip.cpp
         Source/UI/CurveEditor.cpp
+        Source/UI/ExpressionRibbon.cpp
         Source/UI/FxModulePanel.cpp
         Source/UI/GainFaderMeter.cpp
         Source/UI/GridKeyboardComponent.cpp

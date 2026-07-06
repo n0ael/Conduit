@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include <juce_core/juce_core.h>
@@ -32,9 +33,22 @@ public:
     void setSlide     (uint32_t fingerId, float value01) noexcept;
     void allNotesOff  () noexcept;
 
+    /** Globaler Master-Kanal-Controller (nicht Voice-indiziert) — delegiert
+        1:1 an den Sink. */
+    void setGlobalVolume (float value01) noexcept;
+
+    /** Bipolarer globaler Pressure-Offset [-1, +1]. Wird intern auf jeden
+        per-Voice-Pressure addiert (clamp [0,1]) und sofort auf alle
+        gehaltenen Stimmen angewandt. Message Thread. */
+    void setPressureOffset (float bipolarOffset) noexcept;
+
 private:
     IVoiceSink&    sink;
     VoiceAllocator allocator;
+
+    float pressureOffset { 0.0f };
+    std::array<float, (size_t) VoiceAllocator::kMaxVoices> rawPressure {};
+    std::array<bool,  (size_t) VoiceAllocator::kMaxVoices> voiceActive {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GridVoiceEngine)
 };

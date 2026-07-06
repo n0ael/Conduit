@@ -13,7 +13,8 @@ namespace conduit::grid
 class FakeVoiceSink : public IVoiceSink
 {
 public:
-    enum class Kind { VoiceStart, VoiceStop, PitchBend, Pressure, Slide, AllNotesOff };
+    enum class Kind { VoiceStart, VoiceStop, PitchBend, Pressure, Slide, AllNotesOff,
+                      GlobalVolume };
 
     struct Call
     {
@@ -54,6 +55,11 @@ public:
     void allNotesOff() override
     {
         calls.push_back ({ Kind::AllNotesOff, -1, 0, 0, 0.0f });
+    }
+
+    void setGlobalVolume (float value) override
+    {
+        calls.push_back ({ Kind::GlobalVolume, -1, 0, 0, value });
     }
 };
 

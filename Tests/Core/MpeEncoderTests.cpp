@@ -47,3 +47,19 @@ TEST_CASE ("MpeEncoder: Pressure (Channel-Pressure) + Slide (CC74)", "[grid]")
     const int slideValue = slideMsg.getControllerValue();
     REQUIRE ((slideValue == 63 || slideValue == 64));
 }
+
+TEST_CASE ("MpeEncoder: Master-Kanal-Controller (Volume) auf memberChannelBase-1", "[grid]")
+{
+    const grid::MpeEncoder encoder;
+
+    REQUIRE (encoder.masterChannel() == 1);
+
+    const auto volumeMsg = encoder.masterVolume (1.0f);
+    REQUIRE (volumeMsg.isController());
+    REQUIRE (volumeMsg.getChannel() == 1);
+    REQUIRE (volumeMsg.getControllerNumber() == 7);
+    REQUIRE (volumeMsg.getControllerValue() == 127);
+
+    // Clamp bei >1
+    REQUIRE (encoder.masterVolume (2.0f).getControllerValue() == 127);
+}

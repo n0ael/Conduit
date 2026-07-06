@@ -29,6 +29,10 @@ public:
     virtual void voicePressure  (int voiceIndex, float value)            = 0;
     virtual void voiceSlide     (int voiceIndex, float value)            = 0;
     virtual void allNotesOff    ()                                       = 0;
+
+    /** Globaler, NICHT Voice-indizierter Controller auf dem MPE-Master-Kanal
+        (Lower Zone: Kanal 1) — value auf [0, 1] normalisiert. */
+    virtual void setGlobalVolume (float value) = 0;
 };
 
 } // namespace conduit::grid

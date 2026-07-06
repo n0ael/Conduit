@@ -50,7 +50,7 @@ void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
     if (pad < 0)
         return;
 
-    fingers[fingerId] = { pos.x, pad, event.position };
+    fingers[fingerId] = { pos.x, pos.y, pad, event.position };
 
     // MPE-Member-Kanäle sind gepoolt (VoiceAllocator) und behalten Bend/
     // Pressure vom LETZTEN Voice-Nutzer, bis die neue Note etwas Eigenes
@@ -59,7 +59,7 @@ void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
     // 06.07.2026: Pressure "mal 0, mal 50%" direkt nach dem Touch).
     engine.noteOn (static_cast<uint32_t> (fingerId), layout.noteForPad (pad), 100);
     engine.setPitchBend (static_cast<uint32_t> (fingerId), 0.0f);
-    engine.setPressure (static_cast<uint32_t> (fingerId), layout.expressionInPad (pad, pos.y));
+    engine.setPressure (static_cast<uint32_t> (fingerId), layout.expressionFromDrag (pos.y, pos.y));
     repaint();
 }
 
@@ -84,7 +84,7 @@ void GridKeyboardComponent::mouseDrag (const juce::MouseEvent& event)
     engine.setPitchBend (static_cast<uint32_t> (fingerId),
                           layout.pitchBendSemitones (it->second.startNormX, pos.x));
     engine.setPressure (static_cast<uint32_t> (fingerId),
-                         layout.expressionInPad (it->second.padIndex, pos.y));
+                         layout.expressionFromDrag (it->second.startNormY, pos.y));
     it->second.currentPos = event.position;
     repaint();
 }

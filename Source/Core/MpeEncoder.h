@@ -31,12 +31,15 @@ public:
     explicit MpeEncoder (const Config& cfg) noexcept;
 
     int channelForVoice (int voiceIndex) const noexcept; // 1-basierter MIDI-Kanal
+    int masterChannel() const noexcept;                  // = memberChannelBase - 1 (Lower Zone: 1)
 
     juce::MidiMessage noteOn    (int voiceIndex, int note, int velocity)        const noexcept;
     juce::MidiMessage noteOff   (int voiceIndex, int note, int releaseVelocity) const noexcept;
     juce::MidiMessage pitchBend (int voiceIndex, float semitones)               const noexcept;
     juce::MidiMessage pressure  (int voiceIndex, float value01)                 const noexcept;
     juce::MidiMessage slide     (int voiceIndex, float value01)                 const noexcept;
+
+    juce::MidiMessage masterVolume (float value01) const noexcept; // CC7 auf masterChannel
 
 private:
     Config config;

@@ -45,6 +45,7 @@ private:
     struct FingerState
     {
         float startNormX = 0.0f;
+        float startNormY = 0.0f;
         int   padIndex    = -1;
         juce::Point<float> currentPos; // Pixel, live -- für den Helligkeits-Fade des Ursprungs-Pads
     };
