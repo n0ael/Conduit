@@ -50,7 +50,7 @@ void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
     if (pad < 0)
         return;
 
-    fingers[fingerId] = { pos.x, pad };
+    fingers[fingerId] = { pos.x, pad, event.position };
 
     // MPE-Member-Kanäle sind gepoolt (VoiceAllocator) und behalten Bend/
     // Pressure vom LETZTEN Voice-Nutzer, bis die neue Note etwas Eigenes
@@ -85,6 +85,7 @@ void GridKeyboardComponent::mouseDrag (const juce::MouseEvent& event)
                           layout.pitchBendSemitones (it->second.startNormX, pos.x));
     engine.setPressure (static_cast<uint32_t> (fingerId),
                          layout.expressionInPad (it->second.padIndex, pos.y));
+    it->second.currentPos = event.position;
     repaint();
 }
 
@@ -125,9 +126,15 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
     const auto padHeight = bounds.getHeight() / (float) rows;
     constexpr float gap = 2.0f;
 
-    std::map<int, bool> activePads;
+    // Ursprungs-Pad je Finger -> dessen LIVE-Position (für den Helligkeits-
+    // Fade, User 06.07.2026: je weiter die Sonne vom Antipp-Pad wegwandert,
+    // desto mehr fällt die Aufhellung zurück; nähert sie sich wieder, hellt
+    // das Pad wieder auf).
+    std::map<int, juce::Point<float>> activePads;
     for (const auto& entry : fingers)
-        activePads[entry.second.padIndex] = true;
+        activePads[entry.second.padIndex] = entry.second.currentPos;
+
+    const auto fadeDistance = juce::jmax (padWidth, padHeight);
 
     for (int row = 0; row < rows; ++row)
     {
@@ -138,20 +145,32 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
                                                             padWidth, padHeight)
                                         .reduced (gap * 0.5f);
 
-            const auto isActive = activePads.count (padIndex) > 0;
-            g.setColour (isActive ? push::colours::tileActive : push::colours::tile);
-            g.fillRoundedRectangle (padBounds, 4.0f);
+            const auto activeIt = activePads.find (padIndex);
+            const auto isActive = activeIt != activePads.end();
 
-            g.setColour (isActive ? push::colours::ledCyan : push::colours::outline);
-            g.drawRoundedRectangle (padBounds, 4.0f, isActive ? 2.0f : 1.0f);
+            if (isActive)
+            {
+                const auto padCentre = padBounds.getCentre();
+                const auto distance  = activeIt->second.getDistanceFrom (padCentre);
+                const auto closeness = juce::jlimit (0.0f, 1.0f, 1.0f - distance / fadeDistance);
+
+                g.setColour (push::colours::tile.interpolatedWith (push::colours::tileActive, closeness));
+            }
+            else
+            {
+                g.setColour (push::colours::tile);
+            }
+
+            g.fillRoundedRectangle (padBounds, 4.0f);
         }
     }
 
-    const auto sunDiameter = ring.restRadiusPx() * 2.0f;
+    const auto sunDiameter  = ring.restRadiusPx() * 2.0f;
+    const auto moonDiameter = sunDiameter * 0.6f; // 60% der Sonnengröße (User 06.07.2026)
 
     for (const auto& circle : ring.activeCircles())
     {
-        g.setColour (push::colours::ledCyan);
+        g.setColour (push::colours::ledWhite);
 
         // "Sonne": ausgemalter Punkt am (ggf. mitwandernden) Zentrum des
         // primären Fingers — fixer Zielpunkt für Pitch/Press unabhängig vom
@@ -161,10 +180,10 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
         if (circle.hasOrbit)
         {
             // Umlaufbahn: dünner Ring durch die aktuelle (ggf. eingefrorene)
-            // Ring-Distanz, "Planet" in Sonnen-Größe an der Ring-Position.
+            // Ring-Distanz, "Planet" (Mond) an der Ring-Position.
             const auto orbitDiameter = circle.radiusPx * 2.0f;
             g.drawEllipse (juce::Rectangle<float> (orbitDiameter, orbitDiameter).withCentre (circle.center), 1.5f);
-            g.fillEllipse (juce::Rectangle<float> (sunDiameter, sunDiameter).withCentre (circle.orbitPos));
+            g.fillEllipse (juce::Rectangle<float> (moonDiameter, moonDiameter).withCentre (circle.orbitPos));
         }
     }
 }
