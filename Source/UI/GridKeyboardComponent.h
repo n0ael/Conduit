@@ -19,9 +19,10 @@ namespace conduit
     eigenes event.source.
 
     Note + Pitch-Bend über X + Pressure über Y (M1 Teil 3) plus Ring-
-    Mechanik als zweite Ausdrucksachse (M1b-2): ein zweiter Finger im
-    Greifband eines liegenden primären Fingers wird dessen Ring-Finger,
-    sein Abstand moduliert setSlide des primären Fingers (RingTouchModel).
+    Mechanik als zweite Ausdrucksachse (M1b-2, "Sonne/Mond/Orbit"): ein
+    zweiter Finger im Greifband eines liegenden primären Fingers (Sonne)
+    wird dessen Ring-Finger (Mond), sein Abstand zur Sonne (Orbit-Radius)
+    moduliert setSlide des primären Fingers (RingTouchModel).
     Bewusst weiterhin ohne Drone/Latch, Pinch, Doppeltipp, Drift-über-Rand,
     Rand-Ribbons, Release-All — eigene Meilensteine.
 

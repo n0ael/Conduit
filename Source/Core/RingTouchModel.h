@@ -7,8 +7,9 @@
 namespace conduit::grid
 {
 
-/** Ordnet Touch-Finger primären Fingern (Note) und Ring-Fingern (zweite
-    Achse) zu. Pixel-Koordinaten. Message-Thread, kein RT. Testbar. */
+/** Ordnet Touch-Finger primären Fingern ("Sonne", Note) und Ring-Fingern
+    ("Mond", zweite Achse) zu — der Kreis dazwischen ist der "Orbit".
+    Pixel-Koordinaten. Message-Thread, kein RT. Testbar. */
 class RingTouchModel
 {
 public:
@@ -20,12 +21,18 @@ public:
     };
 
     enum class TouchKind { Primary, Ring };
+    /** ringOwner: die Sonne (primärer Finger), an der ein neu gegriffener
+        Mond hängt — nur bei kind == Ring gültig. */
     struct DownResult { TouchKind kind; uint32_t ringOwner = 0; };
+    /** owner: die Sonne, deren Mond sich gerade bewegt hat. */
     struct MoveResult { bool hasSlide = false; uint32_t owner = 0; float slide01 = 0.0f; };
+    /** primaryFinger: die abgehobene Sonne (wasPrimary). ringOwner: die
+        Sonne, deren Mond gerade losgelassen wurde (wasRing). */
     struct UpResult   { bool wasPrimary = false; bool wasRing = false;
                         uint32_t primaryFinger = 0; uint32_t ringOwner = 0; };
-    /** hasOrbit/orbitPos: Position des "Planeten" (Ring-Finger, live oder
-        eingefroren) — nur gültig, wenn ein Ring je aktiv war. */
+    /** hasOrbit/orbitPos: Position des Mondes (Ring-Finger) relativ zur
+        Sonne (center) — live oder eingefroren, nur gültig, wenn ein Mond
+        je aktiv war (Orbit bestand). */
     struct Circle     { juce::Point<float> center; float radiusPx = 0.0f;
                         bool hasOrbit = false; juce::Point<float> orbitPos; };
 
@@ -63,7 +70,7 @@ public:
     std::vector<Circle> activeCircles() const; // Zeichnung; ohne Ring-Historie = minRadius
     void reset() noexcept;
 
-    /** Ruheradius (Sonne/Planet-Größe fürs UI, CLAUDE.md-fremd — reiner
+    /** Ruheradius (Sonne/Mond-Größe fürs UI, CLAUDE.md-fremd — reiner
         Zeichen-Parameter, keine Logik). */
     [[nodiscard]] float restRadiusPx() const noexcept { return config.minRadiusPx; }
 
@@ -71,10 +78,10 @@ private:
     struct PrimaryFinger
     {
         uint32_t id;
-        juce::Point<float> center;      // live, folgt dem primären Finger
-        uint32_t ringFinger = 0;        // 0 = none
-        juce::Point<float> ringOffset;  // Ring-Position RELATIV zu center (friert/wandert mit)
-        bool hasOrbit = false;          // true, sobald je ein Ring angedockt hat
+        juce::Point<float> center;      // Sonnen-Zentrum, live, folgt dem primären Finger
+        uint32_t ringFinger = 0;        // 0 = kein Mond angedockt
+        juce::Point<float> ringOffset;  // Mond-Position RELATIV zu center (friert/wandert mit)
+        bool hasOrbit = false;          // true, sobald je ein Mond angedockt hat (Orbit bestand)
         float curRadiusPx = 0.0f;       // = ringOffset.getDistanceFromOrigin(), gecached
     };
 

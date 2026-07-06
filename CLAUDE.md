@@ -25,6 +25,11 @@ Denke in Architektur und Modulen, bevor du Code schreibst. Liefere Code-Snippets
 - Keine Raw Pointer — JUCE-SmartPointer oder `std::unique_ptr`
 - `JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR` nicht vergessen
 - **Kein `AudioProcessorValueTreeState` (APVTS)** — nicht geeignet für dynamische Node-Graphs
+- Verschachtelte `Config`-Structs mit In-Class-Defaults nicht direkt als
+  Default-Argument (`Klasse(const Config& = {})`) — Clang lehnt das ab.
+  Stattdessen delegierender Default-Ctor in der .cpp: `Klasse() : Klasse(Config{}) {}`.
+- `juce::Point` braucht `<juce_graphics/juce_graphics.h>` (nicht nur `juce_core`) —
+  sonst kaskadierende „Funktion akzeptiert keine 2 Argumente"-Fehler.
 
 ---
 
@@ -647,9 +652,9 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
   Page-Icons, „+"-Browser (Module + Presets), Undo (Shift-Klick = Redo),
   Save, ⚙, Skala.
 - **Pages** (`Source/UI/PageHost`): Grid (Ω, Touch-Controller-Baukasten) · Mixer (∥∥)
-  · Clip (▷▭, Fugue-Machine-Sequencer) · Device (|||, Patch-Canvas). Nur
-  Device ist implementiert — die anderen sind gestylte Platzhalter, je ein
-  eigener Meilenstein (Roadmap 11).
+  · Clip (▷▭, Fugue-Machine-Sequencer) · Device (|||, Patch-Canvas). Device
+  und Grid (M1) sind implementiert — Mixer und Clip bleiben gestylte
+  Platzhalter, je ein eigener Meilenstein (Roadmap 11).
 - **Transport-/Link-Zustand** in `TransportSettings` (App-Zustand, Muster
   MeterSettings); der EngineProcessor speist LinkClock (Start/Stop-Sync,
   Clock-Offset ±100 ms als Beat-Lese-Versatz) und Metronom (Enable, Anker).
@@ -751,6 +756,31 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
     (_l/_r, eingefrorene TrackSource, startPosition = commitStartSample →
     bext-align zu Capture-Exports; `CaptureService::enqueueExternalJob`).
 
+- **Grid-Touch-Controller (Ω, M1 07/2026 — MPE-Keyboard als erstes Modul des
+  Baukastens; symmetrisches Rückgrat Quelle → Voice-Modell → Sink, ADR 14):**
+  - **Kette:** GridKeyboardComponent (Touch) → GridVoiceEngine (Engine-Level
+    wie Looper/Metronom, EngineProcessor-besessen, Message-Thread — kein
+    Audio-Thread/Graph) → IVoiceSink → MpeMidiSink (MPE-MIDI 1.0, Lower Zone)
+    → IMidiOutputTarget → MidiDeviceTarget (öffnet nur EXISTIERENDE MIDI-Out-
+    Ports, erzeugt keinen eigenen virtuellen Port — plattformabhängig).
+  - **Voice-Modell:** VoiceAllocator (Finger → Voice-Slot, allocation-free,
+    thread-agnostisch, Stealing = ältester) + MpeEncoder (Voice-Slot-Event →
+    juce::MidiMessage; Member-Kanäle ab 2, Master-Kanal 1). MPE = MIDI 1.0.
+  - **Touch:** PadGridLayout (isomorph, +1 HT/Spalte, +5/Reihe; Note beim
+    Aufsetzen, Pitch-Bend aus X, Ausdruck aus Y — ungeklemmt/aufsetzpunkt-
+    relativ, einstellbare yRangeNorm, Clamp nur am Ausgang). RingTouchModel
+    (Sonne = primärer Finger; Mond = zweiter Finger im Orbit-Greifband,
+    Radius → Slide; Orbit friert relativ zur Sonne ein, wandert mit ihr,
+    weit weg wieder greifbar).
+  - **Ränder:** ExpressionRibbon ×2 — Volume (unipolar → Master-CC7) und
+    AT-Offset (bipolar, Mitte neutral → interner Pressure-Offset auf jede
+    Stimme; ungeklemmter Rohwert hält den vollen Bereich). Release-All →
+    GridVoiceEngine::allNotesOff.
+  - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
+    docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
+    Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +
+    Slide/PitchBend-Offset) als eigene Stränge (Roadmap 11).
+
 - Touch-first Design: `setAcceptsTouchEvents(true)`
 - Minimale Touch-Target-Größe: 44px
 - Vollständig Mouse/Keyboard-kompatibel — kein Touch-only Code
@@ -771,6 +801,8 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
 | 1 Finger Drag | Parameter-Sweep (CV-Wert) | P0 |
 | 2 Finger Pinch | Range-Zoom Scope/Visualizer | P0 |
 | 10-Finger-Chord | Panic / All-Notes-Off | P0 |
+| Grid: 1 Finger (Sonne) | Note + Pitch-Bend (X) + Ausdruck (Y) | P0 |
+| Grid: 2. Finger im Orbit (Mond) | Ring — Radius → Slide, keine neue Note | P0 |
 | 2 Finger Rotate | LFO-Phase / Tuning | P1 |
 | 3 Finger Tap | Snap-to-Zero / Reset | P1 |
 | Long Press | Kontextmenü / Node-Eigenschaften | P2 |
@@ -800,7 +832,7 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
 | Looper-Vollausbau (4 Looper × 4 Tracks × Slots, Clip-Grid, VARI/Reverse/×2÷2, Delete/Save-Gesten, OSC-Actions, Clip-Export) | v2.0 | erledigt 07/2026 — 10.0; LooperModule + MIDI-Input + Drag-to-DAW später |
 | Mixer-Page | v2.x | ∥∥-Icon, Channel-Strips (Capture-Buttons wandern dorthin) |
 | Grid-Page (Touch-Controller-Baukasten) | Ω-Icon | benutzerfreundlicher Baukasten für Touch-Controller-Layouts, die interne und externe Ziele steuern. AbletonOSC-Remote (Live fernsteuern) ist eines dieser Ziele, keine eigene Page. Meilenstein-Leiter:
-  M1  Voice-Engine + direkter MIDI-Sink + spielbares 2-Stimmen-MPE-Keyboard (Circle-Mechanik, Release = Finger heben, Rand-Ribbons, Release-All)
+  M1  Voice-Engine + direkter MIDI-Sink + spielbares 2-Stimmen-MPE-Keyboard (Circle-Mechanik, Release = Finger heben, Rand-Ribbons, Release-All) — erledigt 07/2026 — 10.0
   danach unabhängig, Reihenfolge nach Priorität:
     - OSC-Sink + Transcoder (Remote, cross-platform)
     - Gesten-State-Machine (Drone/Latch per Abhebe-Reihenfolge, Pinch-weg, Doppeltipp, Drift-über-Rand-und-Faden)
@@ -962,6 +994,29 @@ Konsequenzen:
   der OSC-Weg ist die tragfaehige Remote-Loesung; nativer virtueller
   Port/Loopback ist inzwischen vorhanden.
 
+### ADR: Grid-Voice-Ausgabe — Quelle → Voice-Modell → austauschbare Sinks
+
+- **Rückgrat:** Grid = Touch-Controller-Baukasten, erstes Modul = MPE-Keyboard.
+  Symmetrisch: mehrere Quellen (Grid-Touch, später Hardware-MPE-Input) → EIN
+  internes Voice-Modell → mehrere austauschbare Sinks (MIDI, OSC, CV) hinter
+  Interfaces (IVoiceSink Sink-Seam, IMidiOutputTarget MIDI-Sende-Seam, Muster
+  IOscSink 7.3).
+- **MPE-Zuteilung liegt IN Conduit** (VoiceAllocator + MpeEncoder, testbar);
+  MPE ist MIDI 1.0, kein MIDI-2.0-Bedarf. Ein späterer OSC-Sink trägt bereits
+  zugeteilte Voices → externer Transcoder bleibt logikfrei (Leos Max-Domäne).
+- **Thread-Ebene:** reine MIDI-Ausgabe berührt weder Audio-Thread noch Patch-
+  Graph — GridVoiceEngine ist Engine-Level (Muster Looper/Metronom), Message-
+  Thread. IPolyphonic (4.2, Audio-Thread) bleibt dem späteren CV-Sink vorbehalten.
+- **Ausdrucks-Achsen ungeklemmt an der Quelle, Clamp nur am Ausgang:** so bleibt
+  trotz globalem Offset der volle Bereich durch Weiterwischen erreichbar (Y
+  umgesetzt; Slide/PitchBend folgen im MPE-Shaping-Strang).
+- **MIDI-Out-Sink ist neue Infrastruktur** (4.1 kennt kein MIDI-Out-Modul);
+  MidiDeviceTarget öffnet nur existierende Ports — eigenen virtuellen Port
+  erzeugen ist plattformabhängig (Windows via Windows MIDI Services/Loopback,
+  macOS nativ; eigener Strang).
+- **Terminologie:** Sonne (primärer Finger) / Mond (Ring-Finger) / Orbit (Kreis)
+  durchgängig in Kommentaren/UI; öffentliche API bleibt `ring*`/`primary*`.
+
 ---
 
-*Conduit Alpha v3 — Claude Code Instructions v4.5  |  Juli 2026*
+*Conduit Alpha v3 — Claude Code Instructions v4.6  |  Juli 2026*

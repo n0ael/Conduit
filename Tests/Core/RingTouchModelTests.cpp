@@ -87,7 +87,7 @@ TEST_CASE ("RingTouchModel: primäre Bewegung ohne Ring hält den Kreis auf minR
     const auto circles = model.activeCircles();
     REQUIRE (circles[0].center.x == Approx (200.0f));
     REQUIRE (circles[0].radiusPx == Approx (40.0f)); // minRadiusPx unverändert
-    REQUIRE_FALSE (circles[0].hasOrbit); // nie ein Ring angedockt -- kein Planet
+    REQUIRE_FALSE (circles[0].hasOrbit); // nie ein Ring angedockt -- kein Mond
 }
 
 TEST_CASE ("RingTouchModel: Mond-Orbit -- Radius friert beim Loslassen ein, erneutes Greifen möglich", "[grid]")
@@ -101,7 +101,7 @@ TEST_CASE ("RingTouchModel: Mond-Orbit -- Radius friert beim Loslassen ein, erne
     REQUIRE (up.wasRing);
     REQUIRE (up.ringOwner == 1);
 
-    // Radius bleibt eingefroren (kein Reset auf minRadiusPx), Planet bleibt
+    // Radius bleibt eingefroren (kein Reset auf minRadiusPx), Mond bleibt
     // sichtbar an der zuletzt bekannten Ring-Position stehen
     const auto circles = model.activeCircles();
     REQUIRE (circles[0].radiusPx == Approx (80.0f));

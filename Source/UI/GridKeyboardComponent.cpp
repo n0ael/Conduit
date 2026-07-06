@@ -179,8 +179,8 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
 
         if (circle.hasOrbit)
         {
-            // Umlaufbahn: dünner Ring durch die aktuelle (ggf. eingefrorene)
-            // Ring-Distanz, "Planet" (Mond) an der Ring-Position.
+            // Umlaufbahn (Orbit): dünner Ring durch die aktuelle (ggf.
+            // eingefrorene) Ring-Distanz, Mond an der Ring-Position.
             const auto orbitDiameter = circle.radiusPx * 2.0f;
             g.drawEllipse (juce::Rectangle<float> (orbitDiameter, orbitDiameter).withCentre (circle.center), 1.5f);
             g.fillEllipse (juce::Rectangle<float> (moonDiameter, moonDiameter).withCentre (circle.orbitPos));
