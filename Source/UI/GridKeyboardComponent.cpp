@@ -52,7 +52,14 @@ void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
 
     fingers[fingerId] = { pos.x, pad };
 
+    // MPE-Member-Kanäle sind gepoolt (VoiceAllocator) und behalten Bend/
+    // Pressure vom LETZTEN Voice-Nutzer, bis die neue Note etwas Eigenes
+    // sendet — ohne expliziten Startwert läse das Instrument beim ersten
+    // Ton also einen zufälligen Alt-Zustand statt 0/Ist-Position (Fund
+    // 06.07.2026: Pressure "mal 0, mal 50%" direkt nach dem Touch).
     engine.noteOn (static_cast<uint32_t> (fingerId), layout.noteForPad (pad), 100);
+    engine.setPitchBend (static_cast<uint32_t> (fingerId), 0.0f);
+    engine.setPressure (static_cast<uint32_t> (fingerId), layout.expressionInPad (pad, pos.y));
     repaint();
 }
 
@@ -88,7 +95,10 @@ void GridKeyboardComponent::mouseUp (const juce::MouseEvent& event)
 
     if (upResult.wasRing)
     {
-        engine.setSlide (upResult.ringOwner, 0.0f);
+        // Mond-Orbit (User-Entscheidung 06.07.2026): kein Reset-Slide mehr --
+        // der letzte gesendete CC74-Wert bleibt am Instrument stehen, der
+        // Kreis bleibt sichtbar eingefroren (RingTouchModel::onUp), bis ein
+        // neuer Touch die Umlaufbahn wieder aufgreift.
         repaint();
         return;
     }
@@ -137,11 +147,25 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
         }
     }
 
-    g.setColour (push::colours::ledCyan);
+    const auto sunDiameter = ring.restRadiusPx() * 2.0f;
+
     for (const auto& circle : ring.activeCircles())
     {
-        const auto diameter = circle.radiusPx * 2.0f;
-        g.drawEllipse (juce::Rectangle<float> (diameter, diameter).withCentre (circle.center), 1.5f);
+        g.setColour (push::colours::ledCyan);
+
+        // "Sonne": ausgemalter Punkt am (ggf. mitwandernden) Zentrum des
+        // primären Fingers — fixer Zielpunkt für Pitch/Press unabhängig vom
+        // Orbit-Radius (User 06.07.2026, wichtig sobald Hold dazukommt).
+        g.fillEllipse (juce::Rectangle<float> (sunDiameter, sunDiameter).withCentre (circle.center));
+
+        if (circle.hasOrbit)
+        {
+            // Umlaufbahn: dünner Ring durch die aktuelle (ggf. eingefrorene)
+            // Ring-Distanz, "Planet" in Sonnen-Größe an der Ring-Position.
+            const auto orbitDiameter = circle.radiusPx * 2.0f;
+            g.drawEllipse (juce::Rectangle<float> (orbitDiameter, orbitDiameter).withCentre (circle.center), 1.5f);
+            g.fillEllipse (juce::Rectangle<float> (sunDiameter, sunDiameter).withCentre (circle.orbitPos));
+        }
     }
 }
 

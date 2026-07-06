@@ -21,7 +21,15 @@ RingTouchModel::DownResult RingTouchModel::onDown (uint32_t fingerId, juce::Poin
         if (primary.ringFinger != 0)
             continue;
 
-        const auto dist = pos.getDistanceFrom (primary.center);
+        // Greifpunkt: die aktuelle Mond-Position, falls schon einmal ein Ring
+        // aktiv war -- die Umlaufbahn kann weit von der Sonne entfernt
+        // eingefroren sein, und genau DORT muss man sie wieder aufgreifen
+        // können (User-Fund 06.07.2026); ohne Orbit-Historie zählt weiterhin
+        // die Nähe zum Zentrum (Erstgriff).
+        const auto grabPoint = primary.hasOrbit ? (primary.center + primary.ringOffset)
+                                                 : primary.center;
+        const auto dist = pos.getDistanceFrom (grabPoint);
+
         if (dist <= config.grabRadiusPx && (nearest == nullptr || dist < nearestDist))
         {
             nearest = &primary;
@@ -32,11 +40,13 @@ RingTouchModel::DownResult RingTouchModel::onDown (uint32_t fingerId, juce::Poin
     if (nearest != nullptr)
     {
         nearest->ringFinger = fingerId;
-        nearest->curRadiusPx = nearestDist;
+        nearest->ringOffset = pos - nearest->center;
+        nearest->hasOrbit = true;
+        nearest->curRadiusPx = nearest->ringOffset.getDistanceFromOrigin();
         return { TouchKind::Ring, nearest->id };
     }
 
-    primaries.push_back ({ fingerId, pos, 0, config.minRadiusPx });
+    primaries.push_back ({ fingerId, pos, 0, {}, false, config.minRadiusPx });
     return { TouchKind::Primary, 0 };
 }
 
@@ -44,16 +54,33 @@ RingTouchModel::MoveResult RingTouchModel::onMove (uint32_t fingerId, juce::Poin
 {
     for (auto& primary : primaries)
     {
-        if (primary.ringFinger != fingerId)
-            continue;
+        if (primary.ringFinger == fingerId)
+        {
+            // Ring-Finger bewegt sich: Offset relativ zum AKTUELLEN Zentrum
+            // neu erfassen, Radius = dessen Betrag.
+            primary.ringOffset = pos - primary.center;
+            const auto radius = primary.ringOffset.getDistanceFromOrigin();
+            primary.curRadiusPx = radius;
 
-        const auto radius = pos.getDistanceFrom (primary.center);
-        primary.curRadiusPx = radius;
+            const auto range = config.maxRadiusPx - config.minRadiusPx;
+            const auto slide  = range > 0.0f ? (radius - config.minRadiusPx) / range : 0.0f;
 
-        const auto range = config.maxRadiusPx - config.minRadiusPx;
-        const auto slide  = range > 0.0f ? (radius - config.minRadiusPx) / range : 0.0f;
+            return { true, primary.id, juce::jlimit (0.0f, 1.0f, slide) };
+        }
 
-        return { true, primary.id, juce::jlimit (0.0f, 1.0f, slide) };
+        if (primary.id == fingerId)
+        {
+            // Primärer Finger bewegt sich: Zentrum folgt. Der Ring-Offset
+            // (und damit Radius/Slide) bleibt UNVERÄNDERT -- der Mond klebt
+            // relativ zur Sonne und wandert mit ihr mit (User 06.07.2026:
+            // Fund -- der Mond blieb an einer FIXEN Bildschirmposition
+            // stehen, statt der Sonne zu folgen, weil der Radius vorher aus
+            // dem Live-Abstand zu einer absoluten Ring-Position berechnet
+            // wurde; jetzt ist der Offset relativ, ändert sich also nur,
+            // wenn der Ring-Finger selbst aktiv bewegt wird).
+            primary.center = pos;
+            return {};
+        }
     }
 
     return {};
@@ -65,6 +92,11 @@ RingTouchModel::UpResult RingTouchModel::onUp (uint32_t fingerId) noexcept
     {
         if (primary.ringFinger == fingerId)
         {
+            // Mond-Orbit (User-Entscheidung 06.07.2026): curRadiusPx bleibt
+            // auf dem zuletzt gemessenen Wert eingefroren, KEIN Reset auf
+            // minRadiusPx -- der Kreis bleibt sichtbar an Ort und Abstand
+            // stehen, bis ein neuer Touch im grabRadius (ringFinger == 0)
+            // die Umlaufbahn erneut aufgreift.
             const auto owner = primary.id;
             primary.ringFinger = 0;
             return { false, true, 0, owner };
@@ -89,7 +121,8 @@ std::vector<RingTouchModel::Circle> RingTouchModel::activeCircles() const
     circles.reserve (primaries.size());
 
     for (const auto& primary : primaries)
-        circles.push_back ({ primary.center, primary.curRadiusPx });
+        circles.push_back ({ primary.center, primary.curRadiusPx, primary.hasOrbit,
+                              primary.center + primary.ringOffset });
 
     return circles;
 }

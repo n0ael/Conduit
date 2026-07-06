@@ -30,17 +30,24 @@ TEST_CASE ("GridKeyboardComponent: Tap in ein Pad startet die erwartete Note", "
     // Pad (col=2, row=3 -- unterste Reihe): Mitte bei (100, 140)
     keyboard.mouseDown (makeEvent (keyboard, { 100.0f, 140.0f }));
 
-    REQUIRE (fake.calls.size() == 1);
+    // noteOn + expliziter Startwert für Bend/Pressure (sonst läse das MPE-
+    // Instrument den Alt-Zustand des zuletzt auf diesem Kanal genutzten
+    // Voice-Slots statt 0/Ist-Position, Fund 06.07.2026)
+    REQUIRE (fake.calls.size() == 3);
     REQUIRE (fake.calls[0].kind == grid::FakeVoiceSink::Kind::VoiceStart);
     REQUIRE (fake.calls[0].voiceIndex == 0);
     REQUIRE (fake.calls[0].intValue == 50);   // lowestNote(48) + col(2) + rowFromBottom(0)*5
     REQUIRE (fake.calls[0].intValue2 == 100); // feste Velocity (Platzhalter)
+    REQUIRE (fake.calls[1].kind == grid::FakeVoiceSink::Kind::PitchBend);
+    REQUIRE (juce::exactlyEqual (fake.calls[1].floatValue, 0.0f));
+    REQUIRE (fake.calls[2].kind == grid::FakeVoiceSink::Kind::Pressure);
+    REQUIRE (juce::exactlyEqual (fake.calls[2].floatValue, 0.5f)); // Touch exakt mittig im Pad
 
     keyboard.mouseUp (makeEvent (keyboard, { 100.0f, 140.0f }));
 
-    REQUIRE (fake.calls.size() == 2);
-    REQUIRE (fake.calls[1].kind == grid::FakeVoiceSink::Kind::VoiceStop);
-    REQUIRE (fake.calls[1].voiceIndex == 0);
+    REQUIRE (fake.calls.size() == 4);
+    REQUIRE (fake.calls[3].kind == grid::FakeVoiceSink::Kind::VoiceStop);
+    REQUIRE (fake.calls[3].voiceIndex == 0);
 }
 
 TEST_CASE ("GridKeyboardComponent: Tap außerhalb des Rasters bleibt wirkungslos", "[grid][ui]")
