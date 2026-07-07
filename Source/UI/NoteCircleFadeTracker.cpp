@@ -18,13 +18,14 @@ void NoteCircleFadeTracker::update (const std::vector<grid::GridVoiceEngine::Voi
 
         if (it != tracked.end())
         {
-            it->rawValue    = readout.rawValue;
-            it->opacity     = 1.0f;
-            it->stillActive = true;
+            it->rawValue      = readout.rawValue;
+            it->combinedValue = readout.combinedValue;
+            it->opacity       = 1.0f;
+            it->stillActive   = true;
         }
         else
         {
-            tracked.push_back ({ readout.voiceIndex, readout.rawValue, 1.0f, true });
+            tracked.push_back ({ readout.voiceIndex, readout.rawValue, readout.combinedValue, 1.0f, true });
         }
     }
 

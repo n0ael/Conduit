@@ -61,9 +61,11 @@ public:
 
     struct VoiceReadout
     {
-        int   voiceIndex = -1;
-        int   note       = -1;   // MIDI-Note der Stimme
-        float rawValue   = 0.0f; // roher Achsen-Eingang (vor Kurve/Offset)
+        int   voiceIndex    = -1;
+        int   note          = -1;   // MIDI-Note der Stimme
+        float rawValue      = 0.0f; // roher Achsen-Eingang (vor Kurve/Offset;
+                                    // bei PitchBend normalisiert [0,1], 0.5 = Mitte)
+        float combinedValue = 0.0f; // finaler Ausgang inkl. Kurve+Offset (= combined(slot))
     };
 
     /** Nur-Lese-Referenz auf die ResponseCurve einer Achse (Panel-Editor). */
@@ -76,12 +78,27 @@ public:
         Message Thread. */
     void readActiveVoices (Axis axis, std::vector<VoiceReadout>& outVoices) const;
 
+    /** Encoder-Bendrange in Halbtönen (Panel-Anzeige „Min −R Max +R"). */
+    [[nodiscard]] static constexpr float getPitchBendRangeSemitones() noexcept
+    {
+        return kPitchBendRangeSemitones;
+    }
+
 private:
     // Encoder-Bendrange (MpeEncoder::Config::pitchBendRangeSemitones-Default,
     // CLAUDE.md 14 ADR) — die Achse kennt die konkrete Encoder-Config nicht
     // (IVoiceSink-Abstraktion), spiegelt aber deren Reichweite für den
     // Ausgangs-Clamp.
     static constexpr float kPitchBendRangeSemitones = 48.0f;
+
+    // PitchBend-Offset-Bereich in Halbtönen (S2c-1: pitchBendAxis läuft
+    // intern unipolar [0,1] wie Pressure/Slide, 0.5 = 0 Halbtöne -- diese
+    // Konstante wird auf den normalisierten Offset-Bereich umgerechnet).
+    static constexpr float kPitchBendOffsetSemitones = 12.0f;
+
+    // Halbton <-> normalisierter [0,1]-Achsenwert (0.5 = Mitte/0 Halbtöne).
+    static float pbSemitonesToNorm (float semitones, float rangeSemitones) noexcept;
+    static float pbNormToSemitones (float norm, float rangeSemitones) noexcept;
 
     ExpressionAxis& axisFor (Axis axis) noexcept;
     const ExpressionAxis& axisFor (Axis axis) const noexcept;

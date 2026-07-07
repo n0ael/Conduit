@@ -53,8 +53,9 @@ private:
         NoteCircleFadeTracker fadeTracker { 180 };   // Default, setFadeMs() aus der Persistenz im Ctor
         std::vector<grid::GridVoiceEngine::VoiceReadout> scratch {};   // reserve(kMaxVoices) einmalig
 
-        juce::Rectangle<int> curveBounds {};    // gesetzt in resized(), gelesen in paint()
-        juce::Rectangle<int> detailBounds {};   // leer, wenn unter der Schwellbreite
+        juce::Rectangle<int> tileBounds {};      // ganze Kachel (Kurvenfeld+Detailspalte), Rounded-Rect
+        juce::Rectangle<int> curveBounds {};     // gesetzt in resized(), gelesen in paint()
+        juce::Rectangle<int> detailBounds {};    // leer, wenn unter der Schwellbreite
     };
 
     void tick();
@@ -66,6 +67,10 @@ private:
     static constexpr int   kHeaderRowHeight    = 18;
     static constexpr int   kDetailColumnWidth  = 120;
     static constexpr int   kDevRowHeight       = 28;
+    static constexpr int   kSectionGap         = 6;    // Abstand zwischen den Achsen-Kacheln
+    static constexpr float kTileCornerRadius   = 6.0f; // Looper-Kachel-Stil
+    static constexpr float kMarkerWidth        = 6.0f; // Höhenmarke (combinedValue)
+    static constexpr float kMarkerHeight       = 2.5f;
 
     grid::GridVoiceEngine& engine;
     GridPanelSettings& panelSettings;

@@ -3,10 +3,21 @@
 namespace conduit::grid
 {
 
+float GridVoiceEngine::pbSemitonesToNorm (float semitones, float rangeSemitones) noexcept
+{
+    return 0.5f + semitones / (2.0f * rangeSemitones);
+}
+
+float GridVoiceEngine::pbNormToSemitones (float norm, float rangeSemitones) noexcept
+{
+    return (norm - 0.5f) * 2.0f * rangeSemitones;
+}
+
 GridVoiceEngine::GridVoiceEngine (IVoiceSink& sinkToUse, int maxVoices) noexcept
     : sink (sinkToUse), allocator (maxVoices),
       slideAxis (ExpressionAxis::Config { 0.0f, 1.0f, 1.0f }),
-      pitchBendAxis (ExpressionAxis::Config { -kPitchBendRangeSemitones, kPitchBendRangeSemitones, 12.0f })
+      pitchBendAxis (ExpressionAxis::Config { 0.0f, 1.0f,
+          kPitchBendOffsetSemitones / (2.0f * kPitchBendRangeSemitones) })
 {
     slotNote.fill (-1);
 }
@@ -28,6 +39,10 @@ void GridVoiceEngine::noteOn (uint32_t fingerId, int note, int velocity) noexcep
     pressureAxis.activate (voiceIndex);
     slideAxis.activate (voiceIndex);
     pitchBendAxis.activate (voiceIndex);
+    // activate() setzt den Rohwert generisch auf 0 -- für die jetzt unipolare
+    // PitchBend-Achse ist die Mitte (0.5 = 0 Halbtöne) der korrekte Ruhewert,
+    // nicht der untere Rand (Pressure/Slide bleiben bei 0 = ihr echter Ruhewert).
+    pitchBendAxis.setRaw (voiceIndex, 0.5f);
 
     // Ein aktiver Offset gilt sofort auch für frische Noten, nicht erst ab
     // der nächsten Bewegung des Fingers.
@@ -38,7 +53,8 @@ void GridVoiceEngine::noteOn (uint32_t fingerId, int note, int velocity) noexcep
         sink.voiceSlide (voiceIndex, slideAxis.combined (voiceIndex));
 
     if (! juce::exactlyEqual (pitchBendAxis.offset(), 0.0f))
-        sink.voicePitchBend (voiceIndex, pitchBendAxis.combined (voiceIndex));
+        sink.voicePitchBend (voiceIndex,
+            pbNormToSemitones (pitchBendAxis.combined (voiceIndex), kPitchBendRangeSemitones));
 }
 
 void GridVoiceEngine::noteOff (uint32_t fingerId, int releaseVelocity) noexcept
@@ -63,8 +79,9 @@ void GridVoiceEngine::setPitchBend (uint32_t fingerId, float semitones) noexcept
     if (voiceIndex < 0)
         return;
 
-    pitchBendAxis.setRaw (voiceIndex, semitones);
-    sink.voicePitchBend (voiceIndex, pitchBendAxis.combined (voiceIndex));
+    pitchBendAxis.setRaw (voiceIndex, pbSemitonesToNorm (semitones, kPitchBendRangeSemitones));
+    sink.voicePitchBend (voiceIndex,
+        pbNormToSemitones (pitchBendAxis.combined (voiceIndex), kPitchBendRangeSemitones));
 }
 
 void GridVoiceEngine::setPressure (uint32_t fingerId, float value01) noexcept
@@ -129,12 +146,12 @@ void GridVoiceEngine::setSlideOffset (float bipolarOffset) noexcept
 
 void GridVoiceEngine::setPitchBendOffset (float bipolarOffsetSemitones) noexcept
 {
-    pitchBendAxis.setOffset (bipolarOffsetSemitones);
+    pitchBendAxis.setOffset (bipolarOffsetSemitones / (2.0f * kPitchBendRangeSemitones));
 
     for (int i = 0; i < allocator.maxVoices(); ++i)
     {
         if (pitchBendAxis.isActive (i))
-            sink.voicePitchBend (i, pitchBendAxis.combined (i));
+            sink.voicePitchBend (i, pbNormToSemitones (pitchBendAxis.combined (i), kPitchBendRangeSemitones));
     }
 }
 
@@ -174,7 +191,8 @@ void GridVoiceEngine::readActiveVoices (Axis axis, std::vector<VoiceReadout>& ou
     for (int i = 0; i < allocator.maxVoices(); ++i)
     {
         if (expressionAxis.isActive (i))
-            outVoices.push_back ({ i, slotNote[(size_t) i], expressionAxis.rawValue (i) });
+            outVoices.push_back ({ i, slotNote[(size_t) i], expressionAxis.rawValue (i),
+                                   expressionAxis.combined (i) });
     }
 }
 

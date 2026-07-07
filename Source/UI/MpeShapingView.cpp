@@ -101,8 +101,20 @@ void MpeShapingView::paint (juce::Graphics& g)
 
 void MpeShapingView::paintAxis (juce::Graphics& g, const AxisSection& section) const
 {
+    if (section.tileBounds.isEmpty())
+        return;
+
+    // Abgesetzte Kachel (Looper-Stil): dunkle Fläche + dezente Kontur, runde Ecken
+    const auto tile = section.tileBounds.toFloat();
+    g.setColour (push::colours::tile);
+    g.fillRoundedRectangle (tile, kTileCornerRadius);
+    g.setColour (push::colours::outline);
+    g.drawRoundedRectangle (tile, kTileCornerRadius, 1.0f);
+
     if (section.curveBounds.isEmpty())
         return;
+
+    const auto isPitchBend = section.axis == grid::GridVoiceEngine::Axis::PitchBend;
 
     auto area = section.curveBounds;
     const auto headerArea = area.removeFromTop (kHeaderRowHeight);
@@ -118,8 +130,18 @@ void MpeShapingView::paintAxis (juce::Graphics& g, const AxisSection& section) c
 
     g.setColour (push::colours::textDim);
     g.setFont (push::scaledFont (11.0f));
-    g.drawText ("Max " + juce::String (outMax, 1) + "  Min " + juce::String (outMin, 1),
-               headerArea.reduced (4, 0), juce::Justification::centredRight);
+
+    if (isPitchBend)
+    {
+        const auto range = grid::GridVoiceEngine::getPitchBendRangeSemitones();
+        g.drawText ("Max +" + juce::String (range, 0) + "  Min -" + juce::String (range, 0),
+                   headerArea.reduced (4, 0), juce::Justification::centredRight);
+    }
+    else
+    {
+        g.drawText ("Max " + juce::String (outMax, 1) + "  Min " + juce::String (outMin, 1),
+                   headerArea.reduced (4, 0), juce::Justification::centredRight);
+    }
 
     const auto bounds = area.reduced (6).toFloat();
     if (bounds.isEmpty())
@@ -128,6 +150,16 @@ void MpeShapingView::paintAxis (juce::Graphics& g, const AxisSection& section) c
     // Diagonale Referenz (Identität)
     g.setColour (push::colours::outline);
     g.drawLine (bounds.getX(), bounds.getBottom(), bounds.getRight(), bounds.getY());
+
+    // PitchBend: dünne Mittellinie bei y=0.5 (0 Halbtöne) -- mit der
+    // Default-Kurve (Identität) sitzt eine ungebogene Note automatisch hier,
+    // da rawValue/combinedValue bereits normalisiert sind (0.5 = Mitte).
+    if (isPitchBend)
+    {
+        const auto midY = bounds.getBottom() - 0.5f * bounds.getHeight();
+        g.setColour (push::colours::textDim);
+        g.drawLine (bounds.getX(), midY, bounds.getRight(), midY, 1.0f);
+    }
 
     // Kurve: kCurveSamples+1 Stützstellen über x in [0,1]
     juce::Path path;
@@ -161,6 +193,19 @@ void MpeShapingView::paintAxis (juce::Graphics& g, const AxisSection& section) c
         g.setColour (section.colour.withAlpha (circle.opacity));
         g.fillEllipse (juce::Rectangle<float> (kNoteCircleDiameter, kNoteCircleDiameter)
                            .withCentre ({ px, py }));
+
+        // Zweite Höhenmarke am rechten Feldrand: finaler Ausgang inkl. Kurve+
+        // Offset (combinedValue) -- wandert live am Offset-Slider, schwächer/
+        // kleiner als der Kreis.
+        const auto combinedNormY = outRange > 0.0f
+                                      ? (circle.combinedValue - outMin) / outRange : 0.0f;
+        const auto markerY = bounds.getBottom()
+                                 - juce::jlimit (0.0f, 1.0f, combinedNormY) * bounds.getHeight();
+        const auto markerRect = juce::Rectangle<float> (kMarkerWidth, kMarkerHeight)
+                                    .withCentre ({ bounds.getRight() - kMarkerWidth * 0.5f - 1.0f, markerY });
+
+        g.setColour (section.colour.withAlpha (circle.opacity * 0.7f));
+        g.fillRoundedRectangle (markerRect, 1.0f);
     }
 
     // Detailspalte: reiner Platzhalter-Text, noch nicht interaktiv (S2c-2)
@@ -199,7 +244,10 @@ void MpeShapingView::resized()
 
     for (auto& section : sections)
     {
-        auto sectionBounds = bounds.removeFromTop (sectionHeight);
+        // Abgesetzte Kachel: kleiner Gap oben/unten trennt die drei Achsen-
+        // Felder sichtbar voneinander (Looper-Kachel-Stil).
+        auto sectionBounds = bounds.removeFromTop (sectionHeight).reduced (0, kSectionGap / 2);
+        section.tileBounds = sectionBounds;
 
         section.detailBounds = showDetail ? sectionBounds.removeFromRight (kDetailColumnWidth)
                                           : juce::Rectangle<int>{};

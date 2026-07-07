@@ -43,7 +43,9 @@ TEST_CASE ("GridVoiceEngine: Pitch-Bend/Pressure/Slide adressieren den richtigen
     REQUIRE (fake.calls.size() == 3);
     REQUIRE (fake.calls[0].kind == grid::FakeVoiceSink::Kind::PitchBend);
     REQUIRE (fake.calls[0].voiceIndex == 0);
-    REQUIRE (juce::exactlyEqual (fake.calls[0].floatValue, 2.0f));
+    // S2c-1: PitchBend läuft intern unipolar [0,1] (0.5=Mitte) -- der
+    // Halbton-Roundtrip ist mathematisch transparent, aber nicht bit-exakt.
+    REQUIRE (fake.calls[0].floatValue == Approx (2.0f));
     REQUIRE (fake.calls[1].kind == grid::FakeVoiceSink::Kind::Pressure);
     REQUIRE (fake.calls[1].voiceIndex == 0);
     REQUIRE (juce::exactlyEqual (fake.calls[1].floatValue, 0.5f));
@@ -379,7 +381,9 @@ TEST_CASE ("GridVoiceEngine: setPitchBend ohne Offset sendet den reinen Wert", "
     REQUIRE (fake.calls.size() == 1);
     REQUIRE (fake.calls[0].kind == grid::FakeVoiceSink::Kind::PitchBend);
     REQUIRE (fake.calls[0].voiceIndex == 0);
-    REQUIRE (juce::exactlyEqual (fake.calls[0].floatValue, 5.0f));
+    // S2c-1: Halbton -> normalisiert -> Halbton ist mathematisch transparent,
+    // aber nicht bit-exakt (float-Rundung bei 0.5 + x/(2R)).
+    REQUIRE (fake.calls[0].floatValue == Approx (5.0f));
 }
 
 TEST_CASE ("GridVoiceEngine: setPitchBendOffset addiert/subtrahiert auf den gemerkten Rohwert", "[grid]")
@@ -466,7 +470,8 @@ TEST_CASE ("GridVoiceEngine: noteOn wendet einen bereits aktiven PitchBend-Offse
     REQUIRE (fake.calls[0].kind == grid::FakeVoiceSink::Kind::VoiceStart);
     REQUIRE (fake.calls[1].kind == grid::FakeVoiceSink::Kind::PitchBend);
     REQUIRE (fake.calls[1].voiceIndex == 0);
-    REQUIRE (juce::exactlyEqual (fake.calls[1].floatValue, 7.0f));
+    // S2c-1: Halbton-Roundtrip transparent, nicht bit-exakt (s.o.).
+    REQUIRE (fake.calls[1].floatValue == Approx (7.0f));
 }
 
 //==============================================================================
@@ -528,7 +533,9 @@ TEST_CASE ("GridVoiceEngine: readActiveVoices liefert die Rohwerte von Slide und
     std::vector<grid::GridVoiceEngine::VoiceReadout> bendReadout;
     engine.readActiveVoices (grid::GridVoiceEngine::Axis::PitchBend, bendReadout);
     REQUIRE (bendReadout.size() == 1);
-    REQUIRE (bendReadout[0].rawValue == Approx (5.0f));
+    // S2c-1: PitchBend-rawValue ist jetzt normalisiert [0,1] (0.5 = Mitte/
+    // 0 Halbtöne), nicht mehr roh in Halbtönen -- 5 HT bei R=48.
+    REQUIRE (bendReadout[0].rawValue == Approx (0.5f + 5.0f / (2.0f * 48.0f)));
 }
 
 TEST_CASE ("GridVoiceEngine: responseCurve(Axis) wirkt nur auf die zugehörige Achse", "[grid]")
@@ -573,4 +580,49 @@ TEST_CASE ("GridVoiceEngine: readActiveVoices mit vorbelegtem Vektor hinterläss
     engine.noteOff (102, 0);
     engine.readActiveVoices (grid::GridVoiceEngine::Axis::Pressure, readout);
     REQUIRE (readout.empty());
+}
+
+//==============================================================================
+// S2c-1: PitchBend unipolar [0,1] (0.5 = Mitte) + combinedValue im Readout
+
+TEST_CASE ("GridVoiceEngine: PitchBend-rawValue ist normalisiert, 0 Halbtöne = Mitte", "[grid]")
+{
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+
+    engine.noteOn (101, 60, 100);
+
+    std::vector<grid::GridVoiceEngine::VoiceReadout> readout;
+    const auto range = grid::GridVoiceEngine::getPitchBendRangeSemitones();
+
+    engine.setPitchBend (101, 0.0f);
+    engine.readActiveVoices (grid::GridVoiceEngine::Axis::PitchBend, readout);
+    REQUIRE (readout[0].rawValue == Approx (0.5f));
+
+    engine.setPitchBend (101, range);
+    engine.readActiveVoices (grid::GridVoiceEngine::Axis::PitchBend, readout);
+    REQUIRE (readout[0].rawValue == Approx (1.0f));
+
+    engine.setPitchBend (101, -range);
+    engine.readActiveVoices (grid::GridVoiceEngine::Axis::PitchBend, readout);
+    REQUIRE (readout[0].rawValue == Approx (0.0f));
+}
+
+TEST_CASE ("GridVoiceEngine: readActiveVoices füllt combinedValue (Default-Kurve, mit/ohne Offset)", "[grid]")
+{
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+
+    engine.noteOn (101, 60, 100);
+    engine.setPressure (101, 0.3f);
+
+    std::vector<grid::GridVoiceEngine::VoiceReadout> readout;
+    engine.readActiveVoices (grid::GridVoiceEngine::Axis::Pressure, readout);
+    REQUIRE (readout.size() == 1);
+    REQUIRE (readout[0].combinedValue == Approx (readout[0].rawValue));   // kein Offset -> combined == raw
+
+    engine.setPressureOffset (0.2f);
+    engine.readActiveVoices (grid::GridVoiceEngine::Axis::Pressure, readout);
+    REQUIRE (readout[0].combinedValue == Approx (0.5f));    // 0.3 + 0.2, verschoben
+    REQUIRE (readout[0].rawValue == Approx (0.3f));         // Rohwert bleibt unverändert
 }

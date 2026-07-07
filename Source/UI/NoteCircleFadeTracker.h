@@ -30,10 +30,11 @@ class NoteCircleFadeTracker
 public:
     struct Circle
     {
-        int   voiceIndex   = -1;
-        float rawValue     = 0.0f;   // eingefroren, sobald die Stimme inaktiv wird
-        float opacity      = 1.0f;
-        bool  stillActive  = true;  // internes Bookkeeping (nächstes update())
+        int   voiceIndex    = -1;
+        float rawValue      = 0.0f;   // eingefroren, sobald die Stimme inaktiv wird
+        float combinedValue = 0.0f;   // finaler Ausgang inkl. Kurve+Offset, ebenfalls eingefroren
+        float opacity       = 1.0f;
+        bool  stillActive   = true;  // internes Bookkeeping (nächstes update())
     };
 
     explicit NoteCircleFadeTracker (int fadeMsToUse = 180) noexcept : fadeMs (fadeMsToUse) {}
