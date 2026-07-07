@@ -172,6 +172,16 @@ const ExpressionAxis& GridVoiceEngine::axisFor (Axis axis) const noexcept
     return const_cast<GridVoiceEngine&> (*this).axisFor (axis);
 }
 
+void GridVoiceEngine::setOffsetBeyondMax (Axis axis, bool shouldAllow) noexcept
+{
+    axisFor (axis).setOffsetBeyondMax (shouldAllow);
+}
+
+bool GridVoiceEngine::offsetBeyondMax (Axis axis) const noexcept
+{
+    return axisFor (axis).offsetBeyondMax();
+}
+
 ResponseCurve& GridVoiceEngine::responseCurve (Axis axis) noexcept
 {
     return axisFor (axis).responseCurve();

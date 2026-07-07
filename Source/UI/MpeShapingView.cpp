@@ -56,7 +56,74 @@ MpeShapingView::MpeShapingView (grid::GridVoiceEngine& engineToUse, GridPanelSet
     for (auto& section : sections)
         section.fadeTracker.setFadeMs (panelSettings.getNoteCircleFadeMs());
 
+    // Schloss-Toggle je Achse: initialer Zustand aus der Engine, Klick
+    // schaltet engine.setOffsetBeyondMax(axis, ...) und die Optik.
+    for (int i = 0; i < (int) sections.size(); ++i)
+    {
+        auto& toggle = offsetToggleForSection (i);
+        const auto axis = sections[(size_t) i].axis;
+
+        addChildComponent (toggle);
+        toggle.setTooltip ("Offset darf den Ausgang über die Kurven-Grenze hinausschieben");
+        toggle.setActive (engine.offsetBeyondMax (axis));
+        toggle.onClick = [this, i, axis]
+        {
+            auto& t = offsetToggleForSection (i);
+            const auto shouldAllow = ! t.isActive();
+            t.setActive (shouldAllow);
+            engine.setOffsetBeyondMax (axis, shouldAllow);
+        };
+    }
+
     updateDevSliderVisibility (uiSettings.isDevModeEnabled());
+}
+
+MpeShapingView::LockToggle& MpeShapingView::offsetToggleForSection (int sectionIndex) noexcept
+{
+    switch (sectionIndex)
+    {
+        case 0:  return pressureOffsetToggle;
+        case 1:  return slideOffsetToggle;
+        case 2:  return pitchBendOffsetToggle;
+        default: return pressureOffsetToggle;
+    }
+}
+
+void MpeShapingView::LockToggle::paintButton (juce::Graphics& g, bool, bool)
+{
+    auto bounds = getLocalBounds().toFloat();
+    const auto iconBounds = bounds.removeFromLeft (bounds.getHeight()).reduced (4.0f);
+
+    const auto colour = active ? push::colours::ledCyan : push::colours::textDim;
+    const auto size = juce::jmin (iconBounds.getWidth(), iconBounds.getHeight());
+
+    // Körper: gefüllte, abgerundete Fläche im unteren Bereich des Icons.
+    const auto bodyBounds = juce::Rectangle<float> (size * 0.6f, size * 0.4f)
+                                .withCentre ({ iconBounds.getCentreX(), iconBounds.getBottom() - size * 0.24f });
+    g.setColour (colour);
+    g.fillRoundedRectangle (bodyBounds, size * 0.06f);
+
+    // Bügel: Bogen über dem Körper. Zu: beide Enden im Körper verankert.
+    // Auf: derselbe Bogen nach oben-rechts verschoben -- das linke Ende
+    // hebt sichtbar vom Körper ab (aufgeklappt).
+    const auto shackleDiameter = size * 0.46f;
+    const auto shackleCentre   = juce::Point<float> (bodyBounds.getCentreX(), bodyBounds.getY());
+    const auto openOffset = active ? juce::Point<float> (size * 0.10f, -size * 0.14f) : juce::Point<float>{};
+
+    juce::Path shackle;
+    shackle.addCentredArc (shackleCentre.x + openOffset.x, shackleCentre.y + openOffset.y,
+                           shackleDiameter * 0.5f, shackleDiameter * 0.5f, 0.0f,
+                           juce::MathConstants<float>::pi * -0.5f, juce::MathConstants<float>::pi * 0.5f, true);
+
+    const auto strokeWidth = juce::jmax (1.5f, size * 0.09f);
+    g.setColour (colour);
+    g.strokePath (shackle, juce::PathStrokeType (strokeWidth, juce::PathStrokeType::curved,
+                                                 juce::PathStrokeType::rounded));
+
+    // Beschriftung rechts neben dem Icon -- Schrift nie stauchen (CLAUDE.md 10).
+    g.setFont (push::scaledFont (12.0f));
+    g.drawFittedText ("Offset", bounds.reduced (2.0f, 0.0f).toNearestInt(),
+                      juce::Justification::centredLeft, 1, 1.0f);
 }
 
 void MpeShapingView::updateDevSliderVisibility (bool devModeEnabled)
@@ -135,6 +202,8 @@ void MpeShapingView::paintAxis (juce::Graphics& g, const AxisSection& section,
     const auto& curve  = engine.responseCurve (section.axis);
     const auto outMin  = curve.getOutputMin();
     const auto outMax  = curve.getOutputMax();
+    const auto lo = juce::jmin (outMin, outMax);
+    const auto hi = juce::jmax (outMin, outMax);
 
     g.setColour (section.colour);
     g.setFont (push::scaledFont (12.0f, true));
@@ -179,12 +248,14 @@ void MpeShapingView::paintAxis (juce::Graphics& g, const AxisSection& section,
     // Spanne renormalisieren -- sonst füllt die Kurve nach jedem Repaint
     // wieder die ganze Box aus und ein Min/Max-Drag bleibt unsichtbar
     // (Bugfix: Endpunkte ließen sich anfassen, aber nicht sichtbar ziehen).
+    // Geklemmt auf [lo,hi] statt fix [0,1] -- die Linie liegt an der
+    // gesetzten Grenze flach an, statt weiter zu extrapolieren.
     juce::Path path;
     for (int i = 0; i <= kCurveSamples; ++i)
     {
         const auto x = (float) i / (float) kCurveSamples;
         const auto px = bounds.getX() + x * bounds.getWidth();
-        const auto py = bounds.getBottom() - juce::jlimit (0.0f, 1.0f, curve.apply (x)) * bounds.getHeight();
+        const auto py = valueToTileY (curve.apply (x), lo, hi, bounds);
 
         if (i == 0)
             path.startNewSubPath (px, py);
@@ -204,10 +275,8 @@ void MpeShapingView::paintAxis (juce::Graphics& g, const AxisSection& section,
     const auto minActive = activeTarget == grid::CurveEditInteraction::Target::MinEndpoint;
     const auto maxActive = activeTarget == grid::CurveEditInteraction::Target::MaxEndpoint;
 
-    const auto minPy = bounds.getBottom() - juce::jlimit (0.0f, 1.0f, outMin) * bounds.getHeight();
-    const auto maxPy = bounds.getBottom() - juce::jlimit (0.0f, 1.0f, outMax) * bounds.getHeight();
-    const auto minPos = juce::Point<float> (bounds.getX(), minPy);
-    const auto maxPos = juce::Point<float> (bounds.getRight(), maxPy);
+    const auto minPos = juce::Point<float> (bounds.getX(), valueToTileY (outMin, lo, hi, bounds));
+    const auto maxPos = juce::Point<float> (bounds.getRight(), valueToTileY (outMax, lo, hi, bounds));
 
     const auto minRadius = minActive ? kEndpointRadiusActive : kEndpointRadius;
     g.setColour (minActive ? push::colours::ledWhite : section.colour);
@@ -220,24 +289,28 @@ void MpeShapingView::paintAxis (juce::Graphics& g, const AxisSection& section,
     // Live-Noten-Kreise: x = jlimit(0,1,rawValue) -- für Achsen mit
     // Rohwertbereich außerhalb [0,1] (PitchBend in Halbtönen) klemmt die
     // Position an den Rand; eine domänenkorrekte Skalierung folgt mit den
-    // Achs-Optionen (S2c-2). y = apply(rawValue) direkt (absoluter
-    // Ausgangswert, nicht auf die aktuelle Spanne renormalisiert).
+    // Achs-Optionen (S2c-2). y = apply(rawValue), geklemmt auf [lo,hi] --
+    // ein weitergewischter Rohwert extrapoliert sonst über die gesetzte
+    // Kurven-Grenze hinaus (Bugfix: Kreis blieb am ungeklemmten apply()
+    // hängen statt am Min/Max-Endpunkt kleben zu bleiben).
     for (const auto& circle : section.fadeTracker.circles())
     {
         const auto x = juce::jlimit (0.0f, 1.0f, circle.rawValue);
         const auto px = bounds.getX() + x * bounds.getWidth();
-        const auto py = bounds.getBottom()
-                           - juce::jlimit (0.0f, 1.0f, curve.apply (circle.rawValue)) * bounds.getHeight();
+        const auto py = valueToTileY (curve.apply (circle.rawValue), lo, hi, bounds);
 
         g.setColour (section.colour.withAlpha (circle.opacity));
         g.fillEllipse (juce::Rectangle<float> (kNoteCircleDiameter, kNoteCircleDiameter)
                            .withCentre ({ px, py }));
 
         // Zweite Höhenmarke am rechten Feldrand: finaler Ausgang inkl. Kurve+
-        // Offset (combinedValue, schon absolut) -- wandert live am Offset-
-        // Slider, schwächer/kleiner als der Kreis.
-        const auto markerY = bounds.getBottom()
-                                 - juce::jlimit (0.0f, 1.0f, circle.combinedValue) * bounds.getHeight();
+        // Offset (combinedValue). Anders als Kurvenlinie/Endpunkte/Noten-
+        // Kreise NICHT auf die Kurven-Grenze [lo,hi] geklemmt, sondern auf
+        // die Achsen-Kapazität -- bei aktivem "Offset"-Schloss reicht der
+        // echte, hörbare Ausgang weiter als die Kurve selbst zeigt, und die
+        // Marke muss das sichtbar machen (sonst wäre sie bei aktivem Schloss
+        // wieder auf die Kurven-Grenze eingefroren, obwohl der Ton weiterläuft).
+        const auto markerY = valueToTileY (circle.combinedValue, kAxisCapacityMin, kAxisCapacityMax, bounds);
         const auto markerRect = juce::Rectangle<float> (kMarkerWidth, kMarkerHeight)
                                     .withCentre ({ bounds.getRight() - kMarkerWidth * 0.5f - 1.0f, markerY });
 
@@ -279,8 +352,10 @@ void MpeShapingView::resized()
     const auto sectionHeight = bounds.getHeight() / (int) sections.size();
     const auto showDetail = getWidth() >= panelSettings.getEditorThresholdWidth();
 
-    for (auto& section : sections)
+    for (int i = 0; i < (int) sections.size(); ++i)
     {
+        auto& section = sections[(size_t) i];
+
         // Abgesetzte Kachel: kleiner Gap oben/unten trennt die drei Achsen-
         // Felder sichtbar voneinander (Looper-Kachel-Stil).
         auto sectionBounds = bounds.removeFromTop (sectionHeight).reduced (0, kSectionGap / 2);
@@ -289,6 +364,14 @@ void MpeShapingView::resized()
         section.detailBounds = showDetail ? sectionBounds.removeFromRight (kDetailColumnWidth)
                                           : juce::Rectangle<int>{};
         section.curveBounds  = sectionBounds;
+
+        // Schloss-Toggle: oben in der Detailspalte, Rest bleibt für
+        // den Platzhalter-Text (paintAxis liest section.detailBounds live).
+        auto& toggle = offsetToggleForSection (i);
+        toggle.setVisible (showDetail);
+
+        if (showDetail)
+            toggle.setBounds (section.detailBounds.removeFromTop (kOffsetToggleHeight).reduced (4, 2));
     }
 }
 
@@ -317,6 +400,12 @@ juce::Point<float> MpeShapingView::normalisedPositionIn (juce::Rectangle<float> 
     const auto normX = (pos.x - fieldBounds.getX()) / fieldBounds.getWidth();
     const auto normY = (fieldBounds.getBottom() - pos.y) / fieldBounds.getHeight();   // 0=unten, 1=oben
     return { normX, normY };
+}
+
+float MpeShapingView::valueToTileY (float value, float lo, float hi,
+                                    juce::Rectangle<float> bounds) noexcept
+{
+    return bounds.getBottom() - juce::jlimit (lo, hi, value) * bounds.getHeight();
 }
 
 void MpeShapingView::mouseDown (const juce::MouseEvent& event)

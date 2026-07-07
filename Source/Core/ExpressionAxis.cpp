@@ -63,6 +63,16 @@ float ExpressionAxis::rawValue (int voiceIndex) const noexcept
     return raw[(size_t) voiceIndex];
 }
 
+void ExpressionAxis::setOffsetBeyondMax (bool shouldAllow) noexcept
+{
+    offsetBeyondMaxFlag = shouldAllow;
+}
+
+bool ExpressionAxis::offsetBeyondMax() const noexcept
+{
+    return offsetBeyondMaxFlag;
+}
+
 float ExpressionAxis::combined (int voiceIndex) const noexcept
 {
     if (! isValidSlot (voiceIndex))
@@ -72,10 +82,20 @@ float ExpressionAxis::combined (int voiceIndex) const noexcept
     // die Achsen-Kapazität config.outMin/outMax) -- ein niedrig gezogener
     // Kurven-Max darf nicht durch Weiterwischen/Offset überschritten werden.
     // Invertierte Kurven (Min > Max) sind erlaubt, daher sortiert klemmen.
-    const auto lo = juce::jmin (curve.getOutputMin(), curve.getOutputMax());
-    const auto hi = juce::jmax (curve.getOutputMin(), curve.getOutputMax());
+    const auto curveLo = juce::jmin (curve.getOutputMin(), curve.getOutputMax());
+    const auto curveHi = juce::jmax (curve.getOutputMin(), curve.getOutputMax());
+    const auto shaped  = curve.apply (raw[(size_t) voiceIndex]);
 
-    return juce::jlimit (lo, hi, curve.apply (raw[(size_t) voiceIndex]) + axisOffset);
+    if (! offsetBeyondMaxFlag)
+        return juce::jlimit (curveLo, curveHi, shaped + axisOffset);   // Default: hart an der Kurven-Grenze
+
+    // "Offset über Max erlauben": die Kurve klemmt zuerst auf ihre eigene
+    // Grenze, DANACH schiebt der Offset noch darüber hinaus -- begrenzt nur
+    // durch die Achsen-Kapazität (Config).
+    const auto capLo = juce::jmin (config.outMin, config.outMax);
+    const auto capHi = juce::jmax (config.outMin, config.outMax);
+
+    return juce::jlimit (capLo, capHi, juce::jlimit (curveLo, curveHi, shaped) + axisOffset);
 }
 
 void ExpressionAxis::reset() noexcept

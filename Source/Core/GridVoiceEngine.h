@@ -84,6 +84,12 @@ public:
         return kPitchBendRangeSemitones;
     }
 
+    /** „Offset über Max erlauben" je Achse -- delegiert an
+        ExpressionAxis::setOffsetBeyondMax/offsetBeyondMax (analog
+        responseCurve(Axis)). Message Thread, keine Signalpfad-Änderung. */
+    void setOffsetBeyondMax (Axis axis, bool shouldAllow) noexcept;
+    [[nodiscard]] bool offsetBeyondMax (Axis axis) const noexcept;
+
 private:
     // Encoder-Bendrange (MpeEncoder::Config::pitchBendRangeSemitones-Default,
     // CLAUDE.md 14 ADR) — die Achse kennt die konkrete Encoder-Config nicht

@@ -11,6 +11,7 @@
 #include "Core/GridVoiceEngine.h"
 #include "Core/UiSettings.h"
 #include "NoteCircleFadeTracker.h"
+#include "PushTiles.h"
 
 namespace conduit
 {
@@ -84,6 +85,40 @@ private:
                     grid::CurveEditInteraction::Target activeTarget) const;
     void updateDevSliderVisibility (bool devModeEnabled);
 
+    /** "Offset"-Toggle als Schloss-Symbol (S2c-2a-Nachbesserung): zu
+        (Default) = Max ist hart, offen = Offset darf über Max hinaus. Cyan
+        gefüllt wenn offen, sonst gedimmter Umriss (Push-Stil). Eigene
+        Klasse statt push::TextTile -- PushIcons hat kein Schloss-Symbol,
+        und der Button zeichnet Icon + "Offset"-Beschriftung selbst. */
+    class LockToggle final : public juce::Button
+    {
+    public:
+        LockToggle() : juce::Button ("lockToggle") {}
+
+        void setActive (bool shouldBeActive) noexcept
+        {
+            if (active == shouldBeActive)
+                return;
+
+            active = shouldBeActive;
+            repaint();
+        }
+
+        [[nodiscard]] bool isActive() const noexcept { return active; }
+
+    private:
+        void paintButton (juce::Graphics& g, bool isHighlighted, bool isDown) override;
+
+        bool active = false;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LockToggle)
+    };
+
+    /** Das Schloss-Toggle der Sektion sectionIndex (0=Pressure, 1=Slide,
+        2=PitchBend) -- eigene benannte Member statt Teil der aggregat-
+        initialisierten AxisSection (Button ist nicht kopier-/verschiebbar). */
+    [[nodiscard]] LockToggle& offsetToggleForSection (int sectionIndex) noexcept;
+
     /** Index der Achsen-Sektion, deren curveBounds pos enthält, sonst -1. */
     [[nodiscard]] int sectionIndexAt (juce::Point<float> pos) const noexcept;
 
@@ -97,6 +132,13 @@ private:
     [[nodiscard]] static juce::Point<float> normalisedPositionIn (juce::Rectangle<float> fieldBounds,
                                                                   juce::Point<float> pos) noexcept;
 
+    /** Ein Achsen-Ausgangswert (Kurvenlinie/Endpunkt-Griffe/Noten-Kreise/
+        Höhenmarke) -> Kachel-y-Pixel, geklemmt auf [lo,hi] (die sortierten
+        Kurven-Ausgangsgrenzen). Gemeinsame Abbildung, damit die vier
+        Zeichen-Stellen nie auseinanderlaufen (Konsistenz-Fix). */
+    [[nodiscard]] static float valueToTileY (float value, float lo, float hi,
+                                             juce::Rectangle<float> bounds) noexcept;
+
     static constexpr float kNoteCircleDiameter = 10.0f;
     static constexpr int   kCurveSamples       = 48;   // >= 48 Stützstellen
     static constexpr int   kHeaderRowHeight    = 18;
@@ -106,6 +148,15 @@ private:
     static constexpr float kTileCornerRadius   = 6.0f; // Looper-Kachel-Stil
     static constexpr float kMarkerWidth        = 6.0f; // Höhenmarke (combinedValue)
     static constexpr float kMarkerHeight       = 2.5f;
+    static constexpr int   kOffsetToggleHeight = 28;   // "Offset"-Schloss-Toggle in der Detailspalte
+
+    // Achsen-Kapazität (ExpressionAxis::Config::outMin/outMax) aller drei
+    // Grid-Achsen ist seit S2c-1 immer [0,1] -- ExpressionAxis/GridVoiceEngine
+    // geben das nicht nach außen (Scope dieser Nachbesserung ist ausschließlich
+    // MpeShapingView), daher hier gespiegelt: die combined-Höhenmarke klemmt
+    // darauf, NICHT auf die (ggf. engere) Kurven-Grenze wie Linie/Kreise.
+    static constexpr float kAxisCapacityMin = 0.0f;
+    static constexpr float kAxisCapacityMax = 1.0f;
 
     // Touch-Bearbeitung der Kurve (S2c-2a)
     static constexpr float kTouchTargetPx        = 44.0f;  // CLAUDE.md 10 Touch-Target-Regel
@@ -125,6 +176,12 @@ private:
     juce::Slider thresholdSlider;
     juce::Label  fadeCaption { {}, "Fade-Zeit" };
     juce::Slider fadeSlider;
+
+    // Schloss-Toggle je Achse (Detailspalte) -- eigene Member statt Teil von
+    // AxisSection, siehe offsetToggleForSection().
+    LockToggle pressureOffsetToggle;
+    LockToggle slideOffsetToggle;
+    LockToggle pitchBendOffsetToggle;
 
     bool devSlidersVisible = false;   // gecachter Dev-Modus-Zustand (tick())
     double lastTickMs = 0.0;

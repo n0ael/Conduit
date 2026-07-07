@@ -52,6 +52,13 @@ public:
 
     void reset() noexcept;   // alle Slots inaktiv, Rohwerte 0 — Offset bleibt
 
+    /** „Offset über Max erlauben" (Default aus = jetziges Verhalten): aus ->
+        Kurve+Offset hart auf die Kurven-Ausgangsgrenzen geklemmt; an -> die
+        Kurve klemmt zuerst auf ihre Grenze, DANACH schiebt der Offset noch
+        darüber hinaus, begrenzt nur durch die Achsen-Kapazität (Config). */
+    void setOffsetBeyondMax (bool shouldAllow) noexcept;
+    [[nodiscard]] bool offsetBeyondMax() const noexcept;
+
     /** Zugriff auf die Response-Kurve dieser Achse (Nutzung durch das
         spätere Kurven-Panel, S2). */
     ResponseCurve& responseCurve() noexcept { return curve; }
@@ -65,6 +72,7 @@ public:
 private:
     Config config;
     float  axisOffset { 0.0f };
+    bool   offsetBeyondMaxFlag { false };
     ResponseCurve curve;
     std::array<float, (size_t) VoiceAllocator::kMaxVoices> raw {};
     std::array<bool,  (size_t) VoiceAllocator::kMaxVoices> active {};

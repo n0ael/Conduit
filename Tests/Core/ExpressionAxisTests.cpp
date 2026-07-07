@@ -160,5 +160,52 @@ TEST_CASE ("ExpressionAxis: Offset schiebt bis an die Kurven-Grenze, nicht darü
     axis.setRaw (0, 0.5f);
     axis.setOffset (0.5f);
 
+    // Default: offsetBeyondMax() ist aus -- unverändert zum Clamp-Fix.
+    REQUIRE_FALSE (axis.offsetBeyondMax());
     REQUIRE (axis.combined (0) == Approx (0.7f));
+}
+
+TEST_CASE ("ExpressionAxis: offsetBeyondMax an -- Offset schiebt über die Kurven-Grenze hinaus", "[grid]")
+{
+    grid::ExpressionAxis axis;   // Default-Config: Kapazität [0,1]
+
+    axis.responseCurve().setOutputRange (0.0f, 0.7f);
+    axis.setOffsetBeyondMax (true);
+    REQUIRE (axis.offsetBeyondMax());
+
+    axis.activate (0);
+    axis.setRaw (0, 1.0f);    // apply(1.0) == outMax (0.7) exakt
+    axis.setOffset (0.5f);
+
+    // Kurve klemmt zuerst auf 0.7, dann +0.5 = 1.2, begrenzt nur durch die
+    // Achsen-Kapazität (Default outMax = 1.0) -- deutlich über der Kurven-Grenze.
+    REQUIRE (axis.combined (0) == Approx (1.0f));
+}
+
+TEST_CASE ("ExpressionAxis: offsetBeyondMax an -- negativer Offset schiebt unter die Kurven-Grenze", "[grid]")
+{
+    grid::ExpressionAxis axis;   // Default-Config: Kapazität [0,1]
+
+    axis.responseCurve().setOutputRange (0.3f, 1.0f);
+    axis.setOffsetBeyondMax (true);
+
+    axis.activate (0);
+    axis.setRaw (0, -1.0f);    // extrapoliert, Kurve klemmt auf curveLo = 0.3
+    axis.setOffset (-0.5f);   // 0.3 - 0.5 = -0.2, begrenzt nur durch config.outMin (0.0)
+
+    REQUIRE (axis.combined (0) == Approx (0.0f));
+}
+
+TEST_CASE ("ExpressionAxis: offsetBeyondMax an, aber Achsen-Kapazität klemmt trotzdem", "[grid]")
+{
+    grid::ExpressionAxis axis;   // Default-Config: Kapazität [0,1]
+
+    axis.responseCurve().setOutputRange (0.0f, 0.7f);
+    axis.setOffsetBeyondMax (true);
+
+    axis.activate (0);
+    axis.setRaw (0, 0.5f);
+    axis.setOffset (1.0f);   // sehr großer Offset -- klemmt bei config.outMax (1.0), nicht bei 0.7+1.0
+
+    REQUIRE (axis.combined (0) == Approx (1.0f));
 }
