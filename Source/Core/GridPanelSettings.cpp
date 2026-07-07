@@ -5,8 +5,10 @@ namespace conduit
 
 namespace
 {
-    constexpr const char* editorPanelWidthKey = "editorPanelWidth";
-    constexpr const char* editorPanelOpenKey  = "editorPanelOpen";
+    constexpr const char* editorPanelWidthKey     = "editorPanelWidth";
+    constexpr const char* editorPanelOpenKey      = "editorPanelOpen";
+    constexpr const char* editorThresholdWidthKey = "editorThresholdWidth";
+    constexpr const char* noteCircleFadeMsKey     = "noteCircleFadeMs";
 }
 
 //==============================================================================
@@ -40,6 +42,11 @@ void GridPanelSettings::loadFromFile()
     {
         editorPanelWidth = file->getIntValue (editorPanelWidthKey, defaultWidth);
         editorPanelOpen  = file->getBoolValue (editorPanelOpenKey, false);
+
+        editorThresholdWidth = juce::jlimit (minThresholdWidth, maxThresholdWidth,
+            file->getIntValue (editorThresholdWidthKey, defaultThresholdWidth));
+        noteCircleFadeMs = juce::jlimit (minNoteCircleFadeMs, maxNoteCircleFadeMs,
+            file->getIntValue (noteCircleFadeMsKey, defaultNoteCircleFadeMs));
     }
 }
 
@@ -67,6 +74,38 @@ void GridPanelSettings::setEditorPanelOpen (bool shouldBeOpen)
     if (auto* file = applicationProperties.getUserSettings())
     {
         file->setValue (editorPanelOpenKey, editorPanelOpen);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setEditorThresholdWidth (int newWidth)
+{
+    const auto clamped = juce::jlimit (minThresholdWidth, maxThresholdWidth, newWidth);
+
+    if (clamped == editorThresholdWidth)
+        return;
+
+    editorThresholdWidth = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (editorThresholdWidthKey, editorThresholdWidth);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setNoteCircleFadeMs (int newFadeMs)
+{
+    const auto clamped = juce::jlimit (minNoteCircleFadeMs, maxNoteCircleFadeMs, newFadeMs);
+
+    if (clamped == noteCircleFadeMs)
+        return;
+
+    noteCircleFadeMs = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (noteCircleFadeMsKey, noteCircleFadeMs);
         file->saveIfNeeded();
     }
 }

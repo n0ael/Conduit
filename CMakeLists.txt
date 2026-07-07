@@ -235,8 +235,10 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/LinkAudioStatusBadge.cpp
     Source/UI/LinkMenuPanel.cpp
     Source/UI/LinkSendCreateDialog.cpp
+    Source/UI/MpeShapingView.cpp
     Source/UI/NodeCanvas.cpp
     Source/UI/NodeComponent.cpp
+    Source/UI/NoteCircleFadeTracker.cpp
     Source/UI/OscSettingsComponent.cpp
     Source/UI/LooperPage.cpp
     Source/UI/LooperWaveformStrip.cpp
@@ -410,10 +412,12 @@ target_sources(Conduit PRIVATE
     Source/UI/LinkAudioStatusBadge.h
     Source/UI/LinkMenuPanel.h
     Source/UI/LinkSendCreateDialog.h
+    Source/UI/MpeShapingView.h
     Source/UI/NodeAttributePanel.h
     Source/UI/NodeCanvas.h
     Source/UI/NodeColourDot.h
     Source/UI/NodeComponent.h
+    Source/UI/NoteCircleFadeTracker.h
     Source/UI/OscSettingsComponent.h
     Source/UI/PageHost.h
     Source/UI/ParameterPanel.h
@@ -564,6 +568,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/VoiceAllocatorTests.cpp
         Tests/UI/BrowserPanelTests.cpp
         Tests/UI/EditorDockPanelTests.cpp
+        Tests/UI/NoteCircleFadeTrackerTests.cpp
         Tests/UI/TouchKeyboardTests.cpp
         Tests/UI/GridKeyboardTests.cpp
         Tests/UI/FxModulePanelTests.cpp
@@ -725,8 +730,10 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/LinkAudioStatusBadge.cpp
         Source/UI/LinkMenuPanel.cpp
         Source/UI/LinkSendCreateDialog.cpp
+        Source/UI/MpeShapingView.cpp
         Source/UI/NodeCanvas.cpp
         Source/UI/NodeComponent.cpp
+        Source/UI/NoteCircleFadeTracker.cpp
         Source/UI/OscSettingsComponent.cpp
         Source/UI/LooperPage.cpp
         Source/UI/LooperWaveformStrip.cpp

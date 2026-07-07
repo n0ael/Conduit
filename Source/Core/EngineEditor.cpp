@@ -29,7 +29,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
               &engineProcessor.getInputLevels(), &engineProcessor.getOutputLevels(),
               &engineProcessor.getInputLinkSend(), &engineProcessor.getUiSettings()),
       gridPage (engineProcessor.getGridVoiceEngine(), engineProcessor.getGridMidiDeviceTarget(),
-               engineProcessor.getGridPanelSettings()),
+               engineProcessor.getGridPanelSettings(), engineProcessor.getUiSettings()),
       browserModel (engineProcessor.getModuleFactory(), browserContext, browserWorker),
       browserPanel (browserModel, engineProcessor.getUiSettings())
 {

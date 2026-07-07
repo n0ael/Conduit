@@ -1,22 +1,14 @@
 #include "GridPage.h"
 
-#include "PushLookAndFeel.h"
+#include "MpeShapingView.h"
 
 namespace conduit
 {
 
-void GridPage::MpePlaceholder::paint (juce::Graphics& g)
-{
-    g.fillAll (push::colours::panel);
-    g.setColour (push::colours::textDim);
-    g.setFont (push::scaledFont (15.0f));
-    g.drawFittedText ("MPE Shaping", getLocalBounds(), juce::Justification::centred, 1);
-}
-
 GridPage::GridPage (grid::GridVoiceEngine& engineToUse, grid::MidiDeviceTarget& midiTargetToUse,
-                     GridPanelSettings& panelSettingsToUse)
+                     GridPanelSettings& panelSettingsToUse, UiSettings& uiSettingsToUse)
     : engine (engineToUse), midiTarget (midiTargetToUse), panelSettings (panelSettingsToUse),
-      keyboard (engineToUse)
+      uiSettings (uiSettingsToUse), keyboard (engineToUse)
 {
     addAndMakeVisible (outputCombo);
     addAndMakeVisible (releaseAllButton);
@@ -44,9 +36,11 @@ GridPage::GridPage (grid::GridVoiceEngine& engineToUse, grid::MidiDeviceTarget& 
         engine.setPitchBendOffset ((value - 0.5f) * 2.0f * kPitchBendOffsetSemitones);
     };
 
-    // Editor-Dock-Panel (S2-Gerüst): ein Tab „MPE", Breite/Offen-Zustand aus
-    // der Persistenz laden, Live-Resize + Commit verdrahten.
-    dockPanel.addTab ("mpe", "MPE", std::make_unique<MpePlaceholder>());
+    // Editor-Dock-Panel: ein Tab „MPE" mit dem MPE-Shaping-Editor (S2c),
+    // Breite/Offen-Zustand aus der Persistenz laden, Live-Resize + Commit
+    // verdrahten.
+    dockPanel.addTab ("mpe", "MPE",
+                      std::make_unique<MpeShapingView> (engine, panelSettings, uiSettings));
     dockPanel.setPanelWidth (panelSettings.getEditorPanelWidth());
     dockPanel.setPanelOpen (panelSettings.isEditorPanelOpen());
 

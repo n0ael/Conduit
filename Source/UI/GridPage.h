@@ -6,6 +6,7 @@
 #include "Core/GridPanelSettings.h"
 #include "Core/GridVoiceEngine.h"
 #include "Core/MidiDeviceTarget.h"
+#include "Core/UiSettings.h"
 #include "EditorDockPanel.h"
 #include "ExpressionRibbon.h"
 #include "GridKeyboardComponent.h"
@@ -32,16 +33,17 @@ namespace conduit
     Rechtes Editor-Dock-Panel (S2-Vorstufe MPE-Shaping): EditorDockPanel
     dockt via bounds.removeFromRight (dockPanel.getPreferredWidth()) --
     koexistiert mit dem Browser-Panel (das dockt eine Ebene höher im
-    EngineEditor). Genau ein Tab „MPE" mit Platzhalter-Inhalt (kein
-    Kurven-Editor -- das ist S2c). Toggle über einen eigenen TransportBar-
-    Button (setDockPanelOpen), Breite/Offen-Zustand persistiert über
-    GridPanelSettings (App-Zustand, Muster MeterSettings).
+    EngineEditor). Genau ein Tab „MPE" mit MpeShapingView (S2c) -- drei
+    Kurven (Pressure/Slide/PitchBend) + Live-Noten-Kreise, reine Anzeige
+    (Touch-Bearbeitung folgt in S2c-2). Toggle über einen eigenen
+    TransportBar-Button (setDockPanelOpen), Breite/Offen-Zustand persistiert
+    über GridPanelSettings (App-Zustand, Muster MeterSettings).
 */
 class GridPage final : public juce::Component
 {
 public:
     GridPage (grid::GridVoiceEngine& engineToUse, grid::MidiDeviceTarget& midiTargetToUse,
-              GridPanelSettings& panelSettingsToUse);
+              GridPanelSettings& panelSettingsToUse, UiSettings& uiSettingsToUse);
 
     void resized() override;
 
@@ -54,13 +56,6 @@ private:
     void rebuildDeviceList();
     void handleDeviceSelected();
 
-    /** Platzhalter-Inhalt des „MPE"-Tabs -- kein Editor-Inhalt (S2c). */
-    class MpePlaceholder final : public juce::Component
-    {
-    public:
-        void paint (juce::Graphics& g) override;
-    };
-
     // Bereich des PitchBend-Offset-Ribbons: Mitte = 0, ±Ende = ±12 Halbtöne.
     // Spätere 1–96-Range-UI ersetzt diese Konstante.
     static constexpr float kPitchBendOffsetSemitones = 12.0f;
@@ -68,6 +63,7 @@ private:
     grid::GridVoiceEngine& engine;
     grid::MidiDeviceTarget& midiTarget;
     GridPanelSettings& panelSettings;
+    UiSettings& uiSettings;
     juce::Array<juce::MidiDeviceInfo> devices;
 
     juce::ComboBox outputCombo;

@@ -26,6 +26,11 @@ public:
     void setSegmentCurvature (int segmentIndex, float c) noexcept;  // c auf [-1,1] geklemmt
     void setOutputRange (float outMin, float outMax) noexcept;
 
+    /** Aktueller Ausgangs-Wertebereich (Panel-Anzeige: Min/Max, Kurven-
+        Normalisierung). */
+    [[nodiscard]] float getOutputMin() const noexcept { return outputMin; }
+    [[nodiscard]] float getOutputMax() const noexcept { return outputMax; }
+
     int numPoints()   const noexcept;
     int numSegments() const noexcept;                                // = numPoints()-1
     const std::vector<Point>& points() const noexcept;
