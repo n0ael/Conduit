@@ -68,7 +68,14 @@ float ExpressionAxis::combined (int voiceIndex) const noexcept
     if (! isValidSlot (voiceIndex))
         return config.outMin;
 
-    return juce::jlimit (config.outMin, config.outMax, curve.apply (raw[(size_t) voiceIndex]) + axisOffset);
+    // Geklemmt auf die vom Nutzer gesetzten Kurven-Ausgangsgrenzen (nicht
+    // die Achsen-Kapazität config.outMin/outMax) -- ein niedrig gezogener
+    // Kurven-Max darf nicht durch Weiterwischen/Offset überschritten werden.
+    // Invertierte Kurven (Min > Max) sind erlaubt, daher sortiert klemmen.
+    const auto lo = juce::jmin (curve.getOutputMin(), curve.getOutputMax());
+    const auto hi = juce::jmax (curve.getOutputMin(), curve.getOutputMax());
+
+    return juce::jlimit (lo, hi, curve.apply (raw[(size_t) voiceIndex]) + axisOffset);
 }
 
 void ExpressionAxis::reset() noexcept

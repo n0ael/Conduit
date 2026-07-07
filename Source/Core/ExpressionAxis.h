@@ -10,8 +10,9 @@ namespace conduit::grid
 /** Eine globale Ausdrucks-Achse über allen Stimmen: pro Voice-Slot ein
     ungeklemmter Rohwert plus ein bipolarer Offset. combined() ist der
     einzige Ort, an dem Rohwert + Offset zum finalen Ausgangswert werden
-    (Clamp auf [outMin, outMax]) — künftiger Einhängepunkt für
-    Response-Kurven / Min-Max / Skalen-Magnet. Message Thread. */
+    (Clamp auf die Ausgangsgrenzen der ResponseCurve, siehe unten) —
+    künftiger Einhängepunkt für Response-Kurven / Min-Max / Skalen-Magnet.
+    Message Thread. */
 class ExpressionAxis
 {
 public:
@@ -42,8 +43,11 @@ public:
     bool isActive   (int voiceIndex) const noexcept;
 
     /** Finaler Ausgangswert der Stimme: clamp(curve.apply(raw) + offset,
-        outMin, outMax) -- die Kurve formt VOR dem Offset (Default-Kurve =
-        Identität, also verhaltensneutral). */
+        curve.getOutputMin(), curve.getOutputMax()) -- geklemmt auf die
+        Kurven-Ausgangsgrenzen (nicht die Achsen-Kapazität config.outMin/
+        outMax), invertierte Kurven (Min > Max) eingeschlossen. Die Kurve
+        formt VOR dem Offset (Default-Kurve = Identität, also
+        verhaltensneutral). */
     float combined (int voiceIndex) const noexcept;
 
     void reset() noexcept;   // alle Slots inaktiv, Rohwerte 0 — Offset bleibt
