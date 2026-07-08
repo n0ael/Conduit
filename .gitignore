@@ -27,8 +27,10 @@ Thumbs.db
 *.log
 .cache/
 
-# Claude Code (lokal)
-.claude/
+# Claude Code: lokales bleibt lokal, aber die path-scoped Rules
+# (Subsystem-Invarianten, ADR 005) sind Teil des Projekts wie CLAUDE.md
+.claude/*
+!.claude/rules/
 
 # Airwindows-Quelle (read-only Referenz, Source/DSP/Airwindows/PORTING_NOTES.md)
 Third-Party/airwindows/

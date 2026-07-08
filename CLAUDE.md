@@ -16,7 +16,7 @@ Du bist ein C++20 und JUCE (v8+) Audio-Experte. Wir entwickeln "Conduit alpha v3
 
 Denke in Architektur und Modulen, bevor du Code schreibst. Liefere Code-Snippets immer sauber getrennt in Header (.h) und Source (.cpp). Bleib technisch, präzise und direkt. Keine Erklärungen, die nicht angefordert wurden.
 
-### 1.1 Subsystem-Dossiers (Pflichtlektüre)
+### 1.1 Subsystem-Dossiers & Rules (Pflichtlektüre)
 
 Detail-Spezifikationen und Lektionen abgeschlossener Subsysteme
 liegen in `docs/{Subsystem}.md`, ADRs in `docs/adr/`. Für Arbeiten
@@ -25,6 +25,14 @@ Vor JEDER Änderung an einem Subsystem mit Dossier: das Dossier
 vollständig lesen; Phase 1 des Auftrags listet die gelesenen
 Dossiers. Neue Feature-Spezifikationen wandern nach Abschluss ins
 Dossier — in der CLAUDE.md verbleiben nur Invarianten + Verweis.
+
+Die Subsystem-INVARIANTEN leben seit v5.0 als path-scoped Rules in
+`.claude/rules/*.md` (ADR 005): sie laden mechanisch, sobald Dateien
+des Subsystems gelesen werden — `paths:`-Frontmatter verwenden, NIE
+`globs:` (lädt fälschlich unconditional). Beim Anlegen NEUER Dateien
+eines Subsystems triggert die Rule erst nach dem ersten Read — die
+Phase-1-Inventur (Bestandsdateien lesen) deckt das ab. Querschnitts-
+Regeln (v. a. §3 Audio Thread) bleiben bewusst unconditional hier.
 
 ---
 
@@ -131,30 +139,19 @@ Niemals Interface-Methoden vom falschen Thread aufrufen.
 
 ### 4.5 Launch-Quantisierung (Pattern für IClockSlave-Module)
 
-Quantisierte Start/Stop/Reset-Aktionen folgen dem Ableton-Grid (None/8/4/2/1
-Bar, 1/2 … 1/32); Grid-Enum zentral und app-weit
-(`Source/Core/LaunchQuantization.h`), damit alle Module identisch quantisieren.
-Kanonisches Muster (v1-erprobt): UI/OSC setzt atomare Pending-Flags; der
-Audio-Thread erkennt die Grid-Überquerung pro Block sample-genau
-(`floor(beat/qBeats) > floor(prevBeat/qBeats)`), führt die Aktion aus und
-konsumiert das Flag per `exchange(false, acq_rel)`; qBeats == 0 → sofort am
-Blockanfang.
+Quantisierte Start/Stop/Reset-Aktionen folgen dem Ableton-Grid; Grid-Enum
+zentral und app-weit (`Source/Core/LaunchQuantization.h`), damit alle
+Module identisch quantisieren. Kanonisches Muster (atomare Pending-Flags,
+sample-genaue Grid-Überquerung): Rule `transport`.
 
 ---
 
 ### 4.6 FX-Chassis-Standard (ProcessorModule) — verbindlich für ALLE FX-Module
 
-- Jedes Audio-FX-Modul erbt `ProcessorModule` und implementiert NUR
-  `prepareCore()`/`processCore()` (Stereo-Sicht, Kanäle 0..1);
-  `prepareToPlay`/`processBlock`/`appendParametersTo`/
-  `getParameterTarget` sind final — NIE überschreiben.
-- Kanal-Layout FEST: Audio 0..1, CV 2..N
-  (`ChassisSchema::cvChannelForParam`); Parameter-`role`:
-  "dsp" | "chassis" | "cvAmount".
-- Chassis-Bestandteile (Gains, Meter, Link-Send-Tap,
-  CV-Richtungsmodell, Control-Linking, Schema-/Migrations-Regeln,
-  `FxModulePanel`) NIE nachbauen — Spezifikation:
-  **docs/FxChassis.md — Pflichtlektüre vor jeder FX-Arbeit.**
+Jedes Audio-FX-Modul erbt `ProcessorModule` und implementiert NUR
+`prepareCore()`/`processCore()` — Chassis-Bestandteile NIE nachbauen.
+Invarianten: Rule `fx-chassis`; Spezifikation: **docs/FxChassis.md —
+Pflichtlektüre vor jeder FX-Arbeit.**
 
 ---
 
@@ -266,42 +263,27 @@ Connections[], CalibrationProfiles[], Session-Skala/`followAbleton`):
 
 ### 7.1 Auto-Registration via ValueTree::Listener
 
-- `OscController` lauscht global als `ValueTree::Listener` auf Root-Tree
-- `valueTreeChildAdded` → liest `type` + `moduleId` → registriert OSC-Adressen automatisch
-- `OscController` cached `moduleId` bei `nodeState → Deleting` (Phase 1 Delete)
-- OSC-Deregistrierung erfolgt in Phase 1, **nicht** erst in `valueTreeChildRemoved`
-- DSP-Module wissen nichts von OSC — Single Responsibility
+`OscController` registriert/deregistriert OSC-Adressen automatisch über
+den Root-Tree-Listener; Deregistrierung in Delete-Phase 1. DSP-Module
+wissen nichts von OSC. Details: Rule `osc-remote`.
 
 ### 7.2 Link Audio (Audio in der Link-Session)
 
-- **LinkAudio ERSETZT Link** — beide Klassen nie parallel
-  instanziieren; `LinkClock`-Pimpl hält die einzige
-  `ableton::LinkAudio`-Instanz für Timing UND Audio.
-- IWYU: `<ableton/LinkAudio.hpp>` in JEDER Compilation Unit, die
-  LinkAudio-Typen berührt.
-- Format interleaved int16, Float→Int16 NUR mit TPDF-Dither
-  (LCG); Sink-Größe in SAMPLES — Frames und Samples nie mischen.
-- Send + Clock + Receive implementiert (Receive 08.07.2026:
-  LinkReceiveStream, beat-aligntes Latenzfenster `latency_ms`;
-  Live-Feldtest offen). Spezifikation + Lektionen:
-  **docs/LinkAudio.md — Pflichtlektüre vor jeder LinkAudio-Arbeit.**
+Send + Clock + Receive implementiert (Receive: beat-aligntes
+Latenzfenster `latency_ms`; Live-Feldtest offen 08.07.2026).
+Invarianten (LinkAudio ERSETZT Link, int16+TPDF, WeakReference-Pflicht):
+Rule `linkaudio`; Spezifikation + Lektionen: **docs/LinkAudio.md —
+Pflichtlektüre vor jeder LinkAudio-Arbeit.**
 
 ### 7.3 OSC-Send (Parameter-Feedback an Clients)
 
-- Snapshot-Diff via `juce::Timer` @ 30 Hz auf dem Message Thread,
-  Cache-Key `(nodeUuid, paramId)`; der Audio Thread ist NIE
-  beteiligt (3.1).
-- Default-Port 9001, NICHT 9000 (Loopback-Schutz).
-- Details (Echo-Suppression, Float-Diff-Falle, `/conduit/sync`,
-  IP-Learn, `OscSendSettings`): **docs/OscSend.md**.
+Snapshot-Diff @ 30 Hz auf dem Message Thread, Default-Port 9001 (NICHT
+9000). Invarianten: Rule `osc-remote`; Details: **docs/OscSend.md**.
 
 ### 7.4 Max4Live-Announce (Remote-Module)
 
-- `remoteId` = dokumentierte Ausnahme zur Laufzeit-ID-Regel (§6):
-  in Live-Set UND Patch persistent, hartes Format `[A-Za-z0-9_-]`,
-  max. 64 Zeichen.
-- Details (Announce-Format, RemoteModuleBinder, Alias-Adressen,
-  tintColour, Referenz-Device): **docs/M4LAnnounce.md**.
+`remoteId` = dokumentierte Ausnahme zur Laufzeit-ID-Regel (§6).
+Invarianten: Rule `osc-remote`; Details: **docs/M4LAnnounce.md**.
 
 ---
 
@@ -360,18 +342,13 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
 
 ### 9.1 macOS CoreAudio
 
-- `juce_add_gui_app` mit `BUNDLE_ID` und `JUCE_USE_CORE_AUDIO=1`
-- `AudioDeviceManager.setAudioDeviceSetup()` — sampleRate 48000, bufferSize 128
-- Tatsächliche Buffer-Size nach Setup abfragen — Hardware kann Minimum erzwingen
-- `initAudio()` reagiert defensiv auf abweichende Werte, kein Crash,
-  Abweichung in ValueTree-Property `audioSetupWarning` speichern
+Setup-Details (Buffer-Size-Verhalten, `audioSetupWarning`-Property,
+defensives `initAudio()`): docs/Build.md.
 
 ### 9.2 Linux Kiosk-Mode (LinkBox)
 
-- App startet fullscreen/borderless, kein Window Manager nötig
-- Cursor ausblenden wenn Touch aktiv
-- PREEMPT_RT: keine RT-inkompatiblen Kernel-Calls im Audio Thread
-- Touchscreen-Kalibrierung beim Start prüfen (`xinput set-prop`)
+Fullscreen/borderless, Cursor-Handling, PREEMPT_RT-Regeln,
+Touch-Kalibrierung: docs/Build.md.
 
 ---
 
@@ -379,63 +356,28 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
 
 ### 10.0 Push-3-Design-System (Stand Juli 2026)
 
-- **PushLookAndFeel** (`Source/UI/PushLookAndFeel`) ist Default-LookAndFeel
-  der App (gesetzt im EngineEditor): Jost als App-Font (BinaryData,
-  `Assets/Fonts/`, OFL), dunkle Kacheln (#262626 auf #121212/#1a1a1a),
-  LED-Akzente (grün Play, rot Automate/Looper, cyan Link, orange Capture).
-- **PushIcons** (`Source/UI/PushIcons`): ALLE Symbole als `juce::Path` aus
-  einem normierten 0..1-Quadrat in die Ziel-Bounds skaliert — vektorbasiert,
-  beliebig auflösungs-/DPI-fähig, keine Bitmaps. Bausteine: IconTile/
-  TextTile/ValueTile (`PushTiles`).
-- **TransportBar & Metronom:** TransportBar ersetzt die
-  Modul-Button-Toolbar komplett; Transport-/Link-Zustand in
-  `TransportSettings`; Metronom = allocation-free Click NACH dem
-  GraphFader, Beat-Grenzen sample-genau. Spezifikation:
-  **docs/Transport.md**.
-- **Pages** (`Source/UI/PageHost`): Grid (Ω, Touch-Controller-Baukasten) · Mixer (∥∥)
-  · Clip (▷▭, Fugue-Machine-Sequencer) · Device (|||, Patch-Canvas). Device
-  und Grid (M1) sind implementiert — Mixer und Clip bleiben gestylte
-  Platzhalter, je ein eigener Meilenstein (Roadmap 11).
-- **Transport-/Link-Zustand** in `TransportSettings` (App-Zustand, Muster
-  MeterSettings); der EngineProcessor speist LinkClock (Start/Stop-Sync,
-  Clock-Offset ±100 ms als Beat-Lese-Versatz) und Metronom (Enable, Anker).
-- **Looper (Retro-Looper + Vollausbau):** Engine-Level, kein Graph;
-  MT→Audio via `SpscQueue<ClipCommand>`, Audio→MT via Retire-Queue —
-  `free` NIE im Audio-Callback; Playhead sample-kontinuierlich, NIE
-  roh aus `beatAtBlockStart` (Wall-Clock-Jitter); `prepareToPlay` →
-  `clearAllClips()`. Spezifikation + Lektionen (inkl.
-  CallbackTimingMonitor, Spektrum-View): **docs/Looper.md**.
+Design-System (PushLookAndFeel, PushIcons/PushTiles, Pages) + UI-Regeln
+im Detail: Rule `ui-design` (lädt bei Arbeit unter `Source/UI/`).
+Querschnitts-Kern:
 
-- **Grid-Touch-Controller (Ω):** Kette Quelle → Voice-Modell →
-  Sink; MPE-Zuteilung IN Conduit (`VoiceAllocator` + `MpeEncoder`);
-  `GridVoiceEngine` ist Engine-Level, Message-Thread — kein
-  Audio-Thread, kein Graph. Spezifikation + Meilensteinleiter:
-  **docs/Grid.md**.
+- Touch-first: minimale Touch-Target-Größe 44px, vollständig
+  Mouse/Keyboard-kompatibel — kein Touch-only Code.
+- **Schrift wird NIE horizontal gestaucht (User-Regel 07/2026):**
+  Schriftgröße reduzieren oder Text kürzen — niemals quetschen
+  (minimumHorizontalScale = 1.0, Details Rule `ui-design`).
+- UI-Components binden NUR an den ValueTree-Subtree, nie an den
+  Processor (5.3); Animationen via `VBlankAttachment`, kein Blocking
+  in `paint()`.
 
-- Touch-first Design: `setAcceptsTouchEvents(true)`
-- Minimale Touch-Target-Größe: 44px
-- Vollständig Mouse/Keyboard-kompatibel — kein Touch-only Code
-- **Schrift wird NIE horizontal gestaucht (User-Regel 07/2026):** bei
-  Platzmangel die Schriftgröße reduzieren oder den Text kürzen — niemals
-  quetschen. Konkret: `drawFittedText`/`drawLabel` immer mit
-  minimumHorizontalScale = 1.0 (PushLookAndFeel::drawLabel erzwingt das
-  app-weit), `Label::setMinimumHorizontalScale (< 1.0f)` ist verboten.
-- Jedes UI-Element mit Touch-State reagiert in ≤ 1 Frame visuell
-- Keine blockierenden Operationen im `paint()`-Callback
-- Animationen via `juce::VBlankAttachment` (JUCE 7.0.3+)
-- Scope-Ringbuffer: Audio-Thread schreibt, UI-Thread liest (lock-free), 30fps Refresh
+Subsystem-Regeln + Spezifikationen (je eigene Rule + Dossier):
+**TransportBar/Metronom** → Rule `transport`, docs/Transport.md ·
+**Looper** (Engine-Level, kein Graph) → Rule `looper`, docs/Looper.md ·
+**Grid-Touch-Controller Ω** → Rule `grid`, docs/Grid.md.
 
 ### 10.1 Touch-Gesten
 
-| Geste | Funktion | Priorität |
-|---|---|---|
-| 1 Finger Drag | Parameter-Sweep (CV-Wert) | P0 |
-| 2 Finger Pinch | Range-Zoom Scope/Visualizer | P0 |
-| Grid: 1 Finger (Sonne) | Note + Pitch-Bend (X) + Ausdruck (Y) | P0 |
-| Grid: 2. Finger im Orbit (Mond) | Ring — Radius → Slide, keine neue Note | P0 |
-| 2 Finger Rotate | LFO-Phase / Tuning | P1 |
-| 3 Finger Tap | Snap-to-Zero / Reset | P1 |
-| Long Press | Kontextmenü / Node-Eigenschaften | P2 |
+Gesten-Tabelle (Sonne/Mond, Pinch, Rotate, 3-Finger-Tap, Long Press):
+Rule `ui-design`.
 
 ---
 
@@ -513,18 +455,8 @@ und nur mit Steinberg ASIO SDK (separater Download + Lizenz, Pfad via
 
 ### 13.5 Projektstruktur
 
-```
-/
-├── CMakeLists.txt
-├── CLAUDE.md
-├── Source/
-│   ├── Core/            GraphManager, OscController, Datenmodell
-│   ├── Modules/         ConduitModule + Subklassen (je Modul: .h/.cpp Paar)
-│   ├── Interfaces/      IClockSource, IClockSlave, ISidechain, ...
-│   ├── UI/              Components, nur ValueTree-gebunden
-│   └── Util/            SPSC-Queue, Helpers
-└── Tests/               Catch2-Tests, spiegelt Source/-Struktur
-```
+`Source/{Core,Modules,Interfaces,UI,Util}` + `Tests/` (spiegelt
+Source/-Struktur), je Modul ein .h/.cpp-Paar; UI nur ValueTree-gebunden.
 
 ---
 
@@ -536,7 +468,8 @@ Index:
 - 002 — Grid-Page als Touch-Controller-Baukasten
 - 003 — Grid-Voice-Ausgabe: Quelle → Voice-Modell → austauschbare Sinks
 - 004 — Subsystem-Dossiers unter docs/ (+ Descope 10-Finger-Panic)
+- 005 — Subsystem-Invarianten als path-scoped Rules (.claude/rules/)
 
 ---
 
-*Conduit Alpha v3 — Claude Code Instructions v4.8  |  Juli 2026*
+*Conduit Alpha v3 — Claude Code Instructions v5.0  |  Juli 2026*

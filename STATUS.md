@@ -20,9 +20,12 @@
   Slider (20–500 ms), Status-LED + gepufferte ms.
 - **Befund:** `availableChannels()` listet nur PEER-Announcements — eigene
   Sinks nie; Loopback braucht einen echten Peer (docs/LinkAudio.md).
-- Doku-Diät Stufe 2 am selben Tag: CLAUDE.md v4.8 (540 Zeilen), 4 neue
-  Dossiers (PatchEngine/DataModel/Calibration/Build); Stufe 3
-  (path-scoped Rules) Gating bestanden, kommt nach dem Receive-Feldtest.
+- Doku-Diät Stufe 2 + 3 am selben Tag: CLAUDE.md v5.0 (475 Zeilen /
+  21,7k Zeichen Kern, war 714/33k), 4 neue Dossiers (PatchEngine/
+  DataModel/Calibration/Build) + 7 path-scoped Rules in .claude/rules/
+  (fx-chassis, linkaudio, osc-remote, looper, grid, transport,
+  ui-design — laden mechanisch bei passenden Reads, ADR 005, headless
+  DoD-Nachweis VOR=KEINE → NACH=3/3 Rules).
 - **Nächster Schritt:** Ende-zu-Ende-Feldtest gegen Ableton Live; danach
   User-Idee „I/O-Konsolidierung" (CLAUDE.md §11): audio_input/audio_output
   starten stereo, „+" fügt Hardware- ODER Link-Kanäle hinzu,

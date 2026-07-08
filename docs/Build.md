@@ -45,3 +45,18 @@ cmake --preset tsan && cmake --build --preset tsan   # TSan (Clang) — NUR Linu
 ```
 
 - TSan/ASan-Builds laufen mit Dummy-Audio-Device — kein ASIO nötig.
+
+## 9.1 macOS CoreAudio (ausgelagert aus CLAUDE.md v4.8 §9.1)
+
+- `juce_add_gui_app` mit `BUNDLE_ID` und `JUCE_USE_CORE_AUDIO=1`
+- `AudioDeviceManager.setAudioDeviceSetup()` — sampleRate 48000, bufferSize 128
+- Tatsächliche Buffer-Size nach Setup abfragen — Hardware kann Minimum erzwingen
+- `initAudio()` reagiert defensiv auf abweichende Werte, kein Crash,
+  Abweichung in ValueTree-Property `audioSetupWarning` speichern
+
+## 9.2 Linux Kiosk-Mode / LinkBox (ausgelagert aus CLAUDE.md v4.8 §9.2)
+
+- App startet fullscreen/borderless, kein Window Manager nötig
+- Cursor ausblenden wenn Touch aktiv
+- PREEMPT_RT: keine RT-inkompatiblen Kernel-Calls im Audio Thread
+- Touchscreen-Kalibrierung beim Start prüfen (`xinput set-prop`)
