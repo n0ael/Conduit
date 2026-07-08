@@ -1,0 +1,103 @@
+# Datenmodell (ValueTree-Schema & OSC Dual-State) — Subsystem-Dossier
+> Ausgelagert aus CLAUDE.md v4.7 §6.1/§6.2, Juli 2026. Für Arbeiten an
+> diesem Subsystem verbindlich wie die CLAUDE.md selbst (§1.1).
+> Pflichtlektüre vor Schema-Änderungen, Migrationen und Arbeiten am
+> OSC-Dual-State. Die Kern-Invarianten (Single Source of Truth,
+> Message-Thread-only, Laufzeit-ID-Regel) stehen in CLAUDE.md §6.
+
+## 6.1 OSC Dual-State (Echtzeit vs. UI-Konsistenz)
+
+ValueTree ist Single Source of Truth für Zustand — aber **nicht** für Echtzeit-Parameter-Updates.
+OSC-Parameter-Changes laufen parallel auf zwei Pfaden:
+
+```
+OSC → [Network Thread]
+         │
+         ├─► SPSC-Queue ──────────────► Audio Thread   (sofort, lock-free, < 1ms)
+         │
+         └─► MessageManager::callAsync ► ValueTree      (UI folgt nach, ~1 Frame)
+                                          setzt isDirty = true
+```
+
+```cpp
+// OscController::handleMessage() [Network Thread]
+void onOscMessage(const juce::OSCMessage& msg) {
+    // 1. Sofort in Audio Thread (lock-free)
+    audioQueue.push({ parameterId, value });
+
+    // 2. Async in ValueTree — setzt dirty flag für Serialisierung
+    juce::MessageManager::callAsync([this, parameterId, value] {
+        rootTree.getChildWithProperty("id", parameterId)
+                .setProperty("value", value, nullptr);
+        isDirty.store(false);  // ValueTree ist jetzt aktuell
+    });
+
+    isDirty.store(true);  // Serialisierung muss warten
+}
+```
+
+**Serialisierungs-Regel:** Preset-Save und Undo-Snapshot prüfen `isDirty`.
+Wenn `true`: einen `callAsync`-Zyklus warten, dann serialisieren.
+Dadurch gehen keine OSC-Werte beim Speichern verloren.
+
+| Pfad | Zweck | Latenz-Anforderung |
+|---|---|---|
+| SPSC-Queue | DSP-Parameter | < 1ms |
+| ValueTree async | UI + Serialisierung | 10–50ms akzeptabel |
+| isDirty flag | Serialisierungs-Guard | `std::atomic<bool>` |
+
+## 6.2 ValueTree Schema
+
+```
+RootTree
+  ├── scaleRoot / scaleType   (globale Session-Skala: 0–11 + chromatic/major/minor/pentatonic;
+  │                            reist pro Block im ClockState zu den Modulen)
+  ├── globalSwing             (globaler Session-Swing 0..0.75, Header-Regler; reist im
+  │                            ClockState — IClockSlaves mit lokalem Swing 0 folgen ihm,
+  │                            lokaler Swing > 0 überschreibt pro Modul, CLAUDE.md 4.5)
+  └── Nodes[]
+       ├── nodeId         (juce::Uuid)
+       ├── type           (ModuleType enum als String)
+       ├── factoryId      (unveränderlicher Factory-Schlüssel, z.B. "attenuator")
+       ├── moduleId       (named_id, user-editierbar, eindeutig — z.B. "neutron_filter")
+       ├── stateVersion   (int, für Migration)
+       ├── nodeState      (Active | FadingOut | FadingIn | Deleting)
+       ├── nodeError      (String, leer wenn kein Fehler)
+       ├── position       (x, y für UI)
+       ├── numInputChannels / numOutputChannels   (int, für die Port-UI)
+       ├── remoteId       (optional: Announce-Bindung CLAUDE.md 7.4 — persistente
+       │                   Gegenstelle im Live-Set, dokumentierte Ausnahme
+       │                   zur Laufzeit-ID-Regel CLAUDE.md §6)
+       ├── tintColour     (optional: Track-Farbe 0x00RRGGBB, folgt Re-Announce)
+       ├── linkSendEnabled (bool: FX-Chassis-Send-Tap am Ausgang, CLAUDE.md 4.6)
+       └── Parameters[]
+            ├── id, value, min, max, default
+            ├── role       ("dsp"|"chassis"|"cvAmount" — FX-Chassis CLAUDE.md 4.6)
+            ├── userMin, userMax, uiHidden, curve        (Dev-Modus, optional)
+            └── linkSource, linkAmount, linkCurve        (Control-Link, optional)
+  └── Connections[]
+       ├── sourceNodeId, sourceChannel
+       └── destNodeId,   destChannel
+
+# Reservierte moduleIds: "audio_input" / "audio_output" — Tree-Nodes, die der
+# GraphManager auf die Audio-I/O-Prozessoren des EngineProcessor mappt
+# (keine Factory-Materialisierung, nicht löschbar, Graph-Node bleibt erhalten)
+  └── CalibrationProfiles[]
+       ├── interfaceId        (Hardware-Device-Name, primärer Key)
+       ├── interfaceIdPrefix  (Prefix ohne Suffix wie " (2)", Fallback-Key)
+       ├── dcOffset           (float)
+       └── gainTrim           (float)
+```
+
+**Session-Skala (Ergänzung zu scaleRoot/scaleType, ClockState):**
+
+- Skalen-Vollausbau: die globale Session-Skala unterstützt die 25 Scale-
+  Presets in Ableton-Reihenfolge (Major … Pelog, 12-Bit-Maske pro Skala,
+  Quelle: v1 TuringEngine — verifiziert gegen Live Scale Awareness 11.3+).
+- `followAbleton`-Pattern: Skala kann via OSC von Live gesetzt werden
+  (Root + 12-Bit-Maske als Atomics gestaged, Audio-Thread übernimmt am
+  Blockanfang); manuelle Auswahl und OSC-Follow schließen sich pro
+  Session aus.
+- Scale-Quantisierung als Index-Mapping in die aktive Notenliste
+  (jedes Bitmuster trifft eine gültige Note), nicht Nearest-Note-Rundung —
+  klingt bei generativen Quellen (Turing/Random) deutlich musikalischer.

@@ -118,13 +118,8 @@ Niemals Interface-Methoden vom falschen Thread aufrufen.
 
 ### 4.3 Beispiel: Mehrere Interfaces
 
-```cpp
-class StepSequencer
-    : public GeneratorModule   // primärer CV/Trigger-Output
-    , public IClockSlave       // konsumiert externen Takt  [Audio Thread]
-    , public IStochastic       // Randomization             [Audio Thread]
-{};
-```
+`class StepSequencer : public GeneratorModule, public IClockSlave, public IStochastic {};`
+— primärer CV/Trigger-Output via Basisklasse, Takt + Zufall als Mixins [Audio Thread].
 
 ### 4.4 Pflicht-Methoden jedes Moduls
 
@@ -136,16 +131,14 @@ class StepSequencer
 
 ### 4.5 Launch-Quantisierung (Pattern für IClockSlave-Module)
 
-Quantisierte Start/Stop/Reset-Aktionen folgen dem Ableton-Grid
-(None/8/4/2/1 Bar, 1/2 … 1/32). Kanonisches Muster (v1-erprobt):
-
-- UI/OSC setzt `startPending`/`stopPending` (std::atomic<bool>, release).
-- Audio-Thread erkennt Grid-Überquerung pro Block sample-genau:
-  `floor(beat / qBeats) > floor(prevBeat / qBeats)` → Aktion ausführen,
-  Flag per `exchange(false, acq_rel)` konsumieren.
-- qBeats == 0 → sofort am Blockanfang.
-- Grid-Größen und Namen zentral definieren (ein Enum, app-weit), damit
-  Sequencer/Euclid/Clock-Module identisch quantisieren.
+Quantisierte Start/Stop/Reset-Aktionen folgen dem Ableton-Grid (None/8/4/2/1
+Bar, 1/2 … 1/32); Grid-Enum zentral und app-weit
+(`Source/Core/LaunchQuantization.h`), damit alle Module identisch quantisieren.
+Kanonisches Muster (v1-erprobt): UI/OSC setzt atomare Pending-Flags; der
+Audio-Thread erkennt die Grid-Überquerung pro Block sample-genau
+(`floor(beat/qBeats) > floor(prevBeat/qBeats)`), führt die Aktion aus und
+konsumiert das Flag per `exchange(false, acq_rel)`; qBeats == 0 → sofort am
+Blockanfang.
 
 ---
 
@@ -167,101 +160,54 @@ Quantisierte Start/Stop/Reset-Aktionen folgen dem Ableton-Grid
 
 ## 5. Patch-Engine (Glitch-freier Graph-Swap)
 
+Detail-Abläufe + Code-Muster: **docs/PatchEngine.md — Pflichtlektüre vor
+Arbeiten an GraphManager, Graph-Swap, Delete-Pfad oder Preset-System.**
+
 ### 5.1 Architektur
 
-- `juce::AudioProcessorGraph` ist die DSP-Engine
-- Jedes Modul ist ein eigenständiger `AudioProcessor` im Graph
+- `juce::AudioProcessorGraph` ist die DSP-Engine; jedes Modul ist ein
+  eigenständiger `AudioProcessor` im Graph
 - `ValueTree` + `UndoManager` für Zustand, Serialisierung, Undo/Redo, UI-Binding
-- Graph-Mutationen (`addNode` / `removeConnection`) **NUR auf Message Thread**
-- Alle patchbaren Aktionen (add, remove, connect, disconnect) gehen durch `UndoManager`
+- Graph-Mutationen **NUR auf Message Thread**; alle patchbaren Aktionen
+  (add, remove, connect, disconnect) gehen durch `UndoManager`
 
 ### 5.2 Modul hinzufügen / Kabel umstecken (4-Schritt Ablauf)
 
-**Schritt 1 — Async Prepare [Message/Background Thread]**
-- Modul instanziieren, manuell `prepareToPlay()` aufrufen
-- Schlägt `prepareToPlay()` fehl: Fehler in ValueTree-Property `nodeError` speichern,
-  Modul nicht in Graph aufnehmen, UI zeigt Fehlerzustand — kein Crash, kein Retry-Loop
-- Speicherintensive Allokationen (Delay-Buffer etc.) VOR dem Swap abschließen
-
-**Schritt 2 — DSP Fade-Out [Audio Thread]**
-- Graph-Topologie wird noch NICHT geändert
-- Message Thread: `state.store(FadingOut)` via `std::atomic`
-- `SmoothedValue` rampt Buffer → `0.0f` über ~5ms
-- Bei `getCurrentValue() == 0.0f`: `fadeComplete.store(true)`
-
-**Schritt 3 — Topologie-Swap [Message Thread via AsyncUpdater]**
-- **Kein Busy-Poll, kein Timer** — `juce::AsyncUpdater::triggerAsyncUpdate()` aufrufen
-- In `handleAsyncUpdate()`: prüfe `fadeComplete`
-  - `false` → `triggerAsyncUpdate()` erneut (self-re-dispatch, kein UI-Block)
-  - `true`  → `addConnection()` / `removeConnection()` ausführen
-- JUCE rebuildet Rendering-Plan auf Stille — kein Knacksen
-
-**Schritt 4 — DSP Fade-In [Audio Thread]**
-- Message Thread: `state.store(FadingIn)`
-- `SmoothedValue` rampt Buffer `0.0f` → `1.0f`
+Async Prepare (manuelles `prepareToPlay()` VOR dem Swap; Fehler → `nodeError`,
+Modul nicht aufnehmen) → DSP Fade-Out [Audio Thread] → Topologie-Swap
+[Message Thread via `AsyncUpdater`, **kein Busy-Poll, kein Timer** —
+self-re-dispatch bis `fadeComplete`] → DSP Fade-In. JUCE rebuildet den
+Rendering-Plan auf Stille — kein Knacksen.
 
 ### 5.3 Modul löschen (Zweiphasiges Delete — Zombie-UI-Schutz)
 
-**Regel: UI-Component hält niemals einen Pointer auf den Processor — nur auf den ValueTree-Subtree.**
-
-**Phase 1 [Message Thread] — UI entkoppeln:**
-- ValueTree-Property `nodeState` → `Deleting` setzen
-- `OscController` cached `moduleId` dieses Nodes **jetzt** (nicht erst bei `valueTreeChildRemoved`)
-- UI-Component reagiert via Listener: stoppt Rendering, deregistriert alle Listener,
-  gibt ValueTree-Referenz frei
-- `OscController` deregistriert OSC-Adressen sofort via gecachter `moduleId`
-
-**Phase 2 [Message Thread, nächster Frame] — Objekt zerstören:**
-- `juce::VBlankAttachment` stellt sicher dass UI-Render-Zyklus abgeschlossen ist
-- `removeNode()` aus `AudioProcessorGraph`
-- ValueTree-Subtree entfernen (via `UndoManager` für Undo-Fähigkeit)
-- Objekt destrukturieren
-
-```cpp
-// nodeState enum: Active | FadingOut | FadingIn | Deleting
-// Phase 2 startet erst wenn nodeState == Deleting UND kein UI-Component
-// mehr einen Listener auf diesem Subtree hält.
-// OscController liest moduleId in Phase 1, nicht aus valueTreeChildRemoved-Callback.
-```
+**Regel: UI-Component hält niemals einen Pointer auf den Processor — nur auf
+den ValueTree-Subtree.** Phase 1 [Message Thread]: `nodeState → Deleting`,
+UI entkoppelt sich via Listener, `OscController` cached `moduleId` JETZT und
+deregistriert sofort. Phase 2 [Message Thread, nächster Frame via
+`VBlankAttachment`, erst wenn kein UI-Listener mehr auf dem Subtree]:
+`removeNode()`, Subtree-Entfernung (UndoManager), Destruktion.
+`nodeState` enum: Active | FadingOut | FadingIn | Deleting.
 
 ### 5.4 Preset-System (Speichern / Laden)
 
-```cpp
-// Speichern: nur wenn kein dirty-Flag gesetzt (siehe 6.1)
-juce::ValueTree snapshot = rootTree.createCopy();
-juce::XmlElement* xml = snapshot.createXml();
-xml->writeToFile(presetFile, {});
-
-// Laden:
-juce::XmlElement xml = juce::XmlDocument::parse(presetFile);
-juce::ValueTree loaded = juce::ValueTree::fromXml(*xml);
-// → Graph-Manager rebuildet AudioProcessorGraph aus geladenem Tree
-// → CalibrationProfiles werden mitgeladen und sofort angewendet
-```
+Snapshot = `rootTree.createCopy()` → XML-Datei; Speichern nur wenn kein
+`isDirty`-Flag gesetzt (6.1). Laden rebuildet den Graph aus dem Tree,
+CalibrationProfiles werden mitgeladen und sofort angewendet.
 
 ### 5.5 Batch-Coalescing (Undo / Bulk-Delete)
 
-Wenn der `UndoManager` einen Batch-Undo ausführt (z.B. 5 Module + 20 Kabel in einem Frame),
-darf der `GraphManager` nicht 25 separate Fade-Out/Fade-In-Zyklen triggern.
-
-**Regel:** `GraphManager` sammelt alle ValueTree-Änderungen eines Frames via `AsyncUpdater`,
-führt dann einen einzigen gemeinsamen Graph-Swap durch:
-
-```cpp
-// GraphManager erbt juce::AsyncUpdater
-// valueTreeChanged() → markDirty(), triggerAsyncUpdate()
-// handleAsyncUpdate() → einen Fade-Zyklus für den gesamten Delta
-```
-
-Dies gilt für: Undo, Redo, Preset-Load, Bulk-Delete, Copy-Paste.
+`GraphManager` (erbt `AsyncUpdater`) sammelt alle ValueTree-Änderungen eines
+Frames und führt EINEN gemeinsamen Fade-Zyklus/Graph-Swap für den gesamten
+Delta aus — nie einen pro Änderung. Gilt für Undo, Redo, Preset-Load,
+Bulk-Delete, Copy-Paste.
 
 ### 5.6 Regeln
 
-- `SmoothedValue`-Rampzeit: 5ms default, konfigurierbar pro Node
-- `fadeComplete` ist `std::atomic<bool>` — kein Mutex
+- `SmoothedValue`-Rampzeit: 5ms default, konfigurierbar pro Node;
+  `fadeComplete` ist `std::atomic<bool>` — kein Mutex
 - Kein `new`/`malloc` während des gesamten Ablaufs
 - `prepareToPlay()`-Fehler → `nodeError`-Property, nie ignorieren
-- Mehrere gleichzeitige Graph-Änderungen immer zu einem einzigen Swap coalescing
 
 ---
 
@@ -284,100 +230,30 @@ Dies gilt für: Undo, Redo, Preset-Load, Bulk-Delete, Copy-Paste.
 
 ### 6.1 OSC Dual-State (Echtzeit vs. UI-Konsistenz)
 
-ValueTree ist Single Source of Truth für Zustand — aber **nicht** für Echtzeit-Parameter-Updates.
-OSC-Parameter-Changes laufen parallel auf zwei Pfaden:
-
-```
-OSC → [Network Thread]
-         │
-         ├─► SPSC-Queue ──────────────► Audio Thread   (sofort, lock-free, < 1ms)
-         │
-         └─► MessageManager::callAsync ► ValueTree      (UI folgt nach, ~1 Frame)
-                                          setzt isDirty = true
-```
-
-```cpp
-// OscController::handleMessage() [Network Thread]
-void onOscMessage(const juce::OSCMessage& msg) {
-    // 1. Sofort in Audio Thread (lock-free)
-    audioQueue.push({ parameterId, value });
-
-    // 2. Async in ValueTree — setzt dirty flag für Serialisierung
-    juce::MessageManager::callAsync([this, parameterId, value] {
-        rootTree.getChildWithProperty("id", parameterId)
-                .setProperty("value", value, nullptr);
-        isDirty.store(false);  // ValueTree ist jetzt aktuell
-    });
-
-    isDirty.store(true);  // Serialisierung muss warten
-}
-```
-
-**Serialisierungs-Regel:** Preset-Save und Undo-Snapshot prüfen `isDirty`.
-Wenn `true`: einen `callAsync`-Zyklus warten, dann serialisieren.
-Dadurch gehen keine OSC-Werte beim Speichern verloren.
-
-| Pfad | Zweck | Latenz-Anforderung |
-|---|---|---|
-| SPSC-Queue | DSP-Parameter | < 1ms |
-| ValueTree async | UI + Serialisierung | 10–50ms akzeptabel |
-| isDirty flag | Serialisierungs-Guard | `std::atomic<bool>` |
+ValueTree ist Single Source of Truth für Zustand — aber **nicht** für
+Echtzeit-Parameter-Updates. OSC-Changes laufen parallel auf zwei Pfaden
+[Network Thread]: SPSC-Queue → Audio Thread (sofort, lock-free, < 1 ms)
+UND `MessageManager::callAsync` → ValueTree (UI + Serialisierung, ~1 Frame).
+**Serialisierungs-Regel:** `isDirty` (`std::atomic<bool>`) guarded
+Preset-Save und Undo-Snapshot — bei `true` einen callAsync-Zyklus warten,
+dann serialisieren; so gehen keine OSC-Werte beim Speichern verloren.
+Code-Muster + Latenz-Tabelle: docs/DataModel.md.
 
 ### 6.2 ValueTree Schema
 
-```
-RootTree
-  ├── scaleRoot / scaleType   (globale Session-Skala: 0–11 + chromatic/major/minor/pentatonic;
-  │                            reist pro Block im ClockState zu den Modulen)
-  ├── globalSwing             (globaler Session-Swing 0..0.75, Header-Regler; reist im
-  │                            ClockState — IClockSlaves mit lokalem Swing 0 folgen ihm,
-  │                            lokaler Swing > 0 überschreibt pro Modul, 4.5)
-  └── Nodes[]
-       ├── nodeId         (juce::Uuid)
-       ├── type           (ModuleType enum als String)
-       ├── factoryId      (unveränderlicher Factory-Schlüssel, z.B. "attenuator")
-       ├── moduleId       (named_id, user-editierbar, eindeutig — z.B. "neutron_filter")
-       ├── stateVersion   (int, für Migration)
-       ├── nodeState      (Active | FadingOut | FadingIn | Deleting)
-       ├── nodeError      (String, leer wenn kein Fehler)
-       ├── position       (x, y für UI)
-       ├── numInputChannels / numOutputChannels   (int, für die Port-UI)
-       ├── remoteId       (optional: Announce-Bindung 7.4 — persistente
-       │                   Gegenstelle im Live-Set, dokumentierte Ausnahme
-       │                   zur Laufzeit-ID-Regel oben)
-       ├── tintColour     (optional: Track-Farbe 0x00RRGGBB, folgt Re-Announce)
-       ├── linkSendEnabled (bool: FX-Chassis-Send-Tap am Ausgang, 4.6)
-       └── Parameters[]
-            ├── id, value, min, max, default
-            ├── role       ("dsp"|"chassis"|"cvAmount" — FX-Chassis 4.6)
-            ├── userMin, userMax, uiHidden, curve        (Dev-Modus, optional)
-            └── linkSource, linkAmount, linkCurve        (Control-Link, optional)
-  └── Connections[]
-       ├── sourceNodeId, sourceChannel
-       └── destNodeId,   destChannel
+Vollständiges Schema (RootTree-Properties, Nodes[], Parameters[],
+Connections[], CalibrationProfiles[], Session-Skala/`followAbleton`):
+**docs/DataModel.md — Pflichtlektüre vor Schema-Änderungen.** Invarianten:
 
-# Reservierte moduleIds: "audio_input" / "audio_output" — Tree-Nodes, die der
-# GraphManager auf die Audio-I/O-Prozessoren des EngineProcessor mappt
-# (keine Factory-Materialisierung, nicht löschbar, Graph-Node bleibt erhalten)
-  └── CalibrationProfiles[]
-       ├── interfaceId        (Hardware-Device-Name, primärer Key)
-       ├── interfaceIdPrefix  (Prefix ohne Suffix wie " (2)", Fallback-Key)
-       ├── dcOffset           (float)
-       └── gainTrim           (float)
-```
-
-**Session-Skala (Ergänzung zu scaleRoot/scaleType, ClockState):**
-
-- Skalen-Vollausbau: die globale Session-Skala unterstützt die 25 Scale-
-  Presets in Ableton-Reihenfolge (Major … Pelog, 12-Bit-Maske pro Skala,
-  Quelle: v1 TuringEngine — verifiziert gegen Live Scale Awareness 11.3+).
-- `followAbleton`-Pattern: Skala kann via OSC von Live gesetzt werden
-  (Root + 12-Bit-Maske als Atomics gestaged, Audio-Thread übernimmt am
-  Blockanfang); manuelle Auswahl und OSC-Follow schließen sich pro
-  Session aus.
-- Scale-Quantisierung als Index-Mapping in die aktive Notenliste
-  (jedes Bitmuster trifft eine gültige Note), nicht Nearest-Note-Rundung —
-  klingt bei generativen Quellen (Turing/Random) deutlich musikalischer.
+- Jeder Node-Subtree trägt `stateVersion` (Migration) und `nodeState`
+  (Active | FadingOut | FadingIn | Deleting).
+- Reservierte moduleIds `audio_input` / `audio_output`: der GraphManager
+  mappt sie auf die Audio-I/O-Prozessoren des EngineProcessor — keine
+  Factory-Materialisierung, nicht löschbar.
+- `remoteId` = dokumentierte Ausnahme zur Laufzeit-ID-Regel oben (7.4).
+- Session-Skala (`scaleRoot`/`scaleType`, 25 Ableton-Presets als 12-Bit-Maske,
+  Index-Mapping statt Nearest-Note) und `globalSwing` reisen pro Block im
+  ClockState zu den Modulen.
 
 ---
 
@@ -445,50 +321,26 @@ Gain-Abweichungen. `0.0f` digital ≠ `0.000V` analog → Out-of-Tune bei 1V/Oct
 
 ### 8.1 CalibrationProfile (per Interface)
 
-```cpp
-struct CalibrationProfile {
-    juce::String interfaceId;      // primärer Key: exakter Device-Name
-    juce::String interfaceIdPrefix; // Fallback: Prefix ohne Suffix wie " (2)"
-    float        dcOffset;
-    float        gainTrim;
-};
-
-// Im HardwareIOModule::processBlock() — allocation-free:
-float calibrated = (rawValue + profile.dcOffset) * profile.gainTrim;
-```
-
-**Profile-Matching bei USB-Reconnect (Reihenfolge):**
-1. Exakter Name-Match (`"ES-3"` == `"ES-3"`)
-2. Prefix-Match (ignoriert Suffix: `"ES-3 (2)"` → matched `"ES-3"`)
-3. Kein Match → UI zeigt Kalibrierungs-Warnung, Profil auf Neutral (`dcOffset=0, gainTrim=1`)
-
-Profile sind kanalspezifisch, persistent im ValueTree, user-adjustierbar.
+`interfaceId` (exakter Device-Name, primärer Key) + `interfaceIdPrefix`
+(Fallback ohne Suffix wie " (2)") + `dcOffset` + `gainTrim`; im
+HardwareIOModule allocation-free angewendet:
+`(raw + dcOffset) * gainTrim`. Matching bei USB-Reconnect: exakt → Prefix →
+kein Match = Neutral-Profil + UI-Warnung. Profile sind kanalspezifisch,
+persistent im ValueTree, user-adjustierbar. Details: docs/Calibration.md.
 
 ### 8.2 CVTunerModule (AnalysisModule)
 
-Natives Kalibrierungswerkzeug analog zu Ableton CV Tools — ohne M4L-Abhängigkeit.
-
-**Ablauf:**
-1. Gibt bekannten Referenz-CV-Wert aus (konfigurierbar: 0V, 1V, 2V, 5V) via ES-3/ESX-8CV
-2. Misst Rückweg via ES-6 Eingang
-3. Berechnet `dcOffset` und `gainTrim` aus Differenz
-4. Schreibt `CalibrationProfile` in ValueTree → sofort aktiv
-5. Wiederholbar pro Kanal
-
-```cpp
-class CVTunerModule : public AnalysisModule {
-    // Schreibt NUR in ValueTree (CalibrationProfiles)
-    // Niemals direkt in Audio-Pfad
-    // Messung läuft auf separatem Analyse-Thread
-};
-```
+Natives Kalibrierungswerkzeug (Referenz-CV ausgeben → Rückweg via ES-6
+messen → dcOffset/gainTrim berechnen → Profil in ValueTree schreiben,
+sofort aktiv, wiederholbar pro Kanal). Schreibt NUR CalibrationProfiles,
+nie in den Audio-Pfad; Messung auf separatem Analyse-Thread.
+Ablauf: docs/Calibration.md.
 
 ### 8.3 Latenz-Trim für CV-Ausgänge
 
-Hardware-Realität (v1-erprobt): Modulsysteme brauchen ms-genauen Versatz.
-- Pro CV-Ausgangskanal: `shiftMs` (±50 ms), zusätzlich globales
-  `globalShiftMs` — beide als Beat-Offset im Audio-Thread eingerechnet.
-- Gehört ins CalibrationProfile bzw. den Kanal-State, user-adjustierbar.
+Pro CV-Ausgangskanal `shiftMs` (±50 ms) plus globales `globalShiftMs`,
+beide als Beat-Offset im Audio-Thread eingerechnet — gehört ins
+CalibrationProfile bzw. den Kanal-State, user-adjustierbar (docs/Calibration.md).
 
 ---
 
@@ -588,27 +440,23 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
 
 ## 11. Feature-Roadmap (Scope-Referenz)
 
+Erledigte v2.0-Features stehen nicht mehr hier — sie sind in den Dossiers
+dokumentiert: Link Audio Send, Transport-Header, FX-Chassis, Looper inkl.
+Vollausbau, OSC-Send, M4L-Announce (+ Max-Testdevice ConduitLFO), Grid M1.
+
 | Feature | Version | Notiz |
 |---|---|---|
+| Link Audio Receive | v2.x | NÄCHSTER MEILENSTEIN — Pflichtlektüre docs/LinkAudio.md; beginBeats()-Alignment, Monitoring-Latenz dokumentieren |
 | Gate, EQ, Compressor | v2.0 | ProcessorModule, ISidechain |
 | CVTunerModule | v2.0 | AnalysisModule, CalibrationProfile |
 | CLAP-Hosting | v2.x | PluginModule wraps AudioPluginInstance |
 | IPolyphonic | v2.x | Interface vorbereitet, noch nicht implementiert |
 | VST3-Hosting | v3.0+ | Steinberg-Lizenz, nach CLAP |
 | Cardinal/VCV Integration | v3.0+ | Touch-native Modular UI |
-| Link Audio Send (LinkAudioSendModule) | v2.0 | erledigt 07/2026 → docs/LinkAudio.md — §7.2 |
-| Link Audio Receive | v2.x | NÄCHSTER MEILENSTEIN — Pflichtlektüre docs/LinkAudio.md; beginBeats()-Alignment, Monitoring-Latenz dokumentieren |
-| OSC-Send (Snapshot-Diff, /conduit/sync, IP-Learn) | v2.0 | OscSendService, 7.3 |
-| M4L-Announce (remoteId, Alias-Adressen, Tint) | v2.0 | RemoteModuleBinder, 7.4 |
-| Max-Testdevice ConduitLFO | v2.0 | Tools/Max/ConduitLFO, kein Audio im Device |
 | Expert-Sleepers-Encoder (ES-5/ES-4(0)/8CV/8GT) | v2.x | v1-Port vorhanden (EncoderEngines.hpp, MIT/VCV) — HardwareIOModule-Grundstein |
 | Euclid-/Turing-Module | v2.x | v1-Engines als Referenz (Launch-Quant, parametrischer Swing, Scale-Quantize) |
-| Push-3-Transport-Header (TransportBar, Metronom, globaler Swing) | v2.0 | erledigt 07/2026 → docs/Transport.md — §10.0 |
-| FX-Chassis-Standard (I/O-Gains+Meter, CV/Parameter, Link-Send, Dev-Modus, Kurven, Control-Links, Defaults) | v2.0 | erledigt 07/2026 → docs/FxChassis.md — §4.6 |
-| Looper-Page (Retro-Looper, Endlesss-Stil, MVP ein Loop) | v2.0 | erledigt 07/2026 → docs/Looper.md — §10.0 |
-| Looper-Vollausbau (4 Looper × 4 Tracks × Slots, Clip-Grid, VARI/Reverse/×2÷2, Delete/Save-Gesten, OSC-Actions, Clip-Export) | v2.0 | erledigt 07/2026 → docs/Looper.md — §10.0 |
 | Mixer-Page | v2.x | ∥∥-Icon, Channel-Strips (Capture-Buttons wandern dorthin) |
-| Grid-Page (Touch-Controller-Baukasten) | Ω-Icon | M1 (MPE-Keyboard) erledigt 07/2026; Meilensteinleiter: docs/Grid.md |
+| Grid-Page weitere Meilensteine | Ω-Icon | Meilensteinleiter: docs/Grid.md |
 | Clip-Page (Fugue-Machine-Sequencer) | v2.x | ▷▭-Icon, immer aktiv, CV- UND MIDI-Ziele |
 | Capture-Netzwerk-Share (Exports für entferntes Ableton) | v2.x | HTTP-Bereitstellung der Capture-Dateien |
 
@@ -635,43 +483,21 @@ Plattform-spezifisches Setup in `initAudio()` und CMake ist explizit erlaubt.
 
 ### 13.2 Preprocessor Defines (RT Safety Guardrails)
 
-```cmake
-target_compile_definitions(${PROJECT_NAME} PUBLIC
-    JUCE_MODAL_LOOPS_PERMITTED=0    # verhindert blockierende Modal-Loops im Message Thread
-    JUCE_WEB_BROWSER=0              # keine unnötigen Abhängigkeiten
-    JUCE_USE_CURL=0
-)
-
-# Plattform-conditional — NICHT global setzen:
-if(APPLE)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC JUCE_USE_CORE_AUDIO=1)
-elseif(WIN32)
-    # ASIO erfordert Steinberg ASIO SDK (separater Download + Lizenz, nicht in JUCE!)
-    # SDK-Pfad via JUCE_ASIO_SDK_PATH, erst dann:
-    target_compile_definitions(${PROJECT_NAME} PUBLIC JUCE_ASIO=1)
-endif()
-```
+`JUCE_MODAL_LOOPS_PERMITTED=0` (keine blockierenden Modal-Loops im Message
+Thread), `JUCE_WEB_BROWSER=0`, `JUCE_USE_CURL=0`. Plattform-Defines NIE
+global setzen: `JUCE_USE_CORE_AUDIO=1` nur APPLE; `JUCE_ASIO=1` nur WIN32
+und nur mit Steinberg ASIO SDK (separater Download + Lizenz, Pfad via
+`JUCE_ASIO_SDK_PATH`). CMake-Snippet: docs/Build.md.
 
 ### 13.3 Quick Start & Build-Workflow
 
-```bash
-# Configure (Windows — auf diesem System ist VS 2026 installiert, kein VS 2022)
-cmake -B build -G "Visual Studio 18 2026" -A x64
-# Configure (Ninja, alle Plattformen)
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-
-# Build
-cmake --build build --config Debug
-
-# Test: Standalone-Target aus build/ ausführen
-
-# Sanitizer-Presets (13.4):
-cmake --preset asan && cmake --build --preset asan   # ASan (MSVC) — läuft lokal unter Windows
-cmake --preset tsan && cmake --build --preset tsan   # TSan (Clang) — NUR Linux/macOS/WSL,
-                                                     # unter Windows nicht verfügbar
-# TSan + ASan laufen außerdem automatisch in GitHub Actions (Ubuntu) bei jedem
-# Push auf master — .github/workflows/ci.yml ('tsan' + 'asan-linux' Presets)
-```
+- Windows (VS 2026 installiert, KEIN VS 2022):
+  `cmake -B build -G "Visual Studio 18 2026" -A x64`, dann
+  `cmake --build build --config Debug`; Test = Standalone-Target aus `build/`.
+- Sanitizer-Presets (13.4): `cmake --preset asan` (MSVC, läuft lokal unter
+  Windows) / `tsan` (Clang, NUR Linux/macOS/WSL). TSan + ASan laufen
+  außerdem in GitHub Actions (Ubuntu) bei jedem Push auf master
+  (`.github/workflows/ci.yml`). Ninja-Variante + Details: docs/Build.md.
 
 ### 13.4 Testing & Validierung
 
@@ -711,4 +537,4 @@ Index:
 
 ---
 
-*Conduit Alpha v3 — Claude Code Instructions v4.7  |  Juli 2026*
+*Conduit Alpha v3 — Claude Code Instructions v4.8  |  Juli 2026*
