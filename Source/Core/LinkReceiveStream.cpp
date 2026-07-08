@@ -136,6 +136,27 @@ void LinkReceiveStream::renderSilence (float* left, float* right,
     fadeGain = 0.0f;   // nächster Einstieg blendet wieder ein
 }
 
+double LinkReceiveStream::chainPosOfBeat (double beat) noexcept
+{
+    if (ringCount == 0)
+        return 0.0;
+
+    double cumulative = 0.0;
+
+    for (int i = 0; i < ringCount; ++i)
+    {
+        const auto& slot = ringAt (i);
+        // vor der Kette / im Slot: linear mappen (extrapoliert auch < 0);
+        // hinter der Kette: gegen den letzten Slot extrapolieren
+        if (beat < slot.endBeat() || i == ringCount - 1)
+            return cumulative + beatToFrame (beat, slot.beatBegin, slot.endBeat(), slot.numFrames);
+
+        cumulative += static_cast<double> (slot.numFrames);
+    }
+
+    return cumulative;   // nicht erreichbar
+}
+
 float LinkReceiveStream::sampleAt (std::int64_t frameIndex, int channel) noexcept
 {
     if (frameIndex < 0)
@@ -240,38 +261,32 @@ void LinkReceiveStream::renderBlock (float* left, float* right, int numFrames,
         return;
     }
 
+    // Soll-Fenster im Quell-Frame-Raum — jittert mit der Wall-Clock-
+    // Beat-Achse (Looper-Lektion, Feldtest-Fund 08.07.2026)!
+    const double wantedPos = chainPosOfBeat (targetBegin);
+    const double wantedEnd = chainPosOfBeat (targetEnd);
+
+    // Rohe Raten-Messung (Quell-Frames pro Ausgabe-Frame): deckt SampleRate-
+    // Differenz und Tempoänderungen, trägt aber den Beat-Achsen-Jitter —
+    // NIE direkt als Abspielgeschwindigkeit verwenden.
+    double rawIncrement = (wantedEnd - wantedPos) / static_cast<double> (numFrames);
+    if (! (rawIncrement > 0.25 && rawIncrement < 4.0))
+        rawIncrement = smoothedIncrement;   // degenerierte Messung verwerfen
+
     if (! startReadPos.has_value())
     {
-        const auto& front = ringAt (0);
-        startReadPos = beatToFrame (targetBegin, front.beatBegin, front.endBeat(), front.numFrames);
-        cursorSlot   = 0;
-        cursorBase   = 0;
-        fadeGain     = 0.0f;   // Einstiegs-Declick
+        startReadPos      = wantedPos;
+        smoothedIncrement = rawIncrement;
+        smoothedError     = 0.0;
+        cursorSlot        = 0;
+        cursorBase        = 0;
+        fadeGain          = 0.0f;   // Einstiegs-Declick
     }
 
-    // Frames bis targetEnd über die Slot-Kette einsammeln (SDK-Muster) —
-    // deckt zugleich Beat-Sprünge ab: kein Treffer → Reset auf Stille.
-    double totalFrames = 0.0;
-    bool   foundEnd    = false;
+    const double error = wantedPos - *startReadPos;
 
-    for (int i = 0; i < ringCount; ++i)
-    {
-        const auto&  s     = ringAt (i);
-        const double begin = s.beatBegin;
-        const double end   = s.endBeat();
-
-        if (targetEnd >= begin && targetEnd < end)
-        {
-            totalFrames += beatToFrame (targetEnd, begin, end, s.numFrames);
-            foundEnd = true;
-            break;
-        }
-        totalFrames += static_cast<double> (s.numFrames);
-    }
-
-    totalFrames -= startReadPos.value_or (0.0);
-
-    if (! foundEnd || totalFrames <= 0.0)
+    // Echter Sprung (Transport-Jump, Peer-Neustart) → declickter Neuaufsetzer
+    if (std::fabs (error) > kResetSeconds * clock.sampleRate)
     {
         uiStatus.store (static_cast<int> (Status::waiting), std::memory_order_relaxed);
         storeBuffered (0.0);
@@ -280,10 +295,33 @@ void LinkReceiveStream::renderBlock (float* left, float* right, int numFrames,
         return;
     }
 
-    // Re-Pitching: Quell-Frames pro Ausgabe-Frame — handhabt SampleRate-
-    // Differenz UND Tempoänderungen (SDK-Referenz LinkAudioRenderer).
-    const double frameIncrement = totalFrames / static_cast<double> (numFrames);
+    // Playhead-Servo: Rate träge glätten, Positionsfehler tiefpassen und
+    // nur minimal (±kMaxCorrection) nachführen — der Jitter der Soll-
+    // Position darf NIE als Pitch-Modulation hörbar werden.
+    const double incAlpha = juce::jmin (1.0, numFrames / (kIncTauSeconds * clock.sampleRate));
+    const double errAlpha = juce::jmin (1.0, numFrames / (kErrTauSeconds * clock.sampleRate));
+    smoothedIncrement += (rawIncrement - smoothedIncrement) * incAlpha;
+    smoothedError     += (error - smoothedError) * errAlpha;
+
+    const double correction = juce::jlimit (-kMaxCorrection, kMaxCorrection,
+                                            smoothedError / (kPosTauSeconds * clock.sampleRate));
+
+    const double frameIncrement = smoothedIncrement + correction;
     const double readPos        = *startReadPos;
+
+    // Underflow: der Block (+ Catmull-Rom-Reserve) muss im Bestand liegen
+    double availableFrames = 0.0;
+    for (int i = 0; i < ringCount; ++i)
+        availableFrames += static_cast<double> (ringAt (i).numFrames);
+
+    if (readPos + static_cast<double> (numFrames) * frameIncrement + 3.0 > availableFrames)
+    {
+        uiStatus.store (static_cast<int> (Status::waiting), std::memory_order_relaxed);
+        storeBuffered (0.0);
+        renderSilence (left, right, numFrames, clock.sampleRate);
+        resetRenderState (true);
+        return;
+    }
 
     const auto fadeStep = static_cast<float> (
         1.0 / (kFadeSeconds * (clock.sampleRate > 0.0 ? clock.sampleRate : 48000.0)));

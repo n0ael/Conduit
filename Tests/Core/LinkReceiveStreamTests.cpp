@@ -287,6 +287,60 @@ TEST_CASE ("LinkReceiveStream: requestReset verwirft Bestand und Zustand", "[lin
 }
 
 //==============================================================================
+TEST_CASE ("LinkReceiveStream: Beat-Achsen-Jitter moduliert die Wiedergabe nicht (Servo)",
+           "[linkaudio][receive]")
+{
+    // Feldtest-Fund 08.07.2026: die Link-Beat-Achse jittert wall-clock-
+    // bedingt gegen die Sample-Achse — roh übernommen wird daraus hörbares
+    // Re-Pitching (gemessen ±17 ms Zeitbasis-Wobble). Der Playhead-Servo
+    // muss den Jitter wegfiltern: keine Resets, stabile Rampen-Steigung.
+    conduit::LinkReceiveStream stream;
+    Feed feed;
+
+    std::vector<float> left (kBlock), right (kBlock);
+
+    std::uint32_t lcg = 1;
+    auto jitterBeats = [&lcg]
+    {
+        lcg = 1664525u * lcg + 1013904223u;
+        const double u = static_cast<double> (lcg >> 8) / static_cast<double> (1 << 24);
+        return (u - 0.5) * 2.0 * 0.0015 * (kBpm / 60.0);   // ±1.5 ms in Beats
+    };
+
+    const float idealStep = 7.0f / 32768.0f;   // Rampen-Steigung der Quelle
+    int badSteps = 0, checkedSteps = 0;
+
+    for (int block = 0; block < 400; ++block)
+    {
+        feed.pushSlot (stream, kBlock);
+
+        const double idealBeat = static_cast<double> (block) * kBlock * beatsPerFrame;
+        stream.renderBlock (left.data(), right.data(), kBlock,
+                            clockAt (idealBeat + jitterBeats()), kLatencyMs);
+
+        if (block > 100
+            && stream.getStatusForUi() == conduit::LinkReceiveStream::Status::streaming)
+        {
+            for (size_t i = 1; i < static_cast<size_t> (kBlock); ++i)
+            {
+                const float step = left[i] - left[i - 1];
+                if (step < 0.0f)
+                    continue;   // Rampen-Wrap der Quelle
+
+                ++checkedSteps;
+                if (std::abs (step - idealStep) > 2.0f / 32768.0f)
+                    ++badSteps;
+            }
+        }
+    }
+
+    REQUIRE (stream.getStatusForUi() == conduit::LinkReceiveStream::Status::streaming);
+    REQUIRE (stream.getRenderResets() == 0u);
+    REQUIRE (checkedSteps > 10000);
+    REQUIRE (badSteps < checkedSteps / 100);   // < 1 % Ausreißer
+}
+
+//==============================================================================
 TEST_CASE ("LinkReceiveStream: Producer/Consumer-Stress über echte Threads (TSan)",
            "[linkaudio][receive][threading]")
 {

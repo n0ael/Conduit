@@ -138,6 +138,18 @@ private:
     static constexpr int    kRingCapacity  = 512;  // Bestand fürs Latenzfenster (Zweierpotenz!)
     static constexpr double kFadeSeconds   = 0.005;
 
+    // Playhead-Servo (Looper-Wall-Clock-Lektion, Feldtest-Fund 08.07.2026):
+    // die Link-Beat-Achse jittert gegen die Sample-Achse (±ms pro Block) —
+    // ein pro Block roh aus dem Beat-Fenster abgeleitetes frameIncrement
+    // moduliert die Tonhöhe hörbar (gemessen: ±17 ms Zeitbasis-Wobble).
+    // Deshalb: Rate träge glätten, Positionsfehler tiefpassen und nur
+    // minimal korrigieren; harte Sprünge → declickter Reset.
+    static constexpr double kIncTauSeconds  = 2.0;    // Glättung der Raten-Messung
+    static constexpr double kErrTauSeconds  = 1.0;    // Tiefpass des Positionsfehlers
+    static constexpr double kPosTauSeconds  = 0.5;    // Ausregel-Zeit des Fehler-Mittels
+    static constexpr double kMaxCorrection  = 0.002;  // ±0.2 % ≈ 3.5 Cent — unhörbar
+    static constexpr double kResetSeconds   = 0.1;    // |Fehler| darüber = echter Sprung
+
     // ---- nur Audio-Thread ----
     [[nodiscard]] LinkReceiveSlot&       ringAt (int index) noexcept;
     [[nodiscard]] const LinkReceiveSlot& ringAt (int index) const noexcept;
@@ -146,6 +158,11 @@ private:
     void dropFrontSlot() noexcept;
     void resetRenderState (bool countAsReset) noexcept;
     void renderSilence (float* left, float* right, int numFrames, double sampleRate) noexcept;
+
+    /** Position eines Beats im Quell-Frame-Raum der Slot-Kette (relativ zur
+        Ring-Front); vor/hinter der Kette linear extrapoliert (kann negativ
+        oder > Bestand sein). Nur Audio-Thread. */
+    [[nodiscard]] double chainPosOfBeat (double beat) noexcept;
 
     /** Sample eines Frames im Ring-Strom (frameIndex relativ zur Ring-Front),
         int16→float; hinter dem Ketten-Ende: 0. cursorSlot/cursorBase
@@ -163,6 +180,9 @@ private:
     std::optional<double> startReadPos;   // Frame-Position in der Slot-Kette
     int    cursorSlot = 0;                // sampleAt-Cursor (Ring-relativ)
     std::int64_t cursorBase = 0;          // erster Frame-Index von cursorSlot
+
+    double smoothedIncrement = 1.0;       // Playhead-Servo (Doku bei den Konstanten)
+    double smoothedError     = 0.0;
 
     float  fadeGain       = 0.0f;         // Declick-Rampe 0..1
     float  lastLeft       = 0.0f;         // letzte Ausgabe (Decay bei Abriss)

@@ -48,12 +48,17 @@ Referenz: SDK-Beispiel `examples/linkaudio/LinkAudioRenderer.hpp`
   `beatBegin + numFrames/sampleRate · tempo/60` (Peer-Tempo aus Info —
   exakt bei konstantem Tempo, Sprünge fängt der Reset ab). Zu alte Slots
   droppen, zu neue abwarten (Stille).
-- **Re-Pitching statt Resampler:** `frameIncrement = totalFrames/numFrames`
-  über die Slot-Kette, kubische Interpolation (4er-Cache) — deckt
-  SampleRate-Differenz UND Tempoänderungen ab (SDK-Muster). Kontinuität
-  über `startReadPos`; Underflow/zu neu/Beat-Sprung → Reset auf Stille
-  und Re-Init am Ziel-Fenster. Übergänge Stille↔Signal mit 5-ms-Rampe
-  declicken (Looper-Duck-Lektion).
+- **Re-Pitching NUR über den Playhead-Servo (Feldtest-Lektion
+  08.07.2026):** Das rohe SDK-Muster (`frameIncrement = totalFrames/
+  numFrames` frisch pro Block) übernimmt den Wall-Clock-Jitter der
+  Beat-Achse 1:1 als Abspielgeschwindigkeit — gemessen ±17 ms
+  Zeitbasis-Wobble = hörbare Verzerrung (Parallel-Aufnahmen + Lag-Track,
+  wav_analyze). Stattdessen (Looper-Playhead-Lektion): Raten-Messung
+  träge glätten (τ 2 s), Positionsfehler tiefpassen (τ 1 s) und gedeckelt
+  nachführen (±0.2 % ≈ 3.5 Cent); |Fehler| > 100 ms = echter Sprung →
+  declickter Reset. Kubische Interpolation (Catmull-Rom), Kontinuität
+  über `startReadPos`; Übergänge Stille↔Signal mit 5-ms-Rampe declicken.
+  Regressionstest: „Beat-Achsen-Jitter moduliert die Wiedergabe nicht".
 - **Monitoring-Latenz:** Parameter `latency_ms` (Default 150, Bereich
   20–500, Echtzeit via Dual-State 6.1). Das SDK-Beispiel nutzt fix
   4 Beats (= 2 s bei 120 BPM) — zu träge fürs Monitoring; Same-Machine
