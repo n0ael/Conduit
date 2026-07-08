@@ -15,6 +15,7 @@
 #include "UI/FxModulePanel.h"
 #include "UI/InputSendButton.h"
 #include "UI/LevelMeterBar.h"
+#include "UI/LinkAudioReceivePanel.h"
 #include "UI/LinkAudioSendPanel.h"
 #include "UI/NodeColourDot.h"
 #include "UI/ParameterPanel.h"
@@ -276,6 +277,10 @@ private:
     // Nur bei Link-Audio-Send-Nodes (factoryId == "link_audio_send") —
     // Bedien-Panel: pro Eingang Attenuator + Name + Status-LED (7.2)
     std::unique_ptr<LinkAudioSendPanel> sendPanel;
+
+    // Nur bei Link-Audio-Receive-Nodes (factoryId == "link_audio_receive") —
+    // Kanal-Wahl + Latenz-Slider + Status-LED (7.2)
+    std::unique_ptr<LinkAudioReceivePanel> receivePanel;
 
     // Alle anderen Module mit >= 1 Parameter (nicht Scope/Sequencer/Send/
     // Processor, die eigene Bedienoberflächen haben) — eine Zeile pro

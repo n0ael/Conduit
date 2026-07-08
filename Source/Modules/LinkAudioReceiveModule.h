@@ -115,6 +115,10 @@ public:
     [[nodiscard]] std::uint32_t getSequenceGapsForUi()  const noexcept { return stream.getSequenceGaps(); }
     [[nodiscard]] std::uint32_t getRenderResetsForUi()  const noexcept { return stream.getRenderResets(); }
 
+    /** Kanäle der Session für die UI [Message Thread] — leer ohne Kontext.
+        Die Liste enthält nur Peer-Kanäle (availableChannels-Doku). */
+    [[nodiscard]] std::vector<LinkClock::ChannelInfo> getAvailableChannelsForUi() const;
+
     //==========================================================================
     // Message Thread — Diagnose/Tests
     [[nodiscard]] bool hasActiveSource() const noexcept { return source != nullptr; }

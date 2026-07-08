@@ -107,6 +107,14 @@ void LinkAudioReceiveModule::setTargetChannel (const juce::String& peer, const j
     rebind();
 }
 
+std::vector<LinkClock::ChannelInfo> LinkAudioReceiveModule::getAvailableChannelsForUi() const
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    return linkClock != nullptr ? linkClock->availableChannels()
+                                : std::vector<LinkClock::ChannelInfo>{};
+}
+
 void LinkAudioReceiveModule::changeListenerCallback (juce::ChangeBroadcaster*)
 {
     // ChannelsChanged (LinkClock marshallt auf den Message Thread, 7.2)

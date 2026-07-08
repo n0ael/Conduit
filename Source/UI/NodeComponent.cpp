@@ -143,6 +143,7 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
     }
     else if (factoryKey != StepSequencerModule::staticModuleId
              && factoryKey != LinkAudioSendModule::staticModuleId
+             && factoryKey != LinkAudioReceiveModule::staticModuleId
              && nodeTree.getChildWithName (id::parameters).getNumChildren() > 0)
     {
         parameterPanel = std::make_unique<ParameterPanel> (nodeTree);
@@ -173,6 +174,12 @@ NodeComponent::NodeComponent (juce::ValueTree nodeTreeToBind,
         // Höhe folgt der Eingangszahl (fixe Zahl, kein Live-Umbau)
         const auto numInputs = juce::jmax (1, nodeTree.getChildWithName (id::inputs).getNumChildren());
         setSize (280, touchTarget + LinkAudioSendPanel::heightForInputs (numInputs));
+    }
+    else if (factoryKey == LinkAudioReceiveModule::staticModuleId)
+    {
+        receivePanel = std::make_unique<LinkAudioReceivePanel> (nodeTree, graphManager);
+        addAndMakeVisible (*receivePanel);
+        setSize (280, touchTarget + LinkAudioReceivePanel::panelHeight());
     }
     else if (isExternalEndpoint)
     {
@@ -248,6 +255,9 @@ void NodeComponent::beginTeardown()
 
     if (sendPanel != nullptr)
         sendPanel->stopUpdates();
+
+    if (receivePanel != nullptr)
+        receivePanel->stopUpdates();
 
     if (parameterPanel != nullptr)
         parameterPanel->stopUpdates();
@@ -870,6 +880,9 @@ void NodeComponent::resized()
 
     if (sendPanel != nullptr)
         sendPanel->setBounds (getLocalBounds().withTrimmedTop (touchTarget).reduced (22, 4));
+
+    if (receivePanel != nullptr)
+        receivePanel->setBounds (getLocalBounds().withTrimmedTop (touchTarget).reduced (22, 4));
 
     if (fxPanel != nullptr)
         fxPanel->setBounds (getLocalBounds().withTrimmedTop (touchTarget).reduced (28, 4));

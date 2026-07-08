@@ -234,6 +234,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/GridPage.cpp
     Source/UI/InputSendButton.cpp
     Source/UI/LevelMeterBar.cpp
+    Source/UI/LinkAudioReceivePanel.cpp
     Source/UI/LinkAudioSendPanel.cpp
     Source/UI/LinkAudioStatusBadge.cpp
     Source/UI/LinkMenuPanel.cpp
@@ -413,6 +414,7 @@ target_sources(Conduit PRIVATE
     Source/UI/GridKeyboardComponent.h
     Source/UI/GridPage.h
     Source/UI/InputSendButton.h
+    Source/UI/LinkAudioReceivePanel.h
     Source/UI/LinkAudioSendPanel.h
     Source/UI/LinkAudioStatusBadge.h
     Source/UI/LinkMenuPanel.h
@@ -583,6 +585,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/UI/FxModulePanelTests.cpp
         Tests/UI/NodeCanvasTests.cpp
         Tests/UI/LevelMeterBarTests.cpp
+        Tests/UI/LinkAudioReceivePanelTests.cpp
         Tests/UI/LinkAudioSendPanelTests.cpp
         Tests/UI/OscSettingsComponentTests.cpp
         Tests/UI/LooperPageTests.cpp
@@ -738,6 +741,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/GridPage.cpp
         Source/UI/InputSendButton.cpp
         Source/UI/LevelMeterBar.cpp
+        Source/UI/LinkAudioReceivePanel.cpp
         Source/UI/LinkAudioSendPanel.cpp
         Source/UI/LinkAudioStatusBadge.cpp
         Source/UI/LinkMenuPanel.cpp
