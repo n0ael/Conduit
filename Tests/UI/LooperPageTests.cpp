@@ -65,6 +65,78 @@ TEST_CASE ("LooperPanel: Quellen-Auswahl und Track-Struktur", "[looper][ui]")
     REQUIRE (panel.getAddTrackTile().isVisible());
 }
 
+TEST_CASE ("LooperPanel: Quellen-Menü mit Link-Gruppen — Separatoren, Farben, stabile IDs", "[looper][ui]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    conduit::LooperPanel panel { 1 };
+    panel.setBounds (0, 0, 460, 620);
+
+    const auto orange = juce::Colour (0xffffa726);
+    const auto green  = juce::Colour (0xff66bb6a);
+    const auto cyan   = juce::Colour (0xff4dd0e1);
+
+    // Lokale Quellen | Link-Peer "Live" | Link-Peer "M4L" (je Separator davor)
+    const std::vector<conduit::LooperPanel::Source> sources = {
+        { "master",     "Master",       juce::Colour(), false },
+        { "hw:0",       "In 1 / In 2",  orange,         false },
+        { "tap:live_a", "Live / Drums", green,          true  },
+        { "tap:live_b", "Live / Bass",  green,          false },
+        { "tap:m4l",    "M4L / Synth",  cyan,           true  },
+    };
+
+    juce::String selectedKey;
+    panel.onSourceSelected = [&] (const juce::String& key) { selectedKey = key; };
+
+    panel.setSources (sources, "tap:live_a");
+    auto& combo = panel.getSourceCombo();
+
+    SECTION ("Separatoren strukturieren das Menü, ohne Items zu verschieben")
+    {
+        REQUIRE (combo.getNumItems() == 5);   // Separatoren zählen nicht
+
+        int separators = 0;
+        for (juce::PopupMenu::MenuItemIterator iterator (*combo.getRootMenu()); iterator.next();)
+            if (iterator.getItem().isSeparator)
+                ++separators;
+        REQUIRE (separators == 2);
+
+        // Auswahl über den Key gefunden — Item-ID = Quell-Index + 1
+        REQUIRE (combo.getSelectedId() == 3);
+        REQUIRE (selectedKey.isEmpty());   // Anzeige ≠ User-Klick
+    }
+
+    SECTION ("Auswahl-Wechsel meldet trotz Separatoren den richtigen Key")
+    {
+        combo.setSelectedId (5, juce::sendNotificationSync);
+        REQUIRE (selectedKey == "tap:m4l");
+
+        combo.setSelectedId (1, juce::sendNotificationSync);
+        REQUIRE (selectedKey == "master");
+    }
+
+    SECTION ("Menü-Einträge und Combo-Text tragen die Quellfarbe")
+    {
+        // Item-Farben im RootMenu (Position: Master, hw, SEP, live_a, …)
+        juce::Array<juce::Colour> itemColours;
+        for (juce::PopupMenu::MenuItemIterator iterator (*combo.getRootMenu()); iterator.next();)
+            if (! iterator.getItem().isSeparator)
+                itemColours.add (iterator.getItem().colour);
+
+        REQUIRE (itemColours.size() == 5);
+        REQUIRE (itemColours[1] == orange);
+        REQUIRE (itemColours[2] == green);
+        REQUIRE (itemColours[4] == cyan);
+
+        // Combo-Text: Farbe der Auswahl; farblose Quelle → Standard-Text
+        REQUIRE (combo.findColour (juce::ComboBox::textColourId) == green);
+
+        combo.setSelectedId (1, juce::sendNotificationSync);
+        REQUIRE (combo.findColour (juce::ComboBox::textColourId)
+                 == conduit::push::colours::text);
+    }
+}
+
 TEST_CASE ("LooperTrackStrip: Hooks liefern Track-lokale Indizes und Werte", "[looper][ui]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;

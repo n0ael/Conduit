@@ -53,11 +53,17 @@ public:
 
     void setVisibleSlots (int count);
 
-    /** Quellen-Liste (Muster alte LooperPage). */
+    /** Quellen-Liste (Muster alte LooperPage). colour tönt den Menü-
+        Eintrag UND den Combo-Text der Auswahl (Quellfarbe, 09.07.2026);
+        transparent = Standard-Text. separatorBefore zieht einen Trenner
+        VOR dem Eintrag — Gruppen: lokale Quellen | Link-Quellen, und
+        innerhalb der Link-Gruppe pro Peer (App/Programm). */
     struct Source
     {
         juce::String key;
         juce::String label;
+        juce::Colour colour;
+        bool separatorBefore = false;
     };
     void setSources (std::vector<Source> sources, const juce::String& selectedKey);
 
@@ -77,6 +83,7 @@ public:
 
 private:
     void wireTrack (LooperTrackStrip& track, int trackIndex);
+    void applySelectedSourceColour();
 
     int looperNumber;
     bool audible = false;

@@ -1,7 +1,10 @@
 #include "EngineEditor.h"
 
+#include <algorithm>
+
 #include "Browser/BrowserPaths.h"
 #include "EngineProcessor.h"
+#include "Modules/LinkAudioReceiveModule.h"
 #include "Modules/LinkAudioSendModule.h"
 #include "UI/LinkSendCreateDialog.h"
 #include "Core/Looper/LooperClipExporter.h"
@@ -327,6 +330,10 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
     engine.getCaptureService().addChangeListener (this);
     engine.getChannelNames().addChangeListener (this);
 
+    // … und Node-Property-Änderungen (Link-Kanal-Wahl, Node-Farben,
+    // I/O-Kanalzahl) — read/listen-only auf dem Root-Tree (6)
+    rootState.addListener (this);
+
     // Dev-Tile + Dev-Panel (nur im Dev Mode)
     transportBar.onToggleDevPanel = [this] { toggleDevPanel(); };
     transportBar.setDevTileVisible (engine.getUiSettings().isDevModeEnabled());
@@ -337,6 +344,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
 
 EngineEditor::~EngineEditor()
 {
+    rootState.removeListener (this);
     engine.getLooperSettings().removeChangeListener (this);
     engine.getChannelNames().removeChangeListener (this);
     engine.getCaptureService().removeChangeListener (this);
@@ -351,6 +359,20 @@ EngineEditor::~EngineEditor()
 }
 
 //==============================================================================
+void EngineEditor::valueTreePropertyChanged (juce::ValueTree& tree,
+                                             const juce::Identifier& property)
+{
+    juce::ignoreUnused (tree);
+
+    // Link-Kanal-Wahl (Receive-Panel), Node-Farben und I/O-Kanalzahlen
+    // ändern Labels/Farben der Looper-Quellauswahl — Tap-Registrierung
+    // und Rename decken die CaptureService-Broadcasts bereits ab
+    if (property == id::targetPeer || property == id::targetChannel
+        || property == id::nodeColour
+        || property == id::numOutputChannels || property == id::numInputChannels)
+        rebuildLooperSources();
+}
+
 void EngineEditor::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
     // Looper-Quellen: Tap-Zeilen (CaptureService) und Kanal-Labels
@@ -450,7 +472,7 @@ std::vector<LooperPanel::Source> EngineEditor::buildLooperSources()
 
     // Master zuerst — die Session-Summe (Master-Output-Tap, B2) ist die
     // naheliegendste Looper-Quelle und der Fallback unbekannter Schlüssel
-    sources.push_back ({ "master", "Master" });
+    sources.push_back ({ "master", "Master", juce::Colour(), false });
 
     // Hardware-Eingangs-Paare: Kanalzahl aus dem audio_in-Tree-Node
     // (folgt der Hardware), Labels aus den ChannelNames — Muster
@@ -465,10 +487,14 @@ std::vector<LooperPanel::Source> EngineEditor::buildLooperSources()
     auto& labels = engine.getChannelNames();
 
     for (int channel = 0; channel + 1 < channels; channel += 2)
-        sources.push_back ({ "hw:" + juce::String (channel / 2),
+    {
+        const auto key = "hw:" + juce::String (channel / 2);
+        sources.push_back ({ key,
                              labels.getLabel (ChannelNames::Direction::input, channel)
                                  + " / "
-                                 + labels.getLabel (ChannelNames::Direction::input, channel + 1) });
+                                 + labels.getLabel (ChannelNames::Direction::input, channel + 1),
+                             looperSourceColour (key), false });
+    }
 
     // Ausgangs-Paare hinter dem Master (Kanäle 2p/2p+1, "out:{p}"):
     // damit sind auch Signale loopbar, die nur auf einem Ausgangspaar
@@ -481,14 +507,28 @@ std::vector<LooperPanel::Source> EngineEditor::buildLooperSources()
                            ? (int) outNode.getProperty (id::numInputChannels, 2) : 2;
 
     for (int channel = 2; channel + 1 < outChannels; channel += 2)
-        sources.push_back ({ "out:" + juce::String (channel / 2),
+    {
+        const auto key = "out:" + juce::String (channel / 2);
+        sources.push_back ({ key,
                              "Out: " + labels.getLabel (ChannelNames::Direction::output, channel)
                                  + " / "
-                                 + labels.getLabel (ChannelNames::Direction::output, channel + 1) });
+                                 + labels.getLabel (ChannelNames::Direction::output, channel + 1),
+                             looperSourceColour (key), false });
+    }
 
     // Capture-Taps der Module (virtuelle Slots hinter master_l/_r):
-    // _l/_r-Stereo-Paare auf den Basisnamen reduziert, Mono-Taps einzeln
-    juce::StringArray seenBaseNames;
+    // _l/_r-Stereo-Paare auf den Basisnamen reduziert, Mono-Taps einzeln.
+    // Link-Receive-Taps wandern in eine eigene Gruppe hinter den lokalen
+    // Quellen — Label "{peer} / {kanal}" wie im Receive-Panel, getrennt
+    // per Separator, ein Abschnitt pro Peer/App (User-Wunsch 09.07.2026)
+    struct LinkEntry
+    {
+        juce::String peer;
+        LooperPanel::Source source;
+    };
+    std::vector<LinkEntry> linkEntries;
+
+    juce::StringArray seenBaseNames, seenLinkLabels;
     const auto& capture = engine.getCaptureService();
 
     for (int slot = 2; slot < CaptureService::MAX_VIRTUAL_CHANNELS; ++slot)
@@ -510,7 +550,54 @@ std::vector<LooperPanel::Source> EngineEditor::buildLooperSources()
             continue;
 
         seenBaseNames.add (baseName);
-        sources.push_back ({ "tap:" + baseName, "Tap: " + baseName });
+        const auto key = "tap:" + baseName;
+
+        const auto node = nodesTree.getChildWithProperty (id::moduleId, baseName);
+        const auto isLinkReceive = node.isValid()
+            && node.getProperty (id::factoryId).toString()
+                   == LinkAudioReceiveModule::staticModuleId;
+
+        if (! isLinkReceive)
+        {
+            sources.push_back ({ key, "Tap: " + baseName,
+                                 looperSourceColour (key), false });
+            continue;
+        }
+
+        const auto peer    = node.getProperty (id::targetPeer).toString();
+        const auto channel = node.getProperty (id::targetChannel).toString();
+
+        // Ohne Kanal-Wunsch bleibt der Modulname ("Link:"-Präfix statt
+        // "Tap:" — der Eintrag gehört sichtbar zur Link-Gruppe)
+        auto label = channel.isNotEmpty()
+                   ? (peer.isNotEmpty() ? peer + " / " + channel : channel)
+                   : "Link: " + baseName;
+
+        // Zwei Module auf demselben Peer-Kanal: Modulname disambiguiert
+        if (seenLinkLabels.contains (label))
+            label << " (" << baseName << ")";
+        seenLinkLabels.add (label);
+
+        linkEntries.push_back ({ peer, { key, label, looperSourceColour (key), false } });
+    }
+
+    // Link-Gruppe: nach Peer sortiert (ungebundene ans Ende), Separator
+    // vor dem Block und an jedem Peer-Wechsel
+    std::stable_sort (linkEntries.begin(), linkEntries.end(),
+                      [] (const LinkEntry& a, const LinkEntry& b)
+    {
+        if (a.peer.isEmpty() != b.peer.isEmpty())
+            return b.peer.isEmpty();
+        return a.peer.compareIgnoreCase (b.peer) < 0;
+    });
+
+    juce::String previousPeer;
+    for (std::size_t i = 0; i < linkEntries.size(); ++i)
+    {
+        auto& entry = linkEntries[i];
+        entry.source.separatorBefore = i == 0 || entry.peer != previousPeer;
+        previousPeer = entry.peer;
+        sources.push_back (std::move (entry.source));
     }
 
     return sources;

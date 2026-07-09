@@ -48,7 +48,8 @@ class EngineProcessor;
 class EngineEditor final : public juce::AudioProcessorEditor,
                            public juce::DragAndDropContainer,   // Browser-Drag → Canvas
                            private juce::Timer,
-                           private juce::ChangeListener
+                           private juce::ChangeListener,
+                           private juce::ValueTree::Listener
 {
 public:
     /** deviceManager ist nur im Standalone-Pfad gesetzt (Main.cpp). Im
@@ -69,6 +70,12 @@ private:
     // Klasse speichert nur, HIER wird angewendet (headless Tests bleiben
     // frei von globalem Desktop-Zustand)
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+
+    // Looper-Quellenliste folgt Link-Kanal-Wahl (targetPeer/targetChannel),
+    // Node-Farben und I/O-Kanalzahlen live — die Tap-Registrierung selbst
+    // broadcastet bereits über den CaptureService (read/listen-only, 6)
+    void valueTreePropertyChanged (juce::ValueTree& tree,
+                                   const juce::Identifier& property) override;
 
     void launchPresetChooser (bool saving);
     void handleExportReport (const CaptureWriter::Report& report);

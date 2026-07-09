@@ -19,7 +19,10 @@ LooperPanel::LooperPanel (int number)
     sourceCombo.setName ("looperSource" + juce::String (number));
     sourceCombo.onChange = [this]
     {
-        const auto index = sourceCombo.getSelectedItemIndex();
+        // Über die Item-ID statt des Item-Index — die Separatoren der
+        // Gruppen (lokal | Link, Peer | Peer) verschieben Indizes
+        const auto index = sourceCombo.getSelectedId() - 1;
+        applySelectedSourceColour();
         if (index >= 0 && index < (int) currentSources.size() && onSourceSelected != nullptr)
             onSourceSelected (currentSources[(size_t) index].key);
     };
@@ -106,16 +109,46 @@ void LooperPanel::setSources (std::vector<Source> sources, const juce::String& s
 
     sourceCombo.clear (juce::dontSendNotification);
 
+    // Direkt ins RootMenu: Separatoren (Gruppen-Trenner) und Einträge in
+    // Quellfarbe kann die addItem-API der ComboBox nicht — die Auswahl
+    // läuft weiterhin über Item-IDs (Index + 1), Ticks setzt showPopup
+    auto* menu = sourceCombo.getRootMenu();
+
     int selectedId = 1;
     for (int i = 0; i < (int) currentSources.size(); ++i)
     {
-        sourceCombo.addItem (currentSources[(size_t) i].label, i + 1);
-        if (currentSources[(size_t) i].key == selectedKey)
+        const auto& source = currentSources[(size_t) i];
+
+        if (source.separatorBefore && i > 0)
+            menu->addSeparator();
+
+        juce::PopupMenu::Item item (source.label);
+        item.itemID = i + 1;
+        if (! source.colour.isTransparent())
+            item.colour = source.colour;
+        menu->addItem (std::move (item));
+
+        if (source.key == selectedKey)
             selectedId = i + 1;
     }
 
     if (! currentSources.empty())
         sourceCombo.setSelectedId (selectedId, juce::dontSendNotification);
+
+    applySelectedSourceColour();
+}
+
+void LooperPanel::applySelectedSourceColour()
+{
+    // Combo-Text in der Farbe der gewählten Quelle (wie Strip/Wellenform);
+    // farblose Quellen (Master) fallen auf die Standard-Textfarbe zurück
+    const auto index = sourceCombo.getSelectedId() - 1;
+    const auto colour = index >= 0 && index < (int) currentSources.size()
+                            ? currentSources[(size_t) index].colour
+                            : juce::Colour();
+
+    sourceCombo.setColour (juce::ComboBox::textColourId,
+                           colour.isTransparent() ? push::colours::text : colour);
 }
 
 void LooperPanel::setAudible (bool shouldGlow)

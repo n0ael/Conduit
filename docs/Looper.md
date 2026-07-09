@@ -17,6 +17,17 @@
     `LooperWaveformStrip::setSourceColour` tönt auch die Spektrum-LUT).
     Quelle + Ausgabe-Paar persistiert in TransportSettings
     (looperSource/looperAnchor).
+  - **Quellen-Combo (09.07.2026):** Link-Receive-Taps zeigen
+    „{targetPeer} / {targetChannel}" (Format des Receive-Panels; ohne
+    Kanal-Wunsch „Link: {moduleId}") und bilden eine per Separator
+    getrennte Gruppe HINTER den lokalen Quellen — ein Abschnitt pro Peer
+    (App/Programm), Doppel-Label disambiguiert der Modulname. Alle
+    Einträge und der Combo-Text der Auswahl tragen die Quellfarbe
+    (PopupMenu-Item-Farbe via `getRootMenu()`; Auswahl über Item-IDs =
+    Quell-Index + 1, NIE über Item-Indizes — Separatoren verschieben sie).
+    Live-Refresh: zusätzlich zu CaptureService/ChannelNames-Broadcasts
+    lauscht der EngineEditor als Root-Tree-Listener auf targetPeer/
+    targetChannel/nodeColour/numInput-/numOutputChannels.
   - `BarSampleAnchors` [Audio]: Taktgrenzen sample-genau als gepackte
     64-bit-Atomics (16 Bit bar-Tag + 48 Bit Sample-Position — Paar in EINEM
     Wort, sonst Slot-Reuse-Race); Grenze 0 wird nie überquert → Commit
