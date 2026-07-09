@@ -7,6 +7,7 @@
 #include "TouchLive/LiveFaderScale.h"
 #include "TouchLive/LiveSetModel.h"
 #include "TouchLive/TouchLiveClient.h"
+#include "TouchLive/TouchLiveMeterBus.h"
 #include "TouchLive/TouchLiveSettings.h"
 #include "UI/TouchLivePage/TouchLivePage.h"
 
@@ -86,9 +87,9 @@ struct PageRig
     {
         auto transportOwned = std::make_unique<FakeRemoteTransport>();
         transport = transportOwned.get();
-        client = std::make_unique<conduit::TouchLiveClient> (model, settings,
+        client = std::make_unique<conduit::TouchLiveClient> (model, meterBus, settings,
                                                              std::move (transportOwned));
-        page = std::make_unique<conduit::TouchLivePage> (model, *client, settings);
+        page = std::make_unique<conduit::TouchLivePage> (model, *client, meterBus, settings);
         page->setBounds (0, 0, 720, 460);
 
         settings.setEnabled (true);          // Kommando-Pfad scharf
@@ -124,6 +125,7 @@ struct PageRig
     juce::ScopedJuceInitialiser_GUI juceRuntime;
     TempTouchLiveSettings temp;
     conduit::LiveSetModel model;
+    conduit::TouchLiveMeterBus meterBus;
     conduit::TouchLiveSettings settings;
     FakeRemoteTransport* transport = nullptr;
     std::unique_ptr<conduit::TouchLiveClient> client;
@@ -307,6 +309,38 @@ TEST_CASE ("TouchLiveGridView: Tap feuert Clip, Scene und Stop über die richtig
         REQUIRE (sent.size() == 1);
         REQUIRE (sent.front()[0].getString() == "tr:0");
     }
+}
+
+//==============================================================================
+TEST_CASE ("TouchLiveMixerView: MeterBus-Frames landen in den Fader-Metern (M2)", "[touchlive][ui]")
+{
+    PageRig rig;
+    rig.loadDemoSet();
+
+    rig.meterBus.update ("tr:0", 0.7f, 0.5f);
+    rig.meterBus.noteFrame();
+    rig.page->mixerView.refreshMetersNow();
+
+    auto* drums = rig.page->mixerView.findStrip ("tr:0");
+    REQUIRE (drums != nullptr);
+    REQUIRE (drums->fader.getMeterBarLevel (0) == Approx (0.7f));
+    REQUIRE (drums->fader.getMeterBarLevel (1) == Approx (0.5f));
+    REQUIRE (drums->fader.getMeterPeakLevel (0) == Approx (0.7f));
+
+    // Ballistik: ohne neuen Frame fällt der Balken weich, Peak hält länger
+    rig.meterBus.update ("tr:0", 0.0f, 0.0f);
+    rig.meterBus.noteFrame();
+    rig.page->mixerView.refreshMetersNow();
+    rig.page->mixerView.refreshMetersNow();
+
+    const auto bar = drums->fader.getMeterBarLevel (0);
+    REQUIRE (bar < 0.7f);
+    REQUIRE (bar > 0.0f);
+    REQUIRE (drums->fader.getMeterPeakLevel (0) > bar);
+
+    // Unbekannte Keys (Master hat eigenen) bleiben still
+    REQUIRE (rig.page->mixerView.getMasterStrip()->fader.getMeterBarLevel (0)
+             == Approx (0.0f));
 }
 
 //==============================================================================

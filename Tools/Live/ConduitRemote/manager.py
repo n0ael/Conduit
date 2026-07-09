@@ -14,6 +14,7 @@ from .handlers import session as session_handlers
 from .heartbeat import Heartbeat
 from .sync.base import to_json
 from .sync.delivery import Sender
+from .sync.meters import MeterStream
 from .sync import stable_ids
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,16 @@ class Manager(ControlSurface):
             self.server.add_handler(
                 "/remote/state/%s/unsubscribe" % name, self._make_unsubscribe_handler(domain))
 
+        # Meter-Hochraten-Pfad (M2): kein Domain-Diff, ein kompaktes
+        # Datagramm pro Tick (sync/meters.py)
+        self.meters = MeterStream(self._song, self.server.send)
+        self.server.add_handler(
+            "/remote/meters/subscribe",
+            lambda address, args: self.meters.on_subscribe())
+        self.server.add_handler(
+            "/remote/meters/unsubscribe",
+            lambda address, args: self.meters.on_unsubscribe())
+
         self.server.add_handler("/remote/ping", self._on_ping)
 
         self.schedule_message(1, self.tick)
@@ -167,6 +178,7 @@ class Manager(ControlSurface):
                 logger.exception(
                     "on_unsubscribe failed for domain %s",
                     getattr(domain, "NAME", "?"))
+        self.meters.on_unsubscribe()
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -199,6 +211,11 @@ class Manager(ControlSurface):
                         logger.exception("domain %s detach failed", name)
                     del self.domains[name]
                     del self._domain_failures[name]
+
+        try:
+            self.meters.on_tick(self._tick_count)
+        except Exception:
+            logger.exception("meter stream on_tick failed")
 
         self.heartbeat.check(self._tick_count)
         self.schedule_message(config.TICK_INTERVAL, self.tick)

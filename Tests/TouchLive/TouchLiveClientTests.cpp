@@ -6,6 +6,7 @@
 
 #include "TouchLive/LiveSetModel.h"
 #include "TouchLive/TouchLiveClient.h"
+#include "TouchLive/TouchLiveMeterBus.h"
 #include "TouchLive/TouchLiveSettings.h"
 
 using Catch::Approx;
@@ -135,7 +136,7 @@ struct ClientRig
     {
         auto transportOwned = std::make_unique<FakeRemoteTransport>();
         transport = transportOwned.get();
-        client = std::make_unique<conduit::TouchLiveClient> (model, settings,
+        client = std::make_unique<conduit::TouchLiveClient> (model, meterBus, settings,
                                                              std::move (transportOwned));
         client->setTimeSource ([this] { return fakeNowMs; });
     }
@@ -156,6 +157,7 @@ struct ClientRig
     juce::ScopedJuceInitialiser_GUI juceRuntime;
     TempTouchLiveSettings temp;
     conduit::LiveSetModel model;
+    conduit::TouchLiveMeterBus meterBus;
     conduit::TouchLiveSettings settings;
     double fakeNowMs = 1000.0;
     FakeRemoteTransport* transport = nullptr;
@@ -238,7 +240,67 @@ TEST_CASE ("TouchLiveClient: enable verbindet und abonniert alle Domains (get + 
         REQUIRE (rig.transport->countSent (base + "/subscribe") == 1);
     }
 
+    REQUIRE (rig.transport->countSent ("/remote/meters/subscribe") == 1);
     REQUIRE (rig.transport->countSent ("/remote/ping") == 1);
+}
+
+//==============================================================================
+TEST_CASE ("TouchLiveClient: /remote/meters füllt den MeterBus (roh, ohne Suppression)", "[touchlive]")
+{
+    ClientRig rig;
+    rig.enable();
+
+    // Sogar berührte Keys ändern die Meter — Meter sind von der
+    // Echo-Suppression ausgenommen (Feel-Regel 5.1)
+    rig.client->noteTouchedParameter (
+        conduit::TouchLiveClient::makeParameterKey ("mixer", "tr:0", "vol"));
+
+    // clear() (Enable/Disable) zählt den Frame-Zähler ebenfalls hoch —
+    // relativ zur Baseline prüfen
+    const auto baseline = rig.meterBus.getFrameCounter();
+
+    juce::OSCMessage frame { juce::OSCAddressPattern ("/remote/meters") };
+    frame.addString ("tr:0"); frame.addFloat32 (0.6f); frame.addFloat32 (0.4f);
+    frame.addString ("ma:1"); frame.addFloat32 (0.9f); frame.addFloat32 (0.9f);
+    rig.deliver (frame);
+
+    REQUIRE (rig.meterBus.getFrameCounter() == baseline + 1);
+    REQUIRE (rig.meterBus.getLevel ("tr:0").left == Approx (0.6f));
+    REQUIRE (rig.meterBus.getLevel ("tr:0").right == Approx (0.4f));
+    REQUIRE (rig.meterBus.getLevel ("ma:1").left == Approx (0.9f));
+    REQUIRE (rig.meterBus.getLevel ("unbekannt").left == Approx (0.0f));
+    REQUIRE (rig.client->getStats().meterFrames == 1);
+}
+
+TEST_CASE ("TouchLiveClient: defekter Meter-Frame wird verworfen", "[touchlive]")
+{
+    ClientRig rig;
+    rig.enable();
+
+    const auto baseline = rig.meterBus.getFrameCounter();
+
+    juce::OSCMessage broken { juce::OSCAddressPattern ("/remote/meters") };
+    broken.addString ("tr:0"); broken.addString ("kaputt"); broken.addFloat32 (0.5f);
+    rig.deliver (broken);
+
+    REQUIRE (rig.meterBus.getFrameCounter() == baseline);
+    REQUIRE (rig.client->getStats().meterFrames == 0);
+}
+
+TEST_CASE ("TouchLiveClient: Disable leert den MeterBus", "[touchlive]")
+{
+    ClientRig rig;
+    rig.enable();
+
+    juce::OSCMessage frame { juce::OSCAddressPattern ("/remote/meters") };
+    frame.addString ("tr:0"); frame.addFloat32 (0.8f); frame.addFloat32 (0.8f);
+    rig.deliver (frame);
+    REQUIRE (rig.meterBus.getLevel ("tr:0").left == Approx (0.8f));
+
+    rig.settings.setEnabled (false);
+    rig.settings.dispatchPendingMessages();
+
+    REQUIRE (rig.meterBus.getLevel ("tr:0").left == Approx (0.0f));
 }
 
 TEST_CASE ("TouchLiveClient: Snapshot läuft ins LiveSetModel", "[touchlive]")

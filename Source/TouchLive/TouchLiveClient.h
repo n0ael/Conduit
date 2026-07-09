@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -12,6 +13,7 @@
 
 #include "IRemoteTransport.h"
 #include "LiveSetModel.h"
+#include "TouchLiveMeterBus.h"
 #include "TouchLiveSettings.h"
 
 namespace conduit
@@ -66,8 +68,10 @@ public:
                                                               "mixer", "session" };
 
     /** transport nullptr → UDP (App-Pfad); Tests injizieren einen Fake.
-        Lauscht auf die Settings und verbindet sofort, falls enabled. */
+        Lauscht auf die Settings und verbindet sofort, falls enabled.
+        meterBus empfängt den Hochraten-Pfad /remote/meters (M2). */
     TouchLiveClient (LiveSetModel& modelToUse,
+                     TouchLiveMeterBus& meterBusToUse,
                      TouchLiveSettings& settingsToUse,
                      std::unique_ptr<IRemoteTransport> transportToUse = nullptr);
 
@@ -138,6 +142,19 @@ public:
     /** Fake-Clock für Thinning + Echo-Suppression (Millisekunden). */
     void setTimeSource (std::function<double()> nowMsToUse);
 
+    //==========================================================================
+    /** Diagnose-Zähler (Feel-Messlatte §5.1: „erst Raten messen, dann
+        schrauben") — kumulativ seit Enable, nur Message Thread. */
+    struct Stats
+    {
+        std::int64_t snapshotsApplied = 0;
+        std::int64_t diffsApplied = 0;
+        std::int64_t meterFrames = 0;
+        std::int64_t touchValuesSent = 0;
+    };
+
+    [[nodiscard]] const Stats& getStats() const noexcept { return stats; }
+
 private:
     //==========================================================================
     enum TimerIds { heartbeatTimerId = 1, thinningTimerId = 2 };
@@ -174,6 +191,7 @@ private:
     // Eingehende Messages [Message Thread nach dem Queue-Hop]
     void routeMessage (const juce::OSCMessage& message);
     void handlePong();
+    void handleMeters (const juce::OSCMessage& message);
     void handleStatePayload (const juce::String& domainName, bool isSnapshot,
                              const juce::OSCMessage& message);
     void applyPayload (const juce::String& domainName, bool isSnapshot,
@@ -189,12 +207,14 @@ private:
     class LearnProbe;
 
     LiveSetModel& model;
+    TouchLiveMeterBus& meterBus;
     TouchLiveSettings& settings;
     std::unique_ptr<IRemoteTransport> transport;
 
     Status status = Status::disabled;
     bool transportConnected = false;
     int pingsSinceLastPong = 0;
+    Stats stats;
 
     std::map<juce::String, DomainSync> domainSync;
 

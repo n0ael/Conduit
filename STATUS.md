@@ -3,7 +3,27 @@
 > Letzte Aktualisierung: 2026-07-09 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (09.07.2026) — TouchLive M1c
+## Aktueller Meilenstein (09.07.2026) — TouchLive M2 (Meter-Pfad)
+
+**Echte Live-Pegel in den Kanalzügen — beidseitig:**
+
+- **Script:** `sync/meters.py` — Hochraten-Pfad `/remote/meters` (flache
+  Tripel id/L/R für Tracks+Returns+Master, ~10 Hz, keine seq, Stille-
+  Dedupe), Subscription + Heartbeat-Kopplung; 5 neue pytest-Tests.
+- **Conduit:** `TouchLiveMeterBus` (transient, nie im Tree, Frame-Zähler),
+  Client subscribed Meter mit und parst roh (kein Slew/keine Suppression —
+  §5.1); Fader bekommt Stereo-Meter-Spalte zwischen Rinne und Skala
+  (grün→gelb→rot, UI-Ballistik: Anstieg sofort, Abfall weich, Peak-Hold);
+  MixerView pollt @ 30 Hz nur bei sichtbarer Page. Dazu Diagnose-Zähler
+  (`TouchLiveClient::getStats()`) als Messbasis für die Feel-Abnahme.
+- **Toolchain:** Python 3.12 lokal (winget) + neuer CI-Job `remote-script`
+  (pytest auf Ubuntu — lokal blockiert laufendes Live Port 9010).
+- Tests: 595 Cases / 27 130 Assertions grün, ASan grün; pytest 116 grün
+  (socketfreie Teilmenge lokal).
+- **Nächster Schritt:** Feldtest der Meter + Feel-Abnahme gegen die
+  Roto-Messlatte (Raten via getStats), LiveFaderScale kalibrieren.
+
+## Meilenstein (09.07.2026) — TouchLive M1c
 
 **TouchLive-Page: GRID + MIXER auf Page-Slot 2 (statt Clip-Platzhalter):**
 

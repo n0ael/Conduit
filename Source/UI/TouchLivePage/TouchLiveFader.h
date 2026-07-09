@@ -58,6 +58,28 @@ public:
     [[nodiscard]] bool isDragging() const noexcept { return dragging; }
 
     //==========================================================================
+    // Meter (M2): Stereo-Spalte zwischen Rinne und Skala — Werte sind Lives
+    // rohe output_meter-Norm, KEIN Slew/keine Suppression (§5.1: Meter roh).
+
+    /** Neue Zielpegel aus dem MeterBus (pro empfangenem Frame). */
+    void setMeterLevels (float left, float right);
+
+    /** 30-Hz-Tick der MixerView: Balken fallen weich, Peak-Hold sinkt;
+        repaintet nur bei sichtbarer Änderung. */
+    void tickMeterDisplay();
+
+    /** Angezeigter Balken-/Peak-Stand (Tests der Meter-Ballistik). */
+    [[nodiscard]] float getMeterBarLevel (int channel) const noexcept
+    {
+        return meterBar[juce::jlimit (0, 1, channel)];
+    }
+
+    [[nodiscard]] float getMeterPeakLevel (int channel) const noexcept
+    {
+        return meterPeak[juce::jlimit (0, 1, channel)];
+    }
+
+    //==========================================================================
     // Testbare Gesten-Kernpfade (Maus-Handler rufen genau diese)
 
     void beginGesture();
@@ -85,6 +107,11 @@ private:
     float displayedValue = 0.85f;   // Unity
     float gestureStartValue = 0.85f;
     bool dragging = false;
+
+    // Meter-Ballistik (UI-seitig: Anstieg sofort, Abfall/Peak weich)
+    float meterTarget[2] {};
+    float meterBar[2] {};
+    float meterPeak[2] {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TouchLiveFader)
 };

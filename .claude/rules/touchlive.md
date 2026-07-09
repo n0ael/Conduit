@@ -58,3 +58,14 @@ Wire-Protokoll (Gegenseite M1a):
 - OSC-Codec der Gegenseite encodiert Python-Bools als T/F-Tags — juce_osc
   kennt die NICHT. Richtung Script→Conduit nie Bool-Argumente senden
   (Bools reisen im JSON).
+
+Meter-Pfad (M2):
+- `/remote/meters` = flache Tripel `[id:str, left:float, right:float]` —
+  bewusst KEIN Domain-Diff, KEINE seq (Frames idempotent), Stille-Dedupe;
+  Werte sind Lives rohe output_meter-Norm. Subscription
+  `/remote/meters/subscribe`, Heartbeat-Timeout beendet den Stream.
+- `TouchLiveMeterBus` NIE in den ValueTree; Meter sind ROH (kein Slew,
+  keine Echo-Suppression, §5.1); UI liest per Frame-Zähler @ 30 Hz und
+  nur bei sichtbarer Page. `clear()` erhöht den Frame-Zähler.
+- pytest der Gegenseite: lokal kollidieren Manager-Tests mit laufendem
+  Live (Port 9010) — CI-Job `remote-script` läuft immer vollständig.

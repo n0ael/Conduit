@@ -9,6 +9,7 @@ namespace conduit
 namespace
 {
     constexpr float labelColumn   = 22.0f;  // dB-Zahlen + Ticks rechts
+    constexpr float meterColumn   = 13.0f;  // Stereo-Meter (M2)
     constexpr float channelWidth  = 5.0f;   // Rinne (PushLookAndFeel-Optik)
     constexpr float gripHeight    = 11.0f;
 
@@ -16,6 +17,19 @@ namespace
 
     // Feinmodus (Shift): Wisch-Distanz wirkt nur zu einem Viertel
     constexpr float fineDragFactor = 0.25f;
+
+    // Meter-Ballistik pro 30-Hz-Tick: Balken-Abfall + Peak-Hold-Sinkrate
+    constexpr float meterFallFactor = 0.72f;
+    constexpr float peakDropPerTick = 0.012f;
+    constexpr float meterEps        = 0.004f;
+
+    // Farbverlauf wie GainFaderMeter (grün → gelb → rot)
+    juce::Colour levelColour (float norm)
+    {
+        if (norm > 0.95f) return juce::Colour (0xffe14b3b);
+        if (norm > 0.80f) return juce::Colour (0xffd8b13a);
+        return juce::Colour (0xff3fb56b);
+    }
 }
 
 //==============================================================================
@@ -40,6 +54,36 @@ void TouchLiveFader::setRemoteValue (float newValue)
 void TouchLiveFader::setValueSilent (float newValue)
 {
     slew.snapTo (juce::jlimit (0.0f, 1.0f, newValue));
+}
+
+//==============================================================================
+void TouchLiveFader::setMeterLevels (float left, float right)
+{
+    meterTarget[0] = juce::jlimit (0.0f, 1.0f, left);
+    meterTarget[1] = juce::jlimit (0.0f, 1.0f, right);
+}
+
+void TouchLiveFader::tickMeterDisplay()
+{
+    bool changed = false;
+
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        // Anstieg sofort, Abfall weich (die ~10-Hz-Frames wirken sonst stufig)
+        const auto bar = juce::jmax (meterTarget[channel],
+                                     meterBar[channel] * meterFallFactor);
+        const auto peak = juce::jmax (bar, meterPeak[channel] - peakDropPerTick);
+
+        changed = changed
+               || std::abs (bar - meterBar[channel]) > meterEps
+               || std::abs (peak - meterPeak[channel]) > meterEps;
+
+        meterBar[channel]  = bar;
+        meterPeak[channel] = peak;
+    }
+
+    if (changed)
+        repaint();
 }
 
 //==============================================================================
@@ -130,16 +174,53 @@ void TouchLiveFader::paint (juce::Graphics& g)
     if (track.isEmpty())
         return;
 
-    // Rinne + Füllung von unten (Formsprache PushLookAndFeel-Slider);
-    // das Stereo-Meter kommt als eigene Spalte mit M2 (GainFaderMeter-Muster)
+    // Layout: [Rinne+Griff | Stereo-Meter | Ticks+Labels]
+    auto faderZone = track;
+    const auto meterZone = faderZone.removeFromRight (meterColumn).reduced (1.0f, 0.0f);
+
+    // Rinne + Füllung von unten (Formsprache PushLookAndFeel-Slider)
     const auto gripY = track.getY() + normFromValue (displayedValue) * track.getHeight();
-    const auto channel = track.withSizeKeepingCentre (channelWidth, track.getHeight());
+    const auto channel = faderZone.withSizeKeepingCentre (channelWidth, faderZone.getHeight());
 
     g.setColour (juce::Colour (0xff1b1e22));
     g.fillRoundedRectangle (channel, 2.0f);
 
     g.setColour (push::colours::textDim.withAlpha (0.9f));
     g.fillRoundedRectangle (channel.withTop (gripY), 2.0f);
+
+    // Stereo-Meter (M2): rohe Live-Norm, Balken + Peak-Hold-Linie
+    {
+        const auto barWidth = (meterZone.getWidth() - 1.0f) / 2.0f;
+
+        for (int channelIndex = 0; channelIndex < 2; ++channelIndex)
+        {
+            const auto bar = juce::Rectangle<float> (
+                meterZone.getX() + (float) channelIndex * (barWidth + 1.0f),
+                meterZone.getY(), barWidth, meterZone.getHeight());
+
+            g.setColour (juce::Colour (0xff1b1e22));
+            g.fillRoundedRectangle (bar, 1.5f);
+
+            const auto norm = meterBar[channelIndex];
+
+            if (norm > 0.001f)
+            {
+                const auto fill = bar.withTop (bar.getBottom() - bar.getHeight() * norm);
+                g.setColour (levelColour (norm).withAlpha (0.9f));
+                g.fillRoundedRectangle (fill, 1.5f);
+            }
+
+            const auto peak = meterPeak[channelIndex];
+
+            if (peak > 0.001f)
+            {
+                const auto peakY = bar.getBottom() - bar.getHeight() * peak;
+                g.setColour (juce::Colours::white.withAlpha (0.7f));
+                g.fillRect (juce::Rectangle<float> (bar.getX(), peakY - 0.5f,
+                                                    bar.getWidth(), 1.0f));
+            }
+        }
+    }
 
     // Skala rechts: Ticks + dB-Zahlen, Label-Dichte folgt der Höhe
     const auto labelX = track.getRight() + 4.0f;
@@ -171,8 +252,8 @@ void TouchLiveFader::paint (juce::Graphics& g)
     }
 
     // Griffstein mit Mittellinie (Push-Fader), aktiv leicht heller
-    const auto gripWidth = juce::jmin (22.0f, track.getWidth() - 4.0f);
-    const auto grip = juce::Rectangle<float> (track.getCentreX() - gripWidth * 0.5f,
+    const auto gripWidth = juce::jmin (22.0f, faderZone.getWidth() - 4.0f);
+    const auto grip = juce::Rectangle<float> (faderZone.getCentreX() - gripWidth * 0.5f,
                                               juce::jlimit (track.getY(),
                                                             track.getBottom() - gripHeight,
                                                             gripY - gripHeight * 0.5f),

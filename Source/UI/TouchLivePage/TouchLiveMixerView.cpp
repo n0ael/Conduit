@@ -299,9 +299,11 @@ void TouchLiveChannelStrip::paint (juce::Graphics& g)
 //==============================================================================
 //==============================================================================
 TouchLiveMixerView::TouchLiveMixerView (TouchLiveClient& clientToUse, LiveSetModel& modelToUse,
+                                        TouchLiveMeterBus& meterBusToUse,
                                         TouchLiveSettings& settingsToUse)
     : client (clientToUse),
       model (modelToUse),
+      meterBus (meterBusToUse),
       settings (settingsToUse),
       modelState (model.getState())
 {
@@ -314,10 +316,12 @@ TouchLiveMixerView::TouchLiveMixerView (TouchLiveClient& clientToUse, LiveSetMod
     addAndMakeVisible (viewport);
 
     rebuildStrips();
+    startTimerHz (30);   // Meter-Refresh (CLAUDE.md 10); ohne Sicht kostenlos
 }
 
 TouchLiveMixerView::~TouchLiveMixerView()
 {
+    stopTimer();
     settings.removeChangeListener (this);
     modelState.removeListener (this);
     cancelPendingUpdate();
@@ -386,6 +390,38 @@ void TouchLiveMixerView::handleAsyncUpdate()
 void TouchLiveMixerView::flushPendingRebuild()
 {
     handleUpdateNowIfNeeded();
+}
+
+void TouchLiveMixerView::timerCallback()
+{
+    if (! isShowing())
+        return;   // Page nicht sichtbar → kein Meter-Aufwand
+
+    refreshMetersNow();
+}
+
+void TouchLiveMixerView::refreshMetersNow()
+{
+    const auto frame = meterBus.getFrameCounter();
+    const auto fresh = frame != lastMeterFrame;
+    lastMeterFrame = frame;
+
+    const auto feedStrip = [this, fresh] (TouchLiveChannelStrip& strip)
+    {
+        if (fresh)
+        {
+            const auto level = meterBus.getLevel (strip.getKey());
+            strip.fader.setMeterLevels (level.left, level.right);
+        }
+
+        strip.fader.tickMeterDisplay();   // Ballistik läuft auch ohne Frame
+    };
+
+    for (const auto& strip : strips)
+        feedStrip (*strip);
+
+    if (masterStrip != nullptr)
+        feedStrip (*masterStrip);
 }
 
 //==============================================================================

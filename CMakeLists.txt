@@ -324,6 +324,7 @@ target_sources(Conduit PRIVATE
     Source/TouchLive/LiveFaderScale.h
     Source/TouchLive/LiveSetModel.h
     Source/TouchLive/TouchLiveClient.h
+    Source/TouchLive/TouchLiveMeterBus.h
     Source/TouchLive/TouchLiveSettings.h
     Source/UI/TouchLivePage/TouchLiveFader.h
     Source/UI/TouchLivePage/TouchLiveGridView.h

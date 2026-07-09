@@ -32,7 +32,7 @@ class TouchLivePage final : public juce::Component,
 {
 public:
     TouchLivePage (LiveSetModel& modelToUse, TouchLiveClient& clientToUse,
-                   TouchLiveSettings& settingsToUse);
+                   TouchLiveMeterBus& meterBusToUse, TouchLiveSettings& settingsToUse);
     ~TouchLivePage() override;
 
     enum SubTab { tabGrid = 0, tabMixer = 1, tabDevice = 2, tabBrowser = 3 };

@@ -61,6 +61,15 @@ Domains: `transport` (is_playing, tempo, metronome, session_record, sig) ·
 **Heartbeat:** Client sendet `/remote/ping` (~2 s) → `/remote/pong [version]`.
 Nach ~6 s ohne Ping werden alle Subscriptions beendet.
 
+**Meter (M2)** — Hochraten-Pfad, getrennt von den Domains:
+
+- `/remote/meters/subscribe` / `unsubscribe`
+- Push: `/remote/meters` mit flachen Tripeln `[id:str, left:f, right:f] × n`
+  (Tracks + Returns + Master, gleiche Stable-IDs wie die Domains; Werte =
+  Lives rohe `output_meter`-Norm 0..1) — pro Manager-Tick (~10 Hz), keine
+  Sequenznummer (Frames sind idempotent), Stille wird nach einem
+  Null-Frame dedupliziert.
+
 ## Tests
 
 ```
@@ -75,6 +84,6 @@ den Konventionen von [AbletonOSC](https://github.com/ideoforms/AbletonOSC)
 
 ## Status / Roadmap
 
-M1a fertig (dieses Paket). Es folgen laut `TOUCHLIVE.md`:
-Meter-Hochraten-Pfad (M2), Device-Domain generisch (M3), Browser (M4),
-bespoke Device-UIs (M5), Modulator-Zwillinge (M6).
+M1a fertig, Meter-Hochraten-Pfad (M2) drin. Es folgen laut `TOUCHLIVE.md`
+(im Conduit-Repo: docs/TouchLive.md): Device-Domain generisch (M3),
+Browser (M4), bespoke Device-UIs (M5), Modulator-Zwillinge (M6).

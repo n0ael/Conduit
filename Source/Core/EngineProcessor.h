@@ -18,6 +18,7 @@
 #include "MidiDeviceTarget.h"
 #include "TouchLive/LiveSetModel.h"
 #include "TouchLive/TouchLiveClient.h"
+#include "TouchLive/TouchLiveMeterBus.h"
 #include "TouchLive/TouchLiveSettings.h"
 #include "MpeMidiSink.h"
 #include "GraphFader.h"
@@ -267,6 +268,7 @@ public:
         TouchLive-Page bindet an Modell + Client + Settings. */
     [[nodiscard]] TouchLiveSettings& getTouchLiveSettings() noexcept { return touchLiveSettings; }
     [[nodiscard]] LiveSetModel& getLiveSetModel() noexcept { return liveSetModel; }
+    [[nodiscard]] TouchLiveMeterBus& getTouchLiveMeterBus() noexcept { return touchLiveMeterBus; }
     [[nodiscard]] TouchLiveClient& getTouchLiveClient() noexcept { return touchLiveClient; }
 
 private:
@@ -476,11 +478,12 @@ private:
     grid::GridVoiceEngine  gridVoiceEngine  { mpeMidiSink };
 
     // TouchLive-Remote (docs/TouchLive.md): Message-Thread-only, vom
-    // Audio-Graph unabhängig. Settings + Modell VOR dem Client (nimmt
-    // beide als Referenz); Client startet nur, wenn Settings enabled.
+    // Audio-Graph unabhängig. Settings + Modell + MeterBus VOR dem Client
+    // (nimmt sie als Referenz); Client startet nur, wenn Settings enabled.
     TouchLiveSettings touchLiveSettings;
     LiveSetModel liveSetModel;
-    TouchLiveClient touchLiveClient { liveSetModel, touchLiveSettings };
+    TouchLiveMeterBus touchLiveMeterBus;
+    TouchLiveClient touchLiveClient { liveSetModel, touchLiveMeterBus, touchLiveSettings };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EngineProcessor)
 };

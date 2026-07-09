@@ -7,6 +7,7 @@
 
 #include "TouchLive/LiveSetModel.h"
 #include "TouchLive/TouchLiveClient.h"
+#include "TouchLive/TouchLiveMeterBus.h"
 #include "TouchLive/TouchLiveSettings.h"
 #include "TouchLiveFader.h"
 #include "UI/PushTiles.h"
@@ -95,14 +96,19 @@ private:
 
     Kanalbreite kommt aus TouchLiveSettings (User: „wie viele Tracks
     parallel"), Änderung wirkt sofort.
+
+    Meter (M2): 30-Hz-Timer liest den TouchLiveMeterBus pro Frame-Zähler
+    (nie cachen) und füttert die Fader-Meter; ohne sichtbare Page kostenlos.
 */
 class TouchLiveMixerView final : public juce::Component,
                                  private juce::ValueTree::Listener,
                                  private juce::ChangeListener,
-                                 private juce::AsyncUpdater
+                                 private juce::AsyncUpdater,
+                                 private juce::Timer
 {
 public:
     TouchLiveMixerView (TouchLiveClient& clientToUse, LiveSetModel& modelToUse,
+                        TouchLiveMeterBus& meterBusToUse,
                         TouchLiveSettings& settingsToUse);
     ~TouchLiveMixerView() override;
 
@@ -113,6 +119,9 @@ public:
     // Test-Seams
     /** Führt einen ausstehenden Struktur-Rebuild sofort aus. */
     void flushPendingRebuild();
+
+    /** Ein Meter-Tick sofort (der 30-Hz-Timer ruft dieselbe Logik). */
+    void refreshMetersNow();
 
     [[nodiscard]] TouchLiveChannelStrip* findStrip (const juce::String& key) const;
     [[nodiscard]] int getStripCount() const noexcept { return (int) strips.size(); }
@@ -125,6 +134,7 @@ private:
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int index) override;
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
     void handleAsyncUpdate() override;
+    void timerCallback() override;
 
     void rebuildStrips();
     void layoutStrips();
@@ -134,7 +144,9 @@ private:
 
     TouchLiveClient& client;
     LiveSetModel& model;
+    TouchLiveMeterBus& meterBus;
     TouchLiveSettings& settings;
+    juce::uint32 lastMeterFrame = 0;
 
     // Listener-Handle als Member halten (ValueTree-Listener hängen an der
     // Instanz — Lektion M1b, docs/TouchLive.md §10)

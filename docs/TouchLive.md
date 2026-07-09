@@ -230,7 +230,7 @@ Hardware mit echter Audio-Rate — 10 m vom Ableton-Rechner entfernt.
 | M1a | Script-Basis: AbletonOSC-Fork, Ports, Domains transport/tracks/mixer/session, Heartbeat, Touch-Pfad — **erledigt** (Tools/Live/ConduitRemote, 120 pytest-Tests) |
 | M1b | Conduit: TouchLiveClient + LiveSetModel + TouchLiveSettings (IP-Learn), Snapshot/Diff/Reconnect — **erledigt 09.07.2026** (§10) |
 | M1c | GRID- + MIXER-Sub-Tab (UI nach §5 inkl. Feel-Regeln 5.1) — **erledigt 09.07.2026** (§10b; User-SVGs Fader/Icon eingepflegt, weitere Figma-Assets folgen stückweise) |
-| M2 | Meter-Pfad (TouchLiveMeterBus), Feinschliff Fader-Gesten, Feel-Abnahme gegen Roto-Messlatte |
+| M2 | Meter-Pfad (TouchLiveMeterBus), Feinschliff Fader-Gesten, Feel-Abnahme gegen Roto-Messlatte — **Meter-Pfad erledigt 09.07.2026** (§10c); Feel-Abnahme + Skala-Kalibrierung = Feldtest-Punkte |
 | M3 | DEVICE generisch: Device-Domain, Ketten-Navigation, Parameter-Bänke, On/Off (§6b) |
 | M4 | BROWSER: Baum via `load_children`-Muster, Laden auf Track/Chain, Preview |
 | M5 | Bespoke Device-UIs: EQ Eight → Compressor/Glue → Delay/Reverb (§6b) |
@@ -362,6 +362,37 @@ Tests/TouchLive/LiveFaderScaleTests.cpp.
   bauen. Enabled default aus ⇒ keine Sockets; auf Dev-Maschinen mit
   aktivierter Remote öffnen solche Tests den Listen-Port (harmlos,
   Bind-Fehler wird 2-s-weise erneut versucht).
+
+## 10c. M2 — Meter-Pfad: Implementierungs-Notizen (09.07.2026)
+
+Beidseitig umgesetzt: `sync/meters.py` (Script) + `TouchLiveMeterBus` /
+Fader-Meter-Spalte (Conduit). pytest neu: test_meters.py; Catch2 neu:
+Meter-Parsing/Bus/Ballistik.
+
+- **Wire-Format (bewusst KEIN Domain-Diff):** `/remote/meters` mit flachen
+  Tripeln `[id:str, left:float, right:float] × n` (Tracks + Returns +
+  Master, gleiche Stable-IDs wie tracks/mixer). KEINE seq — Frames sind
+  idempotent, ein verlorenes/spätes Datagramm ist bei ~10 Hz unsichtbar,
+  der nächste Frame überschreibt alles. Kein JSON (Parse-Kosten pro Tick).
+- **Stille-Dedupe:** ein All-Zero-Frame geht noch raus (Client-Meter
+  fallen auf Ruhe), danach schweigt der Stream bis wieder Pegel kommt —
+  idle kostet keine Bandbreite. Subscription `/remote/meters/subscribe`
+  (Client schickt sie in subscribeAll mit), Heartbeat-Timeout beendet.
+- **Werte:** Lives rohe `output_meter_left/right`-Norm (0..1, Lives eigene
+  Ballistik). Anzeige 1:1 als Balkenhöhe; dB-genaue Kalibrierung gegen
+  Lives Meter = Feldtest-Punkt (§11).
+- **Conduit-Seite:** MeterBus = Message-Thread-Map + Frame-Zähler (NIE im
+  Tree, UI liest pro Tick); `clear()` zählt ebenfalls hoch (Test-Falle:
+  Baseline nehmen). MixerView pollt @ 30 Hz nur bei sichtbarer Page;
+  UI-Ballistik im Fader: Anstieg sofort, Balken-Abfall weich
+  (Faktor 0.72/Tick), Peak-Hold sinkt langsam — so wirken 10-Hz-Frames
+  nicht stufig. Meter sind ROH: kein Slew, keine Echo-Suppression (§5.1).
+- **Diagnose-Zähler** (`TouchLiveClient::getStats()`): Snapshots/Diffs/
+  Meter-Frames/Touch-Sends kumulativ seit Enable — die Messbasis für die
+  Feel-Abnahme („erst Raten messen, dann schrauben").
+- **CI:** neuer Job `remote-script` (pytest auf Ubuntu) — lokal kollidieren
+  die Manager-Tests mit laufendem Live (Port 9010 belegt), in der CI
+  laufen immer alle. Python lokal: winget Python 3.12 (09.07.2026).
 
 ## 11. Offen
 

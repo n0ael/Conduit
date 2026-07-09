@@ -8,9 +8,10 @@ namespace conduit
 //==============================================================================
 namespace
 {
-    constexpr const char* pongAddress = "/remote/pong";
-    constexpr const char* pingAddress = "/remote/ping";
-    constexpr const char* statePrefix = "/remote/state/";
+    constexpr const char* pongAddress   = "/remote/pong";
+    constexpr const char* pingAddress   = "/remote/ping";
+    constexpr const char* metersAddress = "/remote/meters";
+    constexpr const char* statePrefix   = "/remote/state/";
 
     [[nodiscard]] juce::String stateAddress (const juce::String& domainName,
                                              const char* suffix)
@@ -217,9 +218,11 @@ private:
 
 //==============================================================================
 TouchLiveClient::TouchLiveClient (LiveSetModel& modelToUse,
+                                  TouchLiveMeterBus& meterBusToUse,
                                   TouchLiveSettings& settingsToUse,
                                   std::unique_ptr<IRemoteTransport> transportToUse)
     : model (modelToUse),
+      meterBus (meterBusToUse),
       settings (settingsToUse),
       transport (transportToUse != nullptr ? std::move (transportToUse)
                                            : makeUdpRemoteTransport()),
@@ -281,6 +284,7 @@ void TouchLiveClient::sendTouchValue (const juce::OSCMessage& message)
         lastTouchSendMs[address] = now;
         pendingTouchValues.erase (address);  // Zwischenwert ist überholt
         transport->send (message);
+        ++stats.touchValuesSent;
         return;
     }
 
@@ -301,6 +305,7 @@ void TouchLiveClient::flushPendingTouchValues()
         {
             lastTouchSendMs[it->first] = now;
             transport->send (it->second);
+            ++stats.touchValuesSent;
             it = pendingTouchValues.erase (it);
         }
         else
@@ -413,6 +418,8 @@ void TouchLiveClient::applySettings()
     for (auto& entry : domainSync)
         entry.second.pending = {};
 
+    meterBus.clear();   // alte Pegel verwerfen (Disable UND Neuverbindung)
+
     if (! settings.isEnabled())
     {
         setStatus (Status::disabled);
@@ -421,6 +428,7 @@ void TouchLiveClient::applySettings()
 
     setStatus (Status::connecting);
     pingsSinceLastPong = 0;
+    stats = {};
 
     transportConnected = transport->connect (settings.getHost(),
                                              settings.getCommandPort(),
@@ -455,6 +463,10 @@ void TouchLiveClient::subscribeAll()
         transport->send (juce::OSCMessage (juce::OSCAddressPattern (
             stateAddress (domainName, "subscribe"))));
     }
+
+    // Meter-Hochraten-Pfad (M2) — eigene Subscription neben den Domains
+    transport->send (juce::OSCMessage (juce::OSCAddressPattern (
+        juce::String (metersAddress) + "/subscribe")));
 }
 
 void TouchLiveClient::requestSnapshot (const juce::String& domainName, DomainSync& sync)
@@ -509,6 +521,12 @@ void TouchLiveClient::routeMessage (const juce::OSCMessage& message)
         return;
     }
 
+    if (address == metersAddress)
+    {
+        handleMeters (message);
+        return;
+    }
+
     if (! address.startsWith (statePrefix))
         return;
 
@@ -520,6 +538,28 @@ void TouchLiveClient::routeMessage (const juce::OSCMessage& message)
         handleStatePayload (domainName, true, message);
     else if (kind == "diff")
         handleStatePayload (domainName, false, message);
+}
+
+void TouchLiveClient::handleMeters (const juce::OSCMessage& message)
+{
+    // Flache Tripel [id:str, left:float, right:float] — roh in den Bus,
+    // KEIN Slew/keine Suppression (Feel-Regel 5.1: Meter sind ausgenommen)
+    const auto triplets = message.size() / 3;
+
+    for (int i = 0; i < triplets; ++i)
+    {
+        const auto& keyArg   = message[i * 3];
+        const auto& leftArg  = message[i * 3 + 1];
+        const auto& rightArg = message[i * 3 + 2];
+
+        if (! keyArg.isString() || ! leftArg.isFloat32() || ! rightArg.isFloat32())
+            return;   // fremdes/defektes Format — Frame verwerfen
+
+        meterBus.update (keyArg.getString(), leftArg.getFloat32(), rightArg.getFloat32());
+    }
+
+    meterBus.noteFrame();
+    ++stats.meterFrames;
 }
 
 void TouchLiveClient::handlePong()
@@ -621,6 +661,7 @@ void TouchLiveClient::applyPayload (const juce::String& domainName, bool isSnaps
         model.applySnapshot (domainName, payload, suppressionCheck);
         sync.lastAppliedSeq = seq;
         sync.snapshotRequested = false;
+        ++stats.snapshotsApplied;
         return;
     }
 
@@ -641,6 +682,7 @@ void TouchLiveClient::applyPayload (const juce::String& domainName, bool isSnaps
 
     model.applyDiff (domainName, payload, suppressionCheck);
     sync.lastAppliedSeq = seq;
+    ++stats.diffsApplied;
 }
 
 //==============================================================================

@@ -44,9 +44,9 @@ void TouchLivePage::PlaceholderView::paint (juce::Graphics& g)
 
 //==============================================================================
 TouchLivePage::TouchLivePage (LiveSetModel& modelToUse, TouchLiveClient& clientToUse,
-                              TouchLiveSettings& settingsToUse)
+                              TouchLiveMeterBus& meterBusToUse, TouchLiveSettings& settingsToUse)
     : gridView (clientToUse, modelToUse, settingsToUse),
-      mixerView (clientToUse, modelToUse, settingsToUse),
+      mixerView (clientToUse, modelToUse, meterBusToUse, settingsToUse),
       client (clientToUse),
       settings (settingsToUse),
       devicePlaceholder (push::Icon::browserAudioFx, "Device",
