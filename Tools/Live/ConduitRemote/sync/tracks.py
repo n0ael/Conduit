@@ -65,8 +65,11 @@ class TracksDomain(Domain):
 
     def _rebind_track_listeners(self):
         for track, name_cb, color_cb in self._track_bindings:
-            track.remove_name_listener(name_cb)
-            track.remove_color_listener(color_cb)
+            try:
+                track.remove_name_listener(name_cb)
+                track.remove_color_listener(color_cb)
+            except Exception:
+                pass   # Track existiert nicht mehr (Reorder/Delete/Teardown)
         self._track_bindings = []
         for track in self._all_tracks():
             name_cb = self._on_field_change
@@ -91,7 +94,10 @@ class TracksDomain(Domain):
         song.remove_tracks_listener(self._on_structure_change)
         song.remove_return_tracks_listener(self._on_structure_change)
         for track, name_cb, color_cb in self._track_bindings:
-            track.remove_name_listener(name_cb)
-            track.remove_color_listener(color_cb)
+            try:
+                track.remove_name_listener(name_cb)
+                track.remove_color_listener(color_cb)
+            except Exception:
+                pass   # LOM-Objekt beim Teardown schon tot (Log 09.07.2026)
         self._track_bindings = []
         self._structure_bound = False

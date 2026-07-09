@@ -2,8 +2,8 @@
 
 Covers the full M1a loop:
   client subscribes -> snapshot arrives on the response port ->
-  client moves a fader (fast path, stable-id addressing) ->
-  value is applied immediately (no tick needed) ->
+  client moves a fader (fast path via Live.Base.Timer-pump, stable-id
+  addressing) -> value is applied without a manager tick ->
   next manager tick emits a mixer diff containing exactly that change.
 """
 
@@ -22,6 +22,22 @@ from ConduitRemote.tests.stub_live import Song
 class FakeCInstance(object):
     def song(self):
         raise AssertionError("song is injected explicitly in tests")
+
+
+class FakeTimer(object):
+    """Live.Base.Timer-Ersatz: der Test feuert fire() von Hand."""
+
+    def __init__(self, callback):
+        self.callback = callback
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def fire(self):
+        self.callback()
 
 
 @pytest.fixture
@@ -46,7 +62,13 @@ def rig(monkeypatch):
 
     from ConduitRemote.manager import Manager
     song = Song(num_tracks=3, num_scenes=4)
-    manager = Manager(FakeCInstance(), song=song)
+
+    def timer_factory(callback):
+        timer = FakeTimer(callback)
+        timer.start()
+        return timer
+
+    manager = Manager(FakeCInstance(), song=song, timer_factory=timer_factory)
 
     client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -63,10 +85,11 @@ def send_cmd(client, listen_port, address, args=()):
 
 
 def recv_state(response_sock, want_address, manager):
-    """Tick-and-receive until want_address arrives (receiver thread needs a
-    moment to queue inbound packets before a tick can process them)."""
+    """Pump-tick-and-receive until want_address arrives (im Timer-Modus
+    liest NUR der Pump den Socket — wie in Live selbst)."""
     deadline = time.time() + 3.0
     while time.time() < deadline:
+        manager._fast_timer.fire()
         manager.tick()
         try:
             data, _ = response_sock.recvfrom(65536)
@@ -91,16 +114,17 @@ def test_full_m1a_loop(rig):
     track_id = stable_ids.get_id(song.tracks[1], stable_ids.TRACK_PREFIX)
     assert snapshot[track_id]["vol"] == pytest.approx(0.85)
 
-    # 2) fader move via FAST PATH with stable-id addressing:
-    #    applied by the receiver thread, no manager.tick() in between.
+    # 2) fader move via FAST PATH with stable-id addressing: applied by the
+    #    timer pump (Live.Base.Timer), no manager.tick() in between.
     send_cmd(client, listen_port, "/live/track/set/volume", [track_id, 0.42])
     deadline = time.time() + 1.0
     while time.time() < deadline:
+        manager._fast_timer.fire()
         if abs(song.tracks[1].mixer_device.volume.value - 0.42) < 1e-6:
             break
         time.sleep(0.005)
     assert song.tracks[1].mixer_device.volume.value == pytest.approx(0.42), \
-        "fast path did not apply the value from the receiver thread"
+        "fast path did not apply the value from the timer pump"
 
     # 3) next tick -> diff with exactly the changed track
     seq2, diff = recv_state(response_sock, "/remote/state/mixer/diff", manager)
@@ -125,6 +149,7 @@ def test_transport_and_session_loop(rig):
     deadline = time.time() + 2.0
     while time.time() < deadline and not (
             song.is_playing and song.scenes[2].__dict__.get("fired")):
+        manager._fast_timer.fire()
         manager.tick()
         time.sleep(0.01)
     assert song.is_playing is True
@@ -141,6 +166,7 @@ def test_ping_pong_and_heartbeat(rig):
     deadline = time.time() + 3.0
     got_pong = False
     while time.time() < deadline and not got_pong:
+        manager._fast_timer.fire()
         manager.tick()
         try:
             data, _ = response_sock.recvfrom(65536)

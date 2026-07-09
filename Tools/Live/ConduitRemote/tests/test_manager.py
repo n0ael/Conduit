@@ -66,10 +66,29 @@ def response_listener():
     sock.close()
 
 
-def make_manager(domain_factory):
+class FakeTimer(object):
+    """Live.Base.Timer-Ersatz: Tests feuern fire() von Hand."""
+
+    def __init__(self, callback):
+        self.callback = callback
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+
+    def fire(self):
+        self.callback()
+
+
+def make_manager(domain_factory, timer_factory=None):
     song = Song(num_tracks=2, num_scenes=4, num_sends=2)
     c_instance = FakeCInstance()
-    manager = Manager(c_instance, song=song, domain_factory=domain_factory)
+    manager = Manager(c_instance, song=song, domain_factory=domain_factory,
+                      timer_factory=timer_factory)
     return manager, song
 
 
@@ -98,6 +117,34 @@ def test_get_triggers_snapshot():
         assert poll_until(lambda: (manager.tick(), domain.snapshot_calls == 1)[1])
     finally:
         manager.disconnect()
+
+
+def test_fast_timer_pumps_whitelisted_writes_between_ticks():
+    """Fast-Path v2: der Timer-Pump wendet Volume-Writes an, OHNE dass
+    manager.tick() laeuft (frueher: 100-ms-Stufen, Feldtest 09.07.2026)."""
+    timers = []
+
+    def factory(callback):
+        timer = FakeTimer(callback)
+        timer.start()
+        timers.append(timer)
+        return timer
+
+    manager, song = make_manager(lambda song_, sender: {}, timer_factory=factory)
+    try:
+        assert len(timers) == 1
+        assert timers[0].started
+        assert manager.server.pump_active is True
+
+        send_to_manager("/live/track/set/volume", [0, 0.25])
+
+        applied = poll_until(
+            lambda: (timers[0].fire(),
+                     abs(song.tracks[0].mixer_device.volume.value - 0.25) < 1e-6)[1])
+        assert applied   # kein manager.tick() noetig
+    finally:
+        manager.disconnect()
+        assert timers[0].stopped
 
 
 def test_unsubscribe_reaches_dummy_domain():

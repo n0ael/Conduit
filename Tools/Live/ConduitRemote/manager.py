@@ -21,6 +21,30 @@ logger = logging.getLogger(__name__)
 
 _MAX_DOMAIN_FAILURES = 5
 
+def _default_timer_factory(callback):
+    """Live.Base.Timer: C++-seitiger Timer, feuert Python-Callbacks auf dem
+    MAIN Thread (~FAST_TIMER_INTERVAL_MS) - der einzige Weg zu schnellerer
+    Anwendung als der 100-ms-Tick (Threads sind GIL-gefangen, s. config).
+    None bei jeder Abweichung -> Tick-Raten-Fallback."""
+    try:
+        import Live
+    except ImportError:
+        # Ausserhalb Lives (pytest) erwartbar — leiser Tick-Raten-Fallback
+        logger.info("Live module unavailable - fast path falls back to tick rate")
+        return None
+
+    try:
+        timer = Live.Base.Timer(callback=callback,
+                                interval=config.FAST_TIMER_INTERVAL_MS,
+                                repeat=True)
+        timer.start()
+        return timer
+    except Exception:
+        logger.exception(
+            "Live.Base.Timer unavailable - fast path falls back to tick rate")
+        return None
+
+
 try:
     from ableton.v2.control_surface import ControlSurface
 except ImportError:
@@ -63,7 +87,8 @@ def _default_domain_factory(song, sender):
 
 
 class Manager(ControlSurface):
-    def __init__(self, c_instance, song=None, domain_factory=None):
+    def __init__(self, c_instance, song=None, domain_factory=None,
+                 timer_factory=None):
         ControlSurface.__init__(self, c_instance)
         self._c_instance = c_instance
         self._song = song if song is not None else c_instance.song()
@@ -73,6 +98,15 @@ class Manager(ControlSurface):
         self.server = OscServer(
             config.BIND_HOST, config.LISTEN_PORT, config.RESPONSE_PORT,
             fast_apply=config.FAST_APPLY)
+
+        # Hochraten-Pump via Live.Base.Timer (Main Thread) - ohne Timer
+        # bleibt pump_active False und process() liest den Socket im Tick
+        self._fast_timer = None
+        if config.FAST_APPLY:
+            factory = (timer_factory if timer_factory is not None
+                       else _default_timer_factory)
+            self._fast_timer = factory(self._pump_fast)
+            self.server.pump_active = self._fast_timer is not None
 
         # Real delivery layer: JSON chunking + per-address dedupe.
         # (ServerSenderAdapter above is kept as a minimal fallback/reference.)
@@ -165,6 +199,14 @@ class Manager(ControlSurface):
             domain.on_unsubscribe()
         return _handler
 
+    def _pump_fast(self):
+        """Live.Base.Timer-Callback [Main Thread] - darf NIE in den Host
+        werfen."""
+        try:
+            self.server.pump()
+        except Exception:
+            logger.exception("fast pump failed")
+
     def _on_ping(self, address, args):
         self.heartbeat.note_ping(self._tick_count)
         self.server.send("/remote/pong", [config.PROTOCOL_VERSION])
@@ -221,6 +263,14 @@ class Manager(ControlSurface):
         self.schedule_message(config.TICK_INTERVAL, self.tick)
 
     def disconnect(self):
+        if self._fast_timer is not None:
+            try:
+                self._fast_timer.stop()
+            except Exception:
+                logger.exception("fast timer stop failed")
+            self._fast_timer = None
+            self.server.pump_active = False
+
         for domain in list(self.domains.values()):
             try:
                 domain.on_unsubscribe()

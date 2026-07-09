@@ -5,12 +5,17 @@ Mixer, Session (Clip-Grid) mit Push-Sync und Fast-Path.
 
 ## Warum nicht einfach AbletonOSC?
 
-Alle verbreiteten OSC-Scripts (AbletonOSC, touchAble, …) lesen ihren UDP-Socket
-nur im ~100-ms-Scheduler-Tick von Live — eingehende Fader-Werte werden mit
-**10 Hz** angewendet, daher das bekannte Ruckeln. ConduitRemote hat einen
-**Fast-Path**: ein eigener Empfangs-Thread wendet reine Wert-Schreibungen
-(Volume/Pan/Send) **sofort** an; alles Strukturelle bleibt sicher im
-Main-Thread-Tick. Abschaltbar über `FAST_APPLY = False` in `config.py`.
+Alle verbreiteten OSC-Scripts (AbletonOSC, touchAble, Grip …) wenden
+eingehende Fader-Werte effektiv nur im ~100-ms-Scheduler-Tick von Live an
+(**10 Hz**, daher das bekannte Ruckeln) — auch die mit eigenem
+Empfangs-Thread: Lives embedded Python schedult Background-Threads
+praktisch nur im Tick (GIL bleibt beim Host; per Automations-Aufnahme
+gemessen, 111-ms-Stufen, 09.07.2026). ConduitRemote hat deshalb einen
+**Fast-Path über `Live.Base.Timer`**: ein C++-seitiger Timer feuert
+`OscServer.pump()` ~alle 10 ms auf dem **Main Thread** (LOM-sicher) —
+reine Wert-Schreibungen (Volume/Pan/Send) werden sofort angewendet, alles
+Strukturelle bleibt im Tick. Abschaltbar über `FAST_APPLY = False`; ohne
+verfügbaren Timer fällt alles automatisch auf Tick-Rate zurück.
 
 ## Installation
 

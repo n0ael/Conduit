@@ -78,8 +78,11 @@ class SessionDomain(Domain):
 
     def _unbind_scenes(self):
         for scene, name_cb, color_cb in self._scene_bindings:
-            scene.remove_name_listener(name_cb)
-            scene.remove_color_listener(color_cb)
+            try:
+                scene.remove_name_listener(name_cb)
+                scene.remove_color_listener(color_cb)
+            except Exception:
+                pass   # Scene existiert nicht mehr (Delete/Teardown)
         self._scene_bindings = []
 
     def _bind_scenes(self):
@@ -158,8 +161,9 @@ class _SlotBinding(object):
         try:
             self.slot.add_playing_status_listener(self.on_change)
             self._playing_status_bound = True
-        except AttributeError:
-            # some Live versions/slot types don't expose this listener;
+        except Exception:
+            # some Live versions/slot types don't expose this listener (or
+            # reject the signature, Live 12.4b: Boost ArgumentError);
             # name/color/is_playing/is_triggered/is_recording listeners on
             # the clip itself are sufficient without it.
             self._playing_status_bound = False
@@ -167,12 +171,15 @@ class _SlotBinding(object):
 
     def unbind(self):
         if self._has_clip_cb is not None:
-            self.slot.remove_has_clip_listener(self._has_clip_cb)
+            try:
+                self.slot.remove_has_clip_listener(self._has_clip_cb)
+            except Exception:
+                pass   # Slot existiert nicht mehr (Delete/Teardown)
             self._has_clip_cb = None
         if self._playing_status_bound:
             try:
                 self.slot.remove_playing_status_listener(self.on_change)
-            except AttributeError:
+            except Exception:
                 pass
             self._playing_status_bound = False
         self._unbind_clip()
@@ -199,6 +206,9 @@ class _SlotBinding(object):
     def _unbind_clip(self):
         if self._clip is not None:
             for prop, cb in self._clip_cbs:
-                getattr(self._clip, "remove_%s_listener" % prop)(cb)
+                try:
+                    getattr(self._clip, "remove_%s_listener" % prop)(cb)
+                except Exception:
+                    pass   # Clip existiert nicht mehr
         self._clip = None
         self._clip_cbs = []

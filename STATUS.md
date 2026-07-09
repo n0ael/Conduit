@@ -27,8 +27,18 @@
   Gefixt via `_live_ptr`-Identität + Fähigkeits-Guards; Test-Stub stellt
   die Fallen jetzt nach (docs/TouchLive.md §10d). pytest 120 grün,
   Conduit-Suite 596 Cases grün.
-- **Nächster Schritt:** Feldtest-Runde 2 (Live neu starten!), dann
-  Feel-Abnahme (getStats-Raten) + LiveFaderScale-Kalibrierung.
+- **Feldtest-Runde 2 + Fast-Path v2 (09.07. spät):** Bidirektionalität
+  bestätigt (IP-LEARN nötig). Stufigkeit blieb — User-Messung: 111-ms-
+  Stufen in aufgenommener Volume-Rampe = Lives Scheduler-Tick. Befund:
+  Lives embedded Python schedult Background-Threads nur im Tick (GIL) —
+  RX-Threads bringen NICHTS (deshalb sind touchAble/Grip stufig).
+  Fast-Path v2: `Live.Base.Timer` (~10 ms, Main Thread, LOM-sicher)
+  treibt `OscServer.pump()`; Tick-Raten-Fallback ohne Timer. Zweiter
+  Log-Befund: add_scenes_listener wirft in 12.4.5b3 → Session-Domain tot
+  → generischer Poll-Fallback in Domain.attach() + Teardown-Guards.
+  pytest 124 grün (socketfrei); docs/TouchLive.md §10e.
+- **Nächster Schritt:** Feldtest-Runde 3 (Live neu starten!) — Fader-Feel
+  gegen Roto-Messlatte, dann LiveFaderScale-Kalibrierung.
 
 ## Meilenstein (09.07.2026) — TouchLive M1c
 

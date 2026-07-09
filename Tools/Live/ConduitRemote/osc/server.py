@@ -1,27 +1,28 @@
-"""UDP OSC server with an optional fast-apply receiver thread.
+"""UDP OSC server, entirely main-thread driven.
 
-Two dispatch paths, mirroring config.FAST_APPLY (see config.py docstring
-for the full rationale):
+FELDTEST-BEFUND 09.07.2026 (Log + 111-ms-Stufenmessung): Lives embedded
+Python schedult Background-Threads praktisch nur im ~100-ms-Scheduler-Tick
+(GIL bleibt dazwischen beim Host) - ein eigener Empfangs-Thread liest also
+alle aufgestauten Datagramme gebuendelt EINMAL pro Tick und bringt exakt
+nichts (das ist der Grund, warum touchAble/Grip-Fader stufig sind). Der
+fruehere RX-Thread ist deshalb ersatzlos raus.
 
-  - fast handlers: a small whitelist of pure-value-write addresses that are
-    safe to apply directly from the receiver thread so faders feel
-    immediate instead of stepping at Live's ~100 ms scheduler tick.
-  - normal handlers: everything else is queued and drained from process(),
-    which is called from the main-thread tick.
+Stattdessen zwei main-thread Eintrittspunkte:
 
-When fast_apply is False no thread is started at all; process() itself
-does the non-blocking socket read and every message (including addresses
-that would otherwise be fast-whitelisted) is queued and dispatched through
-the normal handler registry - the "everything is queued" classic-script
-fallback.
+  - pump():    Hochraten-Drain, vom Manager ueber einen Live.Base.Timer
+               (~10 ms) gerufen. Whitelisted value-writes werden SOFORT
+               angewendet (Main Thread => LOM-sicher, keine Thread-Frage
+               mehr); alles andere landet in der Queue fuer process().
+  - process(): der klassische ~100-ms-Tick. Drained die Queue; liest den
+               Socket nur selbst, wenn kein Timer pumpt (pump_active False,
+               d. h. Live.Base.Timer nicht verfuegbar) - dann laufen auch
+               die Whitelist-Adressen in Tick-Rate (Fallback).
 """
 
 import collections
 import errno
 import logging
-import select
 import socket
-import threading
 
 from .. import config
 from . import codec
@@ -72,6 +73,10 @@ class OscServer(object):
         self._response_port = response_port
         self._fast_apply = fast_apply
 
+        # Manager setzt True, sobald der Live.Base.Timer pump() treibt -
+        # process() liest den Socket dann nicht mehr selbst.
+        self.pump_active = False
+
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind((bind_host, listen_port))
@@ -83,16 +88,7 @@ class OscServer(object):
         self._unknown_logged = set()
 
         self._client_ip = None
-        self._client_lock = threading.Lock()
-
         self._closed = False
-        self._stop_event = threading.Event()
-        self._thread = None
-        if self._fast_apply:
-            self._thread = threading.Thread(
-                target=self._recv_loop, name="ConduitRemote-OSC-RX")
-            self._thread.daemon = True
-            self._thread.start()
 
     # -- introspection ------------------------------------------------------
 
@@ -102,15 +98,12 @@ class OscServer(object):
     @property
     def client_addr(self):
         """(ip, response_port) of the most recent inbound sender, or None."""
-        with self._client_lock:
-            ip = self._client_ip
-        if ip is None:
+        if self._client_ip is None:
             return None
-        return (ip, self._response_port)
+        return (self._client_ip, self._response_port)
 
     def _note_client(self, addr):
-        with self._client_lock:
-            self._client_ip = addr[0]
+        self._client_ip = addr[0]
 
     # -- registration ---------------------------------------------------------
 
@@ -122,17 +115,10 @@ class OscServer(object):
 
     # -- receiving --------------------------------------------------------------
 
-    def _recv_loop(self):
-        while not self._stop_event.is_set():
-            try:
-                ready, _w, _x = select.select([self._sock], [], [], 0.05)
-            except OSError:
-                if self._stop_event.is_set():
-                    break
-                continue
-            if not ready:
-                continue
-            self._drain_available(dispatch_fast=True)
+    def pump(self):
+        """Hochraten-Drain [Main Thread, Live.Base.Timer]: Whitelist sofort
+        anwenden, Rest queuen. Muss billig sein - laeuft ~100x/s."""
+        self._drain_available(dispatch_fast=self._fast_apply)
 
     def _drain_available(self, dispatch_fast):
         """Read every datagram currently available without blocking."""
@@ -167,9 +153,10 @@ class OscServer(object):
                 self._queue.append((address, args, addr))
 
     def process(self):
-        """Main-thread tick: read the socket (non-fast mode) and drain queue."""
-        if not self._fast_apply:
-            self._drain_available(dispatch_fast=False)
+        """Main-thread tick: read the socket (unless pump() does) and drain
+        the queue."""
+        if not self.pump_active:
+            self._drain_available(dispatch_fast=self._fast_apply)
         while True:
             try:
                 address, args, _sender_addr = self._queue.popleft()
@@ -235,9 +222,6 @@ class OscServer(object):
         if self._closed:
             return
         self._closed = True
-        self._stop_event.set()
-        if self._thread is not None and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
         try:
             self._sock.close()
         except OSError:

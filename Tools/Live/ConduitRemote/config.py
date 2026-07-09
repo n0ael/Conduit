@@ -11,15 +11,18 @@ RESPONSE_PORT = 9011        # replies/pushes go to sender_ip:RESPONSE_PORT
 BIND_HOST = "0.0.0.0"       # wired-LAN setup: Conduit runs on another machine
 
 # --- Fast path ---------------------------------------------------------------
-# When True, a dedicated receiver thread applies whitelisted pure-value
-# writes (track volume/pan/send, device parameter value) IMMEDIATELY on
-# arrival instead of waiting for Live's ~100 ms scheduler tick.  This is the
-# single deliberate deviation from the AbletonOSC pattern and the reason
-# faders feel direct instead of 10 Hz-steppy.  Technically the LOM is
-# documented as main-thread-only; value-only writes are field-proven but if
-# anything misbehaves, set this to False (everything then flows through the
-# main-thread queue and still works, just coarser).
+# When True, whitelisted pure-value writes (track volume/pan/send) are
+# applied at high rate.  HOW changed on 2026-07-09 (field test): a receiver
+# THREAD is useless inside Live - its embedded Python only schedules
+# background threads at the ~100 ms tick (GIL stays with the host), which
+# is exactly why touchAble/Grip faders step at ~10 Hz.  Instead the manager
+# drives OscServer.pump() from a Live.Base.Timer (C++-side timer firing
+# Python callbacks on the MAIN thread, AbletonJS/ClyphX-Pro pattern): the
+# socket is drained ~100x/s and whitelisted writes apply immediately and
+# LOM-safe.  If Live.Base.Timer is unavailable, everything falls back to
+# the ~100 ms tick (still correct, just coarse).
 FAST_APPLY = True
+FAST_TIMER_INTERVAL_MS = 10   # pump()-Kadenz; Anwendung limitiert Conduits 60-Hz-Thinning
 
 # --- Rates & limits ----------------------------------------------------------
 TICK_INTERVAL = 1           # Live scheduler ticks between manager ticks (~100 ms)

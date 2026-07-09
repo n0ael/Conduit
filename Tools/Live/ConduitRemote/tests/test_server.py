@@ -39,9 +39,9 @@ def make_server(response_port, fast_apply=True):
     return server
 
 
-# -- fast path ----------------------------------------------------------------
+# -- fast path (pump-Modell, 09.07.2026: kein RX-Thread mehr — GIL) -----------
 
-def test_fast_whitelisted_address_applied_without_process():
+def test_pump_applies_fast_whitelisted_address_immediately():
     server = make_server(response_port=1, fast_apply=True)
     try:
         calls = []
@@ -52,15 +52,17 @@ def test_fast_whitelisted_address_applied_without_process():
         data = codec.encode_message("/live/track/set/volume", [0, 0.5])
         client.sendto(data, server.getsockname())
 
-        assert poll_until(lambda: len(calls) == 1, timeout=0.5)
+        assert poll_until(lambda: (server.pump(), len(calls) == 1)[1],
+                          timeout=0.5)
         assert calls[0] == [0, 0.5]
         client.close()
     finally:
         server.shutdown()
 
 
-def test_non_whitelisted_address_waits_for_process():
+def test_pump_queues_non_whitelisted_for_process():
     server = make_server(response_port=1, fast_apply=True)
+    server.pump_active = True   # Timer-Modus: process() liest den Socket nicht
     try:
         calls = []
         server.add_handler("/live/track/set/mute",
@@ -70,14 +72,33 @@ def test_non_whitelisted_address_waits_for_process():
         data = codec.encode_message("/live/track/set/mute", [0, 1])
         client.sendto(data, server.getsockname())
 
-        # give the RX thread time to pick it up into the queue - it must
-        # NOT be dispatched without an explicit process() call.
-        time.sleep(0.2)
-        assert calls == []
+        assert poll_until(lambda: (server.pump(), len(server._queue) == 1)[1],
+                          timeout=0.5)
+        assert calls == []   # gequeued, nicht dispatcht
 
         server.process()
-        assert poll_until(lambda: len(calls) == 1, timeout=0.5)
-        assert calls[0] == [0, 1]
+        assert calls == [[0, 1]]
+        client.close()
+    finally:
+        server.shutdown()
+
+
+def test_process_reads_socket_itself_when_no_pump_runs():
+    # Fallback ohne Live.Base.Timer: pump_active bleibt False, process()
+    # drained selbst — Whitelist-Adressen laufen dann in Tick-Rate
+    server = make_server(response_port=1, fast_apply=True)
+    try:
+        fast_calls = []
+        server.set_fast_handler("/live/track/set/volume",
+                                 lambda addr, args: fast_calls.append(args))
+
+        client = make_client_socket()
+        data = codec.encode_message("/live/track/set/volume", [0, 0.25])
+        client.sendto(data, server.getsockname())
+
+        assert poll_until(lambda: (server.process(), len(fast_calls) == 1)[1],
+                          timeout=0.5)
+        assert fast_calls[0] == [0, 0.25]
         client.close()
     finally:
         server.shutdown()
@@ -101,8 +122,6 @@ def test_unknown_address_does_not_crash_process():
 def test_fast_apply_false_only_works_through_process():
     server = make_server(response_port=1, fast_apply=False)
     try:
-        assert server._thread is None
-
         calls = []
         # Even a "fast-whitelisted-style" address only reaches the normal
         # registry in this mode - fast handlers are never consulted.
@@ -135,7 +154,9 @@ def test_client_addr_learned_from_inbound_packet():
         data = codec.encode_message("/remote/ping", [])
         client.sendto(data, server.getsockname())
 
-        assert poll_until(lambda: server.client_addr is not None, timeout=0.5)
+        assert poll_until(lambda: (server.pump(),
+                                   server.client_addr is not None)[1],
+                          timeout=0.5)
         ip, port = server.client_addr
         assert ip == HOST
         assert port == 1
@@ -153,7 +174,9 @@ def test_send_reaches_response_listener(response_listener):
         client = make_client_socket()
         client.sendto(codec.encode_message("/remote/ping", []),
                       server.getsockname())
-        assert poll_until(lambda: server.client_addr is not None, timeout=0.5)
+        assert poll_until(lambda: (server.pump(),
+                                   server.client_addr is not None)[1],
+                          timeout=0.5)
 
         ok = server.send("/remote/pong", [1])
         assert ok is True
@@ -183,7 +206,9 @@ def test_send_bundle_reaches_response_listener(response_listener):
         client = make_client_socket()
         client.sendto(codec.encode_message("/remote/ping", []),
                       server.getsockname())
-        assert poll_until(lambda: server.client_addr is not None, timeout=0.5)
+        assert poll_until(lambda: (server.pump(),
+                                   server.client_addr is not None)[1],
+                          timeout=0.5)
 
         ok = server.send_bundle([
             ("/remote/state/a/diff", [1, "{}"]),
@@ -248,10 +273,9 @@ def test_shutdown_idempotent_and_releases_port():
     probe.close()
 
 
-def test_shutdown_stops_thread():
+def test_pump_after_shutdown_is_harmless():
+    # Live.Base.Timer kann nach disconnect noch einmal feuern — pump()
+    # auf geschlossenem Socket darf nicht crashen
     server = make_server(response_port=1, fast_apply=True)
-    thread = server._thread
-    assert thread is not None
-    assert thread.is_alive()
     server.shutdown()
-    assert poll_until(lambda: not thread.is_alive(), timeout=1.0)
+    server.pump()   # must not raise

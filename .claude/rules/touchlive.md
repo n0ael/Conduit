@@ -80,3 +80,10 @@ zurückbauen):
   Fähigkeit = Key weglassen.
 - Der Test-Stub simuliert diese Fallen (stub_live.Track wirft) —
   Stub-Realismus beim Erweitern erhalten.
+- **NIE Background-Threads im Remote Script** (Feldtest-Messung: Lives
+  embedded Python schedult sie nur im ~100-ms-Tick, GIL — 111-ms-Stufen).
+  Hochrate NUR über `Live.Base.Timer` → `OscServer.pump()` [Main Thread];
+  ohne Timer automatischer Tick-Raten-Fallback (`pump_active`).
+- Listener-Binden kann pro Live-Version werfen (12.4b:
+  add_scenes_listener) — `Domain.attach()` hat einen generischen
+  Poll-Fallback; beim Erweitern neuer Domains NICHT umgehen.

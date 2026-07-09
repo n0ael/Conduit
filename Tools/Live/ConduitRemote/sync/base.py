@@ -22,6 +22,9 @@ mark the domain dirty (cheap change hints; collect() stays the truth).
 """
 
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Domain(object):
@@ -36,18 +39,35 @@ class Domain(object):
         self._last = {}
         self._dirty = True   # first tick after subscribe sends everything
         self._attached = False
+        self._polling = False   # Fallback: ohne Listener pro Tick collecten
 
     # -- lifecycle --------------------------------------------------------
 
     def attach(self):
-        if not self._attached:
+        """Listener binden — LOM-sicher (Feldtest 09.07.2026, Live 12.4b:
+        add_scenes_listener warf ArgumentError und riss die Session-Domain
+        beim Subscribe): scheitert on_attach, laeuft die Domain im
+        Poll-Fallback weiter (collect+diff pro Tick — compute_diff und die
+        Sender-Dedupe halten das billig)."""
+        if self._attached:
+            return
+        try:
             self.on_attach()
-            self._attached = True
+        except Exception:
+            logger.exception(
+                "domain %s: on_attach failed - polling fallback", self.NAME)
+            self._polling = True
+        self._attached = True
 
     def detach(self):
         if self._attached:
-            self.on_detach()
+            try:
+                self.on_detach()
+            except Exception:
+                # Beim Teardown sind LOM-Objekte oft schon tot (Log 09.07.)
+                logger.exception("domain %s: on_detach failed", self.NAME)
             self._attached = False
+            self._polling = False
 
     def on_attach(self):
         pass
@@ -83,6 +103,9 @@ class Domain(object):
             force=True)
 
     def on_tick(self, tick_index):
+        if self._polling:
+            self._dirty = True   # keine Listener — jede Runde nachschauen
+
         if not self.subscribed or not self._dirty:
             return
         state = self.collect()

@@ -419,6 +419,33 @@ diese Fallen sind jetzt dauerhaft testabgedeckt):
 Erwartung nach den Fixes: Track-Volume bidirektional, Mixer-Rückrichtung
 für alle Züge, Meter sichtbar, Ruckeln weg (kein Key-Churn mehr). Feel
 danach neu bewerten (getStats-Raten), dann LiveFaderScale kalibrieren.
+→ Runde 2 bestätigte Bidirektionalität (nach IP-LEARN); Stufigkeit blieb
+→ §10e.
+
+## 10e. Feldtest-Runde 2 (09.07.2026 abends) — GIL-Befund & Fast-Path v2
+
+- **Messung (User):** Volume-Rampe als Audio aufgenommen (Operator Pre FX
+  vs. Post Mixer) — die Hüllkurve steigt in **111-ms-Stufen** = Lives
+  Scheduler-Tick. Log zeigt KEINE Fast-Handler-Fehler → der Empfangs-
+  Thread lief, wurde aber von Lives embedded Python nur im ~100-ms-Tick
+  gescheduled (GIL bleibt beim Host). **Ein RX-Thread bringt in Live
+  NICHTS** — exakt deshalb sind touchAble/Grip stufig; der PC des Users
+  war unschuldig.
+- **Fast-Path v2:** RX-Thread ersatzlos raus; `OscServer.pump()` wird von
+  einem **`Live.Base.Timer`** (~10 ms, C++-seitig, Callbacks auf dem MAIN
+  Thread — AbletonJS/ClyphX-Pro-Muster) getrieben: Whitelist-Writes werden
+  sofort UND LOM-sicher angewendet, Rest in die Queue für den Tick. Ohne
+  Timer (ältere Live?/Tests) → `pump_active` False, process() liest selbst
+  (Tick-Raten-Fallback). Test-Seams: `timer_factory`-Injection (Manager),
+  FakeTimer.fire().
+- **Zweiter Log-Befund:** `add_scenes_listener` wirft in Live 12.4.5b3
+  (Boost ArgumentError) → Session-Domain starb beim Subscribe (Grid leer).
+  Generischer **Poll-Fallback in Domain.attach()**: wirft on_attach, läuft
+  die Domain listener-los weiter (collect+diff pro Tick — compute_diff +
+  Sender-Dedupe halten das billig). Dazu Teardown-/Rebind-Guards überall
+  (tote LOM-Objekte werfen beim remove_*_listener).
+- Meter-Kadenz bleibt vorerst am Tick (~10 Hz); falls nötig ist der
+  Timer-Pfad der natürliche Träger für 30-Hz-Meter (M2-Feinschliff).
 
 ## 11. Offen
 
