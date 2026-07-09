@@ -94,5 +94,10 @@ zurückbauen):
   Hochrate NUR über `Live.Base.Timer` → `OscServer.pump()` [Main Thread];
   ohne Timer automatischer Tick-Raten-Fallback (`pump_active`).
 - Listener-Binden kann pro Live-Version werfen (12.4b:
-  add_scenes_listener) — `Domain.attach()` hat einen generischen
-  Poll-Fallback; beim Erweitern neuer Domains NICHT umgehen.
+  add_scenes_listener, „Observer already connected" bei Clip-Listenern) —
+  `Domain.attach()` hat einen generischen Poll-Fallback; beim Erweitern
+  neuer Domains NICHT umgehen, Listener-Binds einzeln try/except.
+- Compressor-`gain_reduction` existiert in 12.4b NICHT im Python-LOM
+  (dir()-bewiesen, docs/TouchLive.md §10g) — Push nutzt den proprietären
+  Display-Kanal. GR-Code bleibt (greift, falls später verfügbar);
+  echter Weg wäre ein M4L-GR-Tap-Device.

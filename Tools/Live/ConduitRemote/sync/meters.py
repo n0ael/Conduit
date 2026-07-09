@@ -27,8 +27,12 @@ Subscription via /remote/meters/subscribe|unsubscribe, torn down by the
 heartbeat timeout like the domains (manager wiring).
 """
 
+import logging
+
 from . import stable_ids
 from .. import config
+
+logger = logging.getLogger(__name__)
 
 _SILENCE_EPS = 1e-4
 
@@ -49,9 +53,38 @@ class MeterStream(object):
     def on_subscribe(self):
         self.subscribed = True
         self._last_was_silent = False   # erster Frame geht immer raus
+        self._log_gr_diagnostics()
 
     def on_unsubscribe(self):
         self.subscribed = False
+
+    def _log_gr_diagnostics(self):
+        """Einmal-Diagnose ins Live-Log (Feldtest 10.07.2026): welche
+        Devices haben gain_reduction — und wenn keins: wie heissen die
+        Kandidaten-Attribute des ersten Compressors wirklich?"""
+        try:
+            total = 0
+            capable = 0
+            sample = None
+            for tracks, _prefix in ((self.song.tracks, None),
+                                    (self.song.return_tracks, None),
+                                    ((self.song.master_track,), None)):
+                for track in tracks:
+                    for device in _devices_of(track):
+                        total += 1
+                        if _gain_reduction(device) is not None:
+                            capable += 1
+                        cls = str(getattr(device, "class_name", ""))
+                        if sample is None and "ompressor" in cls:
+                            sample = device
+            logger.info("meters: gain_reduction on %d/%d devices", capable, total)
+            if capable == 0 and sample is not None:
+                names = [n for n in dir(sample)
+                         if "gain" in n.lower() or "reduc" in n.lower()]
+                logger.info("meters: %r candidate attrs: %r",
+                            str(getattr(sample, "class_name", "?")), names)
+        except Exception:
+            logger.exception("meters: gr diagnostics failed")
 
     def on_tick(self, tick_index):
         if not self.subscribed:
@@ -120,14 +153,20 @@ def _devices_of(track):
 
 def _gain_reduction(device):
     """LOM-sicher: nur Compressor/Glue/Limiter exponieren gain_reduction —
-    fehlt die Property (oder wirft sie), liefert das Device kein Tripel."""
+    fehlt die Property (oder wirft sie), liefert das Device kein Tripel.
+    Live kann die GR als nackte Zahl ODER als Parameter-Objekt (.value)
+    exponieren — beide Formen lesen."""
     try:
         value = device.gain_reduction
     except Exception:
         return None
     if value is None:
         return None
-    try:
-        return max(0.0, min(1.0, float(value)))
-    except Exception:
-        return None
+    for candidate in (value, getattr(value, "value", None)):
+        if candidate is None:
+            continue
+        try:
+            return max(0.0, min(1.0, float(candidate)))
+        except Exception:
+            continue
+    return None

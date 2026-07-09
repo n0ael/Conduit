@@ -198,8 +198,13 @@ class _SlotBinding(object):
         cbs = []
         for prop in _CLIP_PROPS:
             cb = self.on_change
-            getattr(clip, "add_%s_listener" % prop)(cb)
-            cbs.append((prop, cb))
+            try:
+                getattr(clip, "add_%s_listener" % prop)(cb)
+                cbs.append((prop, cb))
+            except Exception:
+                # Live 12.4b wirft u. a. "Observer already connected"
+                # (Log-Befund 10.07.2026) — Listener ist dann ohnehin dran
+                pass
         self._clip = clip
         self._clip_cbs = cbs
 

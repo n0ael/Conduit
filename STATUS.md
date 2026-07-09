@@ -24,8 +24,17 @@
   User-Wunsch: **Gain-Reduction-Meter** (Push-Vorbild) — Dynamics-Devices
   senden `gain_reduction` als dv:-Tripel im Meter-Frame, die DeviceView
   zeigt die GR-Spalte rechts der Bank (füllt von oben).
-- **Nächster Schritt:** GR-Feldtest (Wertebereich 12.4b), dann M4 Browser
-  oder M5 bespoke-UIs (EQ-Eight-Kurve zuerst).
+- **GR-Feldtest (10.07., automatisierter Smoke):** DEVICE-Tab komplett
+  verifiziert (Chips, Bänke 1–3, Slider-Fernsteuerung Threshold
+  0.34→0.09, MIXER-Meter flüssig). Befund: Live 12.4.5b3 exponiert die
+  Compressor-GR NICHT im Python-LOM (Einmal-Diagnose + dir()-Scan; Push
+  nutzt den proprietären Display-Kanal). GR-Code bleibt scharf für
+  spätere Live-Versionen; echter Weg = M4L-GR-Tap (docs §10g). Dazu
+  gefixt: „Observer already connected" beim Clip-Listener-Bind;
+  Reload-Falle dokumentiert (Control-Surface-Toggle re-importiert NICHT —
+  Script-Änderungen brauchen Live-Neustart).
+- **Nächster Schritt:** M4 Browser oder M5 bespoke-UIs (EQ-Eight-Kurve
+  zuerst); optional Mini-M4L „GR-Tap" für echte GR-Anzeige.
 
 ## Meilenstein (09.07.2026) — TouchLive M2 (Meter-Pfad)
 

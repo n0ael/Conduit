@@ -492,14 +492,22 @@ Beidseitig: `sync/devices.py` + `handlers/device.py` (Script) und
   Laufzeit-Zustand (fällt bei verschwundener Kette aufs erste Gerät des
   ersten bestückten Tracks zurück), Suppression-Keys:
   `devices/parvals:{dvid}` (Slider) bzw. `devices/dev:{dvid}/is_active`.
-- **Gain Reduction (User-Wunsch, Push-Vorbild):** Devices mit LOM-Property
-  `gain_reduction` (Compressor/Glue/Limiter — genau die Quelle des
-  Push-GR-Meters) hängen ihr eigenes Tripel `[dvid, gr, gr]` an den
-  `/remote/meters`-Frame (defensiver Read, zählt gegen die Stille-Dedupe).
-  Die DeviceView pollt den MeterBus @ 30 Hz und zeigt eine GR-Spalte
-  rechts der Bank (Reduktion füllt von OBEN, Push-Konvention), sobald das
-  gewählte Device je einen Wert geliefert hat. Wertebereich in 12.4b im
-  Feldtest verifizieren (geclamped 0..1 gesendet).
+- **Gain Reduction (User-Wunsch, Push-Vorbild):** Devices mit
+  `gain_reduction` hängen ihr Tripel `[dvid, gr, gr]` an den
+  `/remote/meters`-Frame; die DeviceView zeigt die GR-Spalte rechts der
+  Bank (füllt von OBEN), sobald je ein Wert kam. **FELDTEST-BEFUND
+  10.07.2026: In Live 12.4.5b3 exponiert das Python-LOM die Compressor-GR
+  NICHT** — per Einmal-Diagnose bewiesen (`gain_reduction on 0/4 devices`,
+  dir()-Scan des Compressor2 ohne gain/reduc-Attribute; auch kein
+  versteckter DeviceParameter, alle 3 Bänke geprüft). Push bezieht seine
+  GR-Kurve über den proprietären Display-Datenkanal der Push-Integration,
+  nicht über Python. Der Sende-/Anzeige-Code bleibt drin (kostenlos,
+  greift automatisch, falls Ableton die Property später freigibt oder ein
+  Device sie liefert). **Gangbarer Weg, wenn gewünscht:** Mini-M4L-Device
+  („GR-Tap", Envelope-Differenz Pre/Post) hinter dem Compressor — dessen
+  Parameter reisen automatisch durch die devices-Domain; passt zur
+  M4L-Announce-Schiene (7.4). Die Einmal-Diagnose bleibt im MeterStream
+  (loggt pro Subscribe eine INFO-Zeile ins Live-Log).
 - **Offen für den Feldtest:** LOM-Fallen der Device-Parameter in 12.4b
   (alle Zugriffe sind geguarded + Poll-Fallback), Payload-Größe bei sehr
   großen Racks (Chunking vorhanden), Anzeige-Einheiten (parmeta trägt
