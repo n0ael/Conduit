@@ -3,7 +3,33 @@
 > Letzte Aktualisierung: 2026-07-09 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (09.07.2026)
+## Aktueller Meilenstein (09.07.2026) — TouchLive M1b
+
+**TouchLive (Ableton-Live-Remote): Conduit-Client + LiveSetModel + Settings
+— noch ohne UI (M1c):**
+
+- Neues Subsystem `Source/TouchLive/` + Dossier docs/TouchLive.md + Rule
+  `.claude/rules/touchlive.md`; Gegenseite (Remote Script M1a,
+  120 pytest-Tests) liegt unter `Tools/Live/ConduitRemote/`.
+- `TouchLiveClient`: eigener OSC-Kanal (Command 9010 / Listen 9011,
+  getrennt von OscController/OscSendService), Domain-Sync
+  transport/tracks/mixer/session mit Seq-Lücken-Heilung (`/get`,
+  gedrosselt) und Chunk-Reassembly; Heartbeat 2 s, 3 verpasste Pongs →
+  disconnected, Ping-Kadenz = Reconnect-Backoff, jeder Connect subscribed
+  neu. Echo-Suppression (Key Domain+Stable-ID+Feld, 250 ms Release) und
+  Touch-Thinning (~16 ms pro Adresse, letzter Wert gewinnt) mit
+  injizierbarer Zeitquelle. IP-Learn als Broadcast-Ping-Probe (Script
+  antwortet nur an Absender-IP).
+- `LiveSetModel`: ValueTree-Spiegel (Message-Thread-only, KEIN UndoManager,
+  nie serialisiert); Snapshots als Tree-Diff mit Deep-var-Vergleich —
+  identischer Reconnect-Snapshot feuert 0 Listener-Events (Flacker-Schutz,
+  per Listener-Zähler-Test bewiesen).
+- Tests: `Tests/TouchLive/` (19 Cases) über `IRemoteTransport`-Seam;
+  Gesamtlauf 579 Cases / 26 811 Assertions grün, ASan grün.
+- **Nächster Schritt:** M1c — GRID- + MIXER-Sub-Tab (docs/TouchLive.md §5,
+  Figma-Assets von Leon) + Verdrahtung im EngineProcessor.
+
+## Meilenstein (09.07.2026)
 
 **Looper-Page: Link-bewusste Quellauswahl + Clip-Thumbnails (invertierte
 Strip-Optik):**

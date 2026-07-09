@@ -146,6 +146,9 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/Capture/CaptureWriter.cpp
     Source/Core/Capture/InputMeter.cpp
     Source/Core/Capture/LevelMeter.cpp
+    Source/TouchLive/LiveSetModel.cpp
+    Source/TouchLive/TouchLiveClient.cpp
+    Source/TouchLive/TouchLiveSettings.cpp
     Source/Modules/ChassisSchema.cpp
     Source/Modules/ConduitModule.cpp
     Source/Modules/ModuleFactory.cpp
@@ -313,6 +316,10 @@ target_sources(Conduit PRIVATE
     Source/Core/Capture/InputMeter.h
     Source/Core/Capture/PreRollBuffer.h
     Source/Core/Capture/SampleClock.h
+    Source/TouchLive/IRemoteTransport.h
+    Source/TouchLive/LiveSetModel.h
+    Source/TouchLive/TouchLiveClient.h
+    Source/TouchLive/TouchLiveSettings.h
     Source/Interfaces/ICaptureTapClient.h
     Source/Interfaces/IClockSlave.h
     Source/Interfaces/IClockSource.h
@@ -577,6 +584,8 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/TransportLinkTests.cpp
         Tests/Core/UiSettingsTests.cpp
         Tests/Core/VoiceAllocatorTests.cpp
+        Tests/TouchLive/LiveSetModelTests.cpp
+        Tests/TouchLive/TouchLiveClientTests.cpp
         Tests/UI/BrowserPanelTests.cpp
         Tests/UI/EditorDockPanelTests.cpp
         Tests/UI/NoteCircleFadeTrackerTests.cpp
@@ -653,6 +662,9 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/Capture/CaptureWriter.cpp
         Source/Core/Capture/InputMeter.cpp
         Source/Core/Capture/LevelMeter.cpp
+        Source/TouchLive/LiveSetModel.cpp
+        Source/TouchLive/TouchLiveClient.cpp
+        Source/TouchLive/TouchLiveSettings.cpp
         Source/Modules/ChassisSchema.cpp
         Source/Modules/ConduitModule.cpp
         Source/Modules/ModuleFactory.cpp
