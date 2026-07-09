@@ -105,6 +105,12 @@ public:
     void previewBrowserItem (int nodeId);
     void stopBrowserPreview();
 
+    /** Feuert bei JEDEM Übergang zu connected [Message Thread] — die
+        Gegenseite kann frisch gestartet sein (Live-Neustart), dann sind
+        alle Session-transienten Browser-Node-IDs tot (Feldtest 10.07.2026:
+        Browser blieb nach Live-Neustart auf einer leeren Ebene hängen). */
+    std::function<void()> onReconnected;
+
     //==========================================================================
     // Echo-Suppression — Message Thread
 

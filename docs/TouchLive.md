@@ -232,7 +232,7 @@ Hardware mit echter Audio-Rate — 10 m vom Ableton-Rechner entfernt.
 | M1c | GRID- + MIXER-Sub-Tab (UI nach §5 inkl. Feel-Regeln 5.1) — **erledigt 09.07.2026** (§10b; User-SVGs Fader/Icon eingepflegt, weitere Figma-Assets folgen stückweise) |
 | M2 | Meter-Pfad (TouchLiveMeterBus), Feinschliff Fader-Gesten, Feel-Abnahme gegen Roto-Messlatte — **KOMPLETT 09.07.2026**: Meter-Pfad (§10c) + Fast-Path v2 (§10e); Feel-Abnahme im Feldtest Runde 3 bestanden („working perfectly"). Offen nur noch LiveFaderScale-Feinkalibrierung (§11) |
 | M3 | DEVICE generisch: Device-Domain, Ketten-Navigation, Parameter-Bänke, On/Off (§6b) — **erledigt 09.07.2026** (§10g; Feldtest offen) |
-| M4 | BROWSER: Baum via `load_children`-Muster, Laden auf Track/Chain, Preview — **erledigt 10.07.2026** (§10h; Feldtest offen) |
+| M4 | BROWSER: Baum via `load_children`-Muster, Laden auf Track/Chain, Preview — **erledigt + Feldtest bestanden 10.07.2026** (§10h) |
 | M5 | Bespoke Device-UIs: EQ Eight → Compressor/Glue → Delay/Reverb (§6b) |
 | M6 | Modulator-Zwillinge: LFO zuerst, dann Shaper/Envelope Follower (§6c) |
 
@@ -524,8 +524,9 @@ Beidseitig: `browser.py` (Script, BrowserService) + `TouchLiveBrowserView`
   `/remote/browser/roots` bzw. `/children [parent_id]` →
   `/remote/browser/list [seq,chunk,chunks,json]` mit
   `{"p": parent, "it": [[id,name,folder,loadable],…]}`. Antworten laufen
-  über den delivery.Sender (force=True) — Chunking für Riesenordner
-  gratis; der Client merged Chunk-Arrays (`it` wird konkateniert).
+  über `Sender.send_json_list` (force=True): Chunking auf **Listen-
+  Element-Ebene** — jeder Chunk trägt `p` plus eine Scheibe des
+  `it`-Arrays, der Client konkateniert die Scheiben einer seq.
   Verlorene Antworten heilt der nächste Tap (kein Seq-Healing nötig).
 - **Node-IDs** vergibt das Script pro Session (Registry hält die
   BrowserItems am Leben, wie stable_ids) — Laufzeit-IDs, NIE
@@ -540,9 +541,25 @@ Beidseitig: `browser.py` (Script, BrowserService) + `TouchLiveBrowserView`
   Vorhör-Modus (Tap spielt an, Ausschalten stoppt). Roots werden beim
   ersten Sichtbarwerden angefordert. `onBrowserList`-Callback am Client
   wird von der View exklusiv belegt.
-- **Feldtest offen:** Baum-Tiefe/Performance großer Packs (children ist
-  im Tick synchron — bei Riesenordnern spürbar?), Live-12.4b-Eigenheiten
-  der Browser-API, Laden-auf-Chain (M5-Umfeld).
+- **Feldtest bestanden (10.07.2026)** — Roots → Drums → Drum Hits →
+  Kick → PRE-Vorhören → LOAD (Sample landet als Simpler auf Lives
+  gewähltem Track). Drei Befunde, alle gefixt:
+  1. **Lives Kategorie-Wurzeln (Sounds…Packs) melden `is_folder=False`**,
+     haben aber Kinder — `tapRow` öffnet deshalb ALLES, was nicht ladbar
+     ist (nicht nur echte Ordner); Chevron-Marker analog.
+  2. **Key-Level-Chunking verwarf große Ordner komplett:** die Drums-
+     Liste ist EIN `it`-Key > max_bytes → „dropping oversized key", beim
+     Client kam eine leere Ebene an. Fix: `Sender.send_json_list`
+     (elementweises Listen-Chunking, exakte Größenmathematik über
+     kompaktes ASCII-JSON, Antwort geht IMMER raus — notfalls leer).
+  3. **Live-Neustart ließ den Browser auf toter Ebene hängen** (Session-
+     transiente Node-IDs der alten Script-Session): Client-Callback
+     `onReconnected` (feuert bei jedem Übergang zu connected, neben
+     `subscribeAll`) — die View verwirft alle Ebenen und fordert
+     sichtbar die Wurzeln frisch an.
+- **Feldtest offen:** Performance sehr großer Packs (children ist im
+  Tick synchron — bei Riesenordnern spürbar?), Laden-auf-Chain
+  (M5-Umfeld).
 
 ## 11. Offen
 

@@ -102,3 +102,71 @@ def test_dedupe_is_per_address():
     sender.send_json("/remote/state/transport/diff", 1, {"tempo": 120.0})
     sender.send_json("/remote/state/mixer/diff", 2, {"tempo": 120.0})
     assert len(osc.messages) == 2
+
+
+# -- send_json_list (browser M4: element-level chunking) ----------------------
+
+def _browser_entries(count):
+    return [[i, "Entry with a fairly long name %04d" % i, 0, 1]
+            for i in range(count)]
+
+
+def test_list_small_payload_is_single_message():
+    osc = RecordingOsc()
+    sender = Sender(osc, max_bytes=9000)
+    sender.send_json_list("/remote/browser/list", 1, {"p": 0}, "it",
+                          _browser_entries(3), force=True)
+    assert len(osc.messages) == 1
+    seq, chunk_index, chunk_count, payload_json = osc.messages[0][1]
+    assert (seq, chunk_index, chunk_count) == (1, 1, 1)
+    payload = json.loads(payload_json)
+    assert payload["p"] == 0
+    assert payload["it"] == _browser_entries(3)
+
+
+def test_list_oversized_payload_chunks_by_element():
+    osc = RecordingOsc()
+    sender = Sender(osc, max_bytes=200)
+    entries = _browser_entries(20)
+    sender.send_json_list("/remote/browser/list", 7, {"p": 2}, "it",
+                          entries, force=True)
+    assert len(osc.messages) > 1
+    counts = set()
+    indices = []
+    reassembled = []
+    for address, args in osc.messages:
+        assert address == "/remote/browser/list"
+        seq, chunk_index, chunk_count, payload_json = args
+        assert seq == 7
+        counts.add(chunk_count)
+        indices.append(chunk_index)
+        payload = json.loads(payload_json)
+        assert payload["p"] == 2            # Meta reist in JEDEM Chunk mit
+        reassembled.extend(payload["it"])
+        assert len(payload_json.encode("utf-8")) <= 200
+    assert len(counts) == 1
+    assert sorted(indices) == list(range(1, list(counts)[0] + 1))
+    assert reassembled == entries           # Reihenfolge bleibt erhalten
+
+
+def test_list_oversized_element_is_dropped_not_raised():
+    osc = RecordingOsc()
+    sender = Sender(osc, max_bytes=120)
+    entries = [[1, "ok", 0, 1], [2, "x" * 500, 0, 1], [3, "ok too", 0, 1]]
+    sender.send_json_list("/remote/browser/list", 1, {"p": 5}, "it",
+                          entries, force=True)
+    reassembled = []
+    for _, args in osc.messages:
+        reassembled.extend(json.loads(args[3])["it"])
+    assert [e[0] for e in reassembled] == [1, 3]
+
+
+def test_list_all_elements_dropped_still_answers():
+    osc = RecordingOsc()
+    sender = Sender(osc, max_bytes=60)
+    entries = [[1, "y" * 500, 0, 1]]
+    sender.send_json_list("/remote/browser/list", 1, {"p": 9}, "it",
+                          entries, force=True)
+    assert len(osc.messages) == 1           # Antwort geht IMMER raus
+    payload = json.loads(osc.messages[0][1][3])
+    assert payload == {"p": 9, "it": []}

@@ -72,6 +72,15 @@ Browser (M4):
   `/remote/browser/list`, gleiche [seq,chunk,chunks,json]-Hülle, Chunks
   konkatenieren das `it`-Array). Node-IDs sind Session-transient (NIE
   persistieren); verlorene Antworten heilt der nächste Tap.
+- Browser-Listen IMMER über `Sender.send_json_list` (elementweises
+  Listen-Chunking) — Key-Level-Chunking (`send_json`) verwirft große
+  Ordner als EINEN oversized `it`-Key (Feldtest 10.07.2026: Drums kam
+  leer an).
+- Lives Kategorie-Wurzeln (Sounds…Packs) melden `is_folder=False`,
+  haben aber Kinder — die View öffnet ALLES, was nicht ladbar ist.
+- `TouchLiveClient::onReconnected` feuert bei JEDEM Übergang zu
+  connected (neben subscribeAll): die BrowserView verwirft dann alle
+  Ebenen (tote Node-IDs nach Live-Neustart) und re-requested die Wurzeln.
 - Laden zielt auf Lives Track-Selektion (`/live/song/set/selected_track`).
 
 Meter-Pfad (M2):

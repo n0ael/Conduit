@@ -8,8 +8,9 @@ pattern):
     -> /remote/browser/children  [parent_id:int]
     <- /remote/browser/list      [seq, chunk, chunks, json]
          json = {"p": parent_id, "it": [[id, name, folder, loadable], ...]}
-         (parent_id 0 == roots; delivered through delivery.Sender with
-          force=True, so the existing chunking covers big folders)
+         (parent_id 0 == roots; delivered via Sender.send_json_list with
+          force=True -- big folders are chunked by list ELEMENT, the
+          client concatenates the "it" slices of one seq)
 
     -> /live/browser/load         [id]   loads onto Live's selected track
     -> /live/browser/preview      [id]
@@ -171,8 +172,12 @@ class BrowserService(object):
                             1 if _flag(item, "is_loadable") else 0])
 
         self._seq += 1
-        self._sender.send_json(LIST_ADDRESS, self._seq,
-                               {"p": parent_id, "it": entries}, force=True)
+        # Listen-Chunking (send_json_list): grosse Ordner sprengen sonst als
+        # EIN 'it'-Key das Key-Level-Chunking (Feldtest 10.07.2026: Drums
+        # kam als leere Liste an, 'dropping oversized key')
+        self._sender.send_json_list(LIST_ADDRESS, self._seq,
+                                    {"p": parent_id}, "it", entries,
+                                    force=True)
 
 
 def _as_int(value):

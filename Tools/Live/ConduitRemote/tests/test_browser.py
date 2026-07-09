@@ -98,6 +98,42 @@ def test_roots_survive_missing_browser():
     assert items_of(sender)["it"] == []
 
 
+def test_big_folder_chunks_by_element_with_real_sender():
+    """Feldtest 10.07.2026: Drums-children sprengten als EIN 'it'-Key das
+    Key-Level-Chunking und kamen als leere Liste an -- jetzt muss die Liste
+    elementweise gechunkt vollstaendig ankommen."""
+    import json
+
+    from ConduitRemote.sync.delivery import Sender
+
+    children = [BrowserItem("Kit %04d.adg" % i, is_loadable=True)
+                for i in range(40)]
+    drums = BrowserItem("Drums", children)
+    browser = Browser(drums=drums)
+
+    messages = []
+    sender = Sender(lambda address, args: messages.append((address, args)),
+                    max_bytes=300)
+    service = BrowserService(lambda: browser, sender)
+
+    service.handle_roots(LIST_ADDRESS, [])
+    roots = json.loads(messages[-1][1][3])
+    drums_id = roots["it"][0][0]
+    del messages[:]
+
+    service.handle_children(LIST_ADDRESS, [drums_id])
+    assert len(messages) > 1
+    reassembled = []
+    for address, args in messages:
+        assert address == LIST_ADDRESS
+        payload = json.loads(args[3])
+        assert payload["p"] == drums_id
+        reassembled.extend(payload["it"])
+        assert len(args[3].encode("utf-8")) <= 300
+    assert [e[1] for e in reassembled] == ["Kit %04d.adg" % i
+                                           for i in range(40)]
+
+
 def test_selected_track_command_targets_song_view():
     stable_ids.clear()
     song = Song(num_tracks=2, num_scenes=2)

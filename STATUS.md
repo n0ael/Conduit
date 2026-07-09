@@ -1,6 +1,6 @@
 # Conduit Alpha — Projektstatus
 
-> Letzte Aktualisierung: 2026-07-09 | wird nach jedem Meilenstein gepflegt
+> Letzte Aktualisierung: 2026-07-10 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
 ## Aktueller Meilenstein (10.07.2026) — TouchLive M4 (BROWSER)
@@ -18,8 +18,16 @@
   LOAD-Kachel, PRE-Vorhörmodus; Client-Reassembly für gechunkte Listen
   (Arrays werden gemerged). 3 neue UI-Tests; Suite 604 Cases /
   27 232 Assertions grün.
-- **Nächster Schritt:** M4-Feldtest (Live-Neustart!), dann M5 bespoke
-  Device-UIs (EQ-Eight-Kurve zuerst) oder M6 Modulator-Zwillinge.
+- **Feldtest bestanden (10.07.2026)** — kompletter Smoke: Roots →
+  Drums → Drum Hits → Kick → PRE → LOAD (Sample landet als Simpler
+  auf Lives gewähltem Track). Drei Befunde gefixt (docs §10h):
+  Kategorie-Wurzeln melden `is_folder=False` → View öffnet alles
+  Nicht-Ladbare; Key-Level-Chunking verwarf große Ordner als EINEN
+  oversized `it`-Key → `Sender.send_json_list` (elementweises
+  Listen-Chunking); Live-Neustart hinterließ tote Node-IDs →
+  `onReconnected`-Callback verwirft die Ebenen und re-requested.
+- **Nächster Schritt:** M5 bespoke Device-UIs (EQ-Eight-Kurve zuerst)
+  oder M6 Modulator-Zwillinge; optional Mini-M4L „GR-Tap".
 
 ## Meilenstein (09.07.2026) — TouchLive M3 (DEVICE generisch)
 

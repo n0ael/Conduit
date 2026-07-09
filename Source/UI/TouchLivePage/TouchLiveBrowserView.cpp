@@ -31,10 +31,10 @@ public:
                 g.fillRoundedRectangle (bounds.toFloat().reduced (2.0f, 1.0f), 4.0f);
             }
 
-            // Marker: › für Ordner, ● für ladbare Items
+            // Marker: › für Öffnenbares (Ordner UND Kategorien), ● für Ladbares
             const auto marker = bounds.toFloat().removeFromLeft (34.0f);
 
-            if (entryIsFolder (entry))
+            if (entryIsFolder (entry) || ! entryIsLoadable (entry))
             {
                 juce::Path chevron;
                 chevron.startNewSubPath (marker.getCentreX() - 3.0f, marker.getCentreY() - 6.0f);
@@ -113,11 +113,26 @@ TouchLiveBrowserView::TouchLiveBrowserView (TouchLiveClient& clientToUse)
     // Antworten der Gegenseite — die View belegt den Callback exklusiv
     client.onBrowserList = [this] (int parentId, juce::var items)
     { handleBrowserList (parentId, items); };
+
+    // Reconnect (Live-Neustart): alle Session-transienten Node-IDs sind
+    // tot — Ebenen verwerfen, sichtbar → Wurzeln frisch anfordern
+    client.onReconnected = [this]
+    {
+        levels.clear();
+        pendingParentId = -1;
+        selectedNodeId = -1;
+        loading = false;
+        refreshList();
+
+        if (isVisible())
+            requestLevel (0, {});
+    };
 }
 
 TouchLiveBrowserView::~TouchLiveBrowserView()
 {
     client.onBrowserList = nullptr;
+    client.onReconnected = nullptr;
 }
 
 //==============================================================================
@@ -187,20 +202,21 @@ void TouchLiveBrowserView::tapRow (int rowIndex)
     if (entry.isVoid())
         return;
 
-    if (entryIsFolder (entry))
-    {
-        requestLevel (entryId (entry), entryName (entry));
-        return;
-    }
-
-    if (entryIsLoadable (entry))
+    // Ladbare Items werden ausgewählt; ALLES andere gilt als öffnenbar —
+    // Lives Kategorie-Wurzeln (Sounds/Drums/…) melden is_folder=False,
+    // haben aber Kinder (Feldtest 10.07.2026)
+    if (! entryIsFolder (entry) && entryIsLoadable (entry))
     {
         selectedNodeId = entryId (entry);
         listArea->repaint();
 
         if (previewMode)
             client.previewBrowserItem (selectedNodeId);
+
+        return;
     }
+
+    requestLevel (entryId (entry), entryName (entry));
 }
 
 void TouchLiveBrowserView::doubleTapRow (int rowIndex)

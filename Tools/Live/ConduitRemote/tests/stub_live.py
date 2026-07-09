@@ -299,6 +299,11 @@ class FakeSender(object):
     def send_json(self, address, seq, payload, force=False):
         self.sent.append((address, seq, payload))
 
+    def send_json_list(self, address, seq, meta, list_key, items, force=False):
+        payload = dict(meta)
+        payload[list_key] = list(items)
+        self.sent.append((address, seq, payload))
+
     def last(self):
         return self.sent[-1] if self.sent else None
 

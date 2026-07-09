@@ -553,7 +553,8 @@ TEST_CASE ("TouchLiveBrowserView: Roots → Ordner → Item → Laden (M4)", "[t
     REQUIRE (rig.transport->countSent ("/remote/browser/roots") == 1);
     REQUIRE (browser.isLoading());
 
-    rig.deliver (browserList (1, R"({"p":0,"it":[[1,"Sounds",1,0],[2,"Drums",1,0]]})"));
+    // Lives Kategorie-Wurzeln melden is_folder=0 — öffnenbar sind sie trotzdem
+    rig.deliver (browserList (1, R"({"p":0,"it":[[1,"Sounds",0,0],[2,"Drums",0,0]]})"));
     REQUIRE_FALSE (browser.isLoading());
     REQUIRE (browser.getRowCount() == 2);
     REQUIRE (browser.getRowName (1) == "Drums");
@@ -584,6 +585,35 @@ TEST_CASE ("TouchLiveBrowserView: Roots → Ordner → Item → Laden (M4)", "[t
     REQUIRE (browser.getDepth() == 1);
     REQUIRE (browser.getRowName (0) == "Sounds");
     REQUIRE (rig.transport->countSent ("/remote/browser/children") == 1);
+}
+
+TEST_CASE ("TouchLiveBrowserView: Reconnect verwirft tote Node-IDs und lädt Wurzeln neu",
+           "[touchlive][ui]")
+{
+    PageRig rig;
+    auto& browser = rig.page->browserView;
+    browser.setBounds (0, 0, 600, 400);
+
+    // In eine Unterebene navigieren (Session 1 der Gegenseite)
+    rig.page->browserTabTile.onClick();
+    rig.deliver (browserList (1, R"({"p":0,"it":[[1,"Sounds",0,0],[2,"Drums",0,0]]})"));
+    browser.tapRow (1);
+    rig.deliver (browserList (2, R"({"p":2,"it":[[7,"Kick.adg",0,1]]})"));
+    REQUIRE (browser.getDepth() == 2);
+    const auto rootsBefore = rig.transport->countSent ("/remote/browser/roots");
+
+    // Live-Neustart: Pong im Zustand connecting → Übergang zu connected —
+    // alle Node-IDs der alten Session sind jetzt tot
+    rig.deliver (juce::OSCMessage (juce::OSCAddressPattern ("/remote/pong")));
+
+    REQUIRE (browser.getDepth() == 0);
+    REQUIRE (browser.isLoading());
+    REQUIRE (rig.transport->countSent ("/remote/browser/roots") == rootsBefore + 1);
+
+    // Frische Wurzeln der neuen Session (neue IDs) kommen normal an
+    rig.deliver (browserList (1, R"({"p":0,"it":[[1,"Sounds",0,0],[2,"Drums",0,0],[3,"Packs",0,0]]})"));
+    REQUIRE (browser.getDepth() == 1);
+    REQUIRE (browser.getRowCount() == 3);
 }
 
 TEST_CASE ("TouchLiveBrowserView: Preview-Modus spielt beim Antippen an", "[touchlive][ui]")

@@ -696,6 +696,9 @@ void TouchLiveClient::handlePong()
         // verloren gegangen sein → immer neu anfordern; der Snapshot landet
         // als Tree-Diff im Modell (kein Flackern)
         subscribeAll();
+
+        if (onReconnected != nullptr)
+            onReconnected();
     }
 }
 
