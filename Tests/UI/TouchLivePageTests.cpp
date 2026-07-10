@@ -856,6 +856,10 @@ TEST_CASE ("TouchLiveEq8Panel: Gesten — Multi-Select, Pinch-Q, Auswahl schiebe
         REQUIRE (panel->getResonanceNorm (1) > qBefore + 0.05);
         REQUIRE (panel->getFrequencyNorm (1) == Approx (0.2));   // X unverändert
 
+        // Der Punkt wandert mit und zeigt den Q an (klebt unter dem Finger)
+        REQUIRE (panel->bandPosition (1).y
+                 == Approx (start.y - 80.0f).margin (1.5f));
+
         const auto sent = rig.transport->sentTo ("/live/device/set/parameter");
         std::vector<int> indices;
         for (const auto& message : sent)

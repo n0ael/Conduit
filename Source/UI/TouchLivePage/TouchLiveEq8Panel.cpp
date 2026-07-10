@@ -746,7 +746,15 @@ juce::Point<float> TouchLiveEq8Panel::bandPosition (int band) const
         return {};
 
     const auto& state = bands[(size_t) band];
-    const auto gainForY = shapeHasGain (shapeOf (state)) ? state.gainDb : 0.0;
+
+    // Bell/Shelf: y = Gain. Cut/Notch: y zeigt den Q (Live-Verhalten,
+    // Feedback-Runde 3) — Q-Norm 0.5 liegt auf der 0-Linie, und die
+    // Skalierung folgt dem Y-Drag exakt 1:1 (beide spannen die volle
+    // Plot-Höhe), der Punkt klebt also unter dem Finger.
+    const auto gainForY = shapeHasGain (shapeOf (state))
+                              ? state.gainDb
+                              : (state.resonanceNorm - 0.5) * 2.0 * plotDbRange;
+
     return { xForNorm (state.frequencyNorm), yForDb (gainForY) };
 }
 

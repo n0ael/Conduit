@@ -653,6 +653,8 @@ analoge RBJ-Prototypen mit eigener Q-Semantik** — kalibriert auf
      triggerLongPress).
   6. **Cut/Notch-Punkte steuern per Y-Drag den Q** (Live-Verhalten,
      Feedback-Runde 2) — hoch = schärfer; Bell/Shelf behalten Y=Gain.
+     Der Punkt WANDERT dabei mit (y = (qNorm−0.5)·2·15 dB-Äquivalent:
+     Q-Norm 0.5 = 0-Linie, Skalierung folgt dem Finger exakt 1:1).
      Der Panel-Footer ist KOMPLETT entfallen (Band-ON = Doppeltipp,
      Typ = Long-Press); der Typ-Name steht im Readout oben rechts.
      Scale-Trim gröber als Output (0.0015/px vs. 0.0005/px).
