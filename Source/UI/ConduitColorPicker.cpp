@@ -99,10 +99,12 @@ void ConduitColorPicker::toHsv (juce::Colour colour, float& h01, float& s, float
         return;
     }
 
+    // Kein Float-==: Maximum-Kanal per >= bestimmen (-Wfloat-equal);
+    // an den Gleichstands-Punkten ist die Hue-Funktion stetig.
     float h = 0.0f;
-    if (mx == r)
+    if (r >= g && r >= b)
         h = (g - b) / delta;            // kann negativ sein → unten wrappen
-    else if (mx == g)
+    else if (g >= b)
         h = (b - r) / delta + 2.0f;
     else
         h = (r - g) / delta + 4.0f;
