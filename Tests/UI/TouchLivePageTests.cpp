@@ -547,6 +547,10 @@ namespace
              << R"(,{"name":")" << p << R"( Q A","min":0,"max":1,"quant":false})";   // Live-12-Name
     }
 
+    // Globale Parameter am Ende (Band-Indizes bleiben stabil)
+    meta << R"(,{"name":"Output","min":-12,"max":12,"quant":false})"
+         << R"(,{"name":"Scale","min":0,"max":2,"quant":false})"
+         << R"(,{"name":"Adaptive Q","min":0,"max":1,"quant":true})";
     meta << "]";
     return meta;
 }
@@ -559,6 +563,7 @@ namespace
     for (int n = 1; n <= 8; ++n)
         vals << ",1,3," << juce::String (0.1 * n, 2) << ",0.0,0.5";
 
+    vals << ",0.0,1.0,1.0";   // Output, Scale, Adaptive Q
     vals << "]";
     return vals;
 }
@@ -597,12 +602,13 @@ TEST_CASE ("TouchLiveEq8Panel: bespoke ersetzt die Bank, Drag sendet Freq + Gain
 
     // Drag an Band 4 (Bell): Freq + Gain reisen als getrennte Touch-Sends
     const auto start = panel->bandPosition (3);
-    panel->beginDrag (start);
+    panel->touchDown (0, start);
     REQUIRE (panel->getSelectedBand() == 3);
+    REQUIRE (panel->getGesture() == conduit::TouchLiveEq8Panel::Gesture::bandDrag);
 
     rig.transport->sent.clear();
-    panel->dragTo (start.translated (30.0f, -25.0f));
-    panel->endDrag();
+    panel->touchMove (0, start.translated (30.0f, -25.0f));
+    panel->touchUp (0);
 
     const auto sent = rig.transport->sentTo ("/live/device/set/parameter");
     REQUIRE (sent.size() == 2);
@@ -629,9 +635,11 @@ TEST_CASE ("TouchLiveEq8Panel: bespoke ersetzt die Bank, Drag sendet Freq + Gain
     REQUIRE (device.getParameterName (0) == "1 Filter On A");
 }
 
-TEST_CASE ("TouchLiveEq8Panel: Pinch (zweiter Finger) ändert den Q des aktiven Bandes",
+TEST_CASE ("TouchLiveEq8Panel: Gesten — Multi-Select, Pinch-Q, Auswahl schieben, Output/Scale",
            "[touchlive][ui]")
 {
+    using Gesture = conduit::TouchLiveEq8Panel::Gesture;
+
     PageRig rig;
     rig.loadDemoSet();
 
@@ -645,29 +653,150 @@ TEST_CASE ("TouchLiveEq8Panel: Pinch (zweiter Finger) ändert den Q des aktiven 
     auto* panel = dynamic_cast<conduit::TouchLiveEq8Panel*> (device.getBespokePanel());
     REQUIRE (panel != nullptr);
 
-    panel->selectBand (2);
-    const auto before = panel->getResonanceNorm (2);
-    REQUIRE (before == Approx (0.5));
+    SECTION ("Punkt halten + weitere Punkte antippen = Mehrfachauswahl")
+    {
+        panel->touchDown (0, panel->bandPosition (0));
+        REQUIRE (panel->getGesture() == Gesture::bandDrag);
+        REQUIRE (panel->isBandSelected (0));
 
-    panel->beginPinch (100.0f);
-    REQUIRE (panel->isPinchActive());
+        panel->touchDown (1, panel->bandPosition (2));
+        REQUIRE (panel->isBandSelected (2));
+        REQUIRE (panel->getSelectedBand() == 0);            // aktiv bleibt gehalten
+        REQUIRE (panel->getGesture() == Gesture::bandDrag); // kein Pinch
 
-    rig.transport->sent.clear();
-    panel->pinchTo (200.0f);   // Abstand verdoppelt → +0.25 auf der Q-Norm
+        panel->touchUp (1);
+        panel->touchUp (0);
 
-    REQUIRE (panel->getResonanceNorm (2) == Approx (before + 0.25).margin (1e-4));
-    REQUIRE (panel->qSlider.getValue() == Approx (before + 0.25).margin (1e-4));
+        // Einzeltap auf nicht selektierten Punkt ersetzt die Auswahl
+        panel->touchDown (0, panel->bandPosition (3));
+        panel->touchUp (0);
+        REQUIRE (panel->isBandSelected (3));
+        REQUIRE_FALSE (panel->isBandSelected (0));
+        REQUIRE_FALSE (panel->isBandSelected (2));
+    }
 
-    const auto sent = rig.transport->sentTo ("/live/device/set/parameter");
-    REQUIRE (sent.size() == 1);
-    REQUIRE (sent.front()[1].getInt32() == panel->resonanceIndexOf (2));
+    SECTION ("Punkt halten + freier Finger = Pinch-Q (nur bei berührtem Punkt)")
+    {
+        const auto p = panel->bandPosition (2);
+        panel->touchDown (0, p);
+        const auto before = panel->getResonanceNorm (2);
+        REQUIRE (before == Approx (0.5));
 
-    // Halbierter Abstand vom Start: −0.25 (Ziel unter dem Startwert)
-    panel->pinchTo (50.0f);
-    REQUIRE (panel->getResonanceNorm (2) == Approx (before - 0.25).margin (1e-4));
+        panel->touchDown (1, p.translated (0.0f, 150.0f));   // freie Fläche
+        REQUIRE (panel->getGesture() == Gesture::pinchQ);
 
-    panel->endPinch();
-    REQUIRE_FALSE (panel->isPinchActive());
+        rig.transport->sent.clear();
+        panel->touchMove (1, p.translated (0.0f, 300.0f));   // Abstand verdoppelt
+
+        REQUIRE (panel->getResonanceNorm (2) == Approx (before + 0.25).margin (1e-4));
+        REQUIRE (panel->qSlider.getValue() == Approx (before + 0.25).margin (1e-4));
+
+        const auto sent = rig.transport->sentTo ("/live/device/set/parameter");
+        REQUIRE (sent.size() == 1);
+        REQUIRE (sent.front()[1].getInt32() == panel->resonanceIndexOf (2));
+
+        // Pinch-Finger hoch → zurück zum Drag; Freq/Gain waren eingefroren
+        panel->touchUp (1);
+        REQUIRE (panel->getGesture() == Gesture::bandDrag);
+        panel->touchUp (0);
+        REQUIRE (panel->getGesture() == Gesture::none);
+    }
+
+    SECTION ("Zwei Finger frei = angewählte Bänder gemeinsam verschieben")
+    {
+        // Auswahl {0, 2} herstellen
+        panel->touchDown (0, panel->bandPosition (0));
+        panel->touchDown (1, panel->bandPosition (2));
+        panel->touchUp (1);
+        panel->touchUp (0);
+
+        const auto freq0 = panel->getFrequencyNorm (0);
+        const auto freq2 = panel->getFrequencyNorm (2);
+
+        // Zwei Finger auf freier Fläche (weit weg von der 0-Linie)
+        const auto area = panel->getLocalBounds().toFloat();
+        const juce::Point<float> a { area.getWidth() * 0.3f, area.getHeight() * 0.75f };
+        const juce::Point<float> b { area.getWidth() * 0.6f, area.getHeight() * 0.75f };
+        panel->touchDown (0, a);
+        REQUIRE (panel->getGesture() == Gesture::none);      // 1 Finger frei: nichts
+        panel->touchDown (1, b);
+        REQUIRE (panel->getGesture() == Gesture::moveSelection);
+
+        rig.transport->sent.clear();
+        panel->touchMove (0, a.translated (40.0f, 0.0f));
+        panel->touchMove (1, b.translated (40.0f, 0.0f));
+
+        // Beide selektierten Bänder wanderten um dasselbe Delta nach rechts
+        const auto delta0 = panel->getFrequencyNorm (0) - freq0;
+        const auto delta2 = panel->getFrequencyNorm (2) - freq2;
+        REQUIRE (delta0 > 0.0);
+        REQUIRE (delta0 == Approx (delta2).margin (1e-6));
+        REQUIRE (panel->getFrequencyNorm (1) == Approx (0.2));   // nicht selektiert
+
+        const auto sent = rig.transport->sentTo ("/live/device/set/parameter");
+        std::vector<int> indices;
+        for (const auto& message : sent)
+            indices.push_back (message[1].getInt32());
+        REQUIRE (std::find (indices.begin(), indices.end(),
+                            panel->frequencyIndexOf (0)) != indices.end());
+        REQUIRE (std::find (indices.begin(), indices.end(),
+                            panel->frequencyIndexOf (2)) != indices.end());
+
+        panel->touchUp (0);
+        panel->touchUp (1);
+    }
+
+    SECTION ("Drei Finger = Output-Gain fein, vier = Scale")
+    {
+        const auto area = panel->getLocalBounds().toFloat();
+        const auto y = area.getHeight() * 0.8f;
+        panel->touchDown (0, { 100.0f, y });
+        panel->touchDown (1, { 200.0f, y });
+        panel->touchDown (2, { 300.0f, y });
+        REQUIRE (panel->getGesture() == Gesture::trimOutput);
+
+        rig.transport->sent.clear();
+        panel->touchMove (0, { 100.0f, y - 90.0f });   // Zentroid −30 px → +0.36 dB
+
+        auto sent = rig.transport->sentTo ("/live/device/set/parameter");
+        REQUIRE (sent.size() == 1);
+        REQUIRE (sent.front()[1].getInt32() == panel->outputIndexOf());
+        REQUIRE (sent.front()[2].getFloat32() == Approx (0.36f).margin (1e-3f));
+
+        // Vierter Finger dazu → Scale-Trim mit frischer Baseline
+        panel->touchDown (3, { 400.0f, y });
+        REQUIRE (panel->getGesture() == Gesture::trimScale);
+
+        rig.transport->sent.clear();
+        panel->touchMove (3, { 400.0f, y - 120.0f });  // Zentroid −30 px → +0.03
+
+        sent = rig.transport->sentTo ("/live/device/set/parameter");
+        REQUIRE (sent.size() == 1);
+        REQUIRE (sent.front()[1].getInt32() == panel->scaleIndexOf());
+        REQUIRE (sent.front()[2].getFloat32() == Approx (1.03f).margin (1e-3f));
+
+        panel->touchUp (0);
+        panel->touchUp (1);
+        panel->touchUp (2);
+        panel->touchUp (3);
+        REQUIRE (panel->getGesture() == Gesture::none);
+    }
+
+    SECTION ("Haltender Finger weg → Restfinger wirkungslos (idle)")
+    {
+        panel->touchDown (0, panel->bandPosition (1));
+        panel->touchDown (1, panel->bandPosition (1).translated (0.0f, 150.0f));
+        panel->touchUp (0);   // Primär weg, Pinch-Finger liegt noch
+
+        REQUIRE (panel->getGesture() == Gesture::idle);
+
+        rig.transport->sent.clear();
+        panel->touchMove (1, panel->bandPosition (1).translated (0.0f, 260.0f));
+        REQUIRE (rig.transport->sentTo ("/live/device/set/parameter").empty());
+
+        panel->touchUp (1);
+        REQUIRE (panel->getGesture() == Gesture::none);
+    }
 }
 
 //==============================================================================

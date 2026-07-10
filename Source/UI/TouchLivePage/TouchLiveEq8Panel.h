@@ -27,10 +27,16 @@ namespace conduit
     Butterworth-8-Kaskade). Kalibriert auf < 0.4 dB gegen Lives Anzeige;
     der "Adaptive Q"-Parameter der Gegenseite schaltet den Gain-Term.
 
-    Interaktion: Drag am Punkt = Frequenz (X, log 10 Hz–22 kHz) + Gain
-    (Y, nur Bell/Shelf) — lokal-optimistisch (§5.1); Doppeltipp = Band
-    an/aus; ZWEITER Finger = Pinch: Abstand ändert den Q des aktiven
-    Bandes (Multi-Touch, Kernpfade beginPinch/pinchTo testbar).
+    Gesten (User-Spezifikation 10.07.2026, Kernpfade touchDown/Move/Up):
+    - Punkt ziehen = Frequenz (X) + Gain (Y, nur Bell/Shelf), Doppeltipp
+      = Band an/aus — alles lokal-optimistisch (§5.1).
+    - Punkt HALTEN + weitere Punkte antippen = Mehrfachauswahl;
+      Punkt halten + freier zweiter Finger = Pinch ändert den Q des
+      aktiven Bandes (Q-Geste NUR bei berührtem Punkt).
+    - OHNE Punktberührung: 2 Finger = alle angewählten Bänder gemeinsam
+      verschieben · 3 Finger = Output-Gain fein · 4 Finger = Scale.
+      Lässt der haltende Finger los, sind Restfinger bis zum Abheben
+      wirkungslos (keine Gesten-Überraschungen).
     Wertesemantik (verifiziert): Hz = 10·2200^norm, Q = 0.1·180^norm,
     Gain direkt dB.
 */
@@ -52,33 +58,37 @@ public:
     [[nodiscard]] bool isUsable() const override { return mappedBandCount > 0; }
 
     //==========================================================================
-    // Testbare Kernpfade (Maus-Handler rufen genau diese)
+    // Testbare Kernpfade (die Maus-/Touch-Handler rufen genau diese;
+    // touchIndex = MouseInputSource-Index, Maus ist 0)
+
+    enum class Gesture { none, idle, bandDrag, pinchQ, moveSelection,
+                         trimOutput, trimScale };
 
     [[nodiscard]] int bandAt (juce::Point<float> position) const;
 
+    void touchDown (int touchIndex, juce::Point<float> position);
+    void touchMove (int touchIndex, juce::Point<float> position);
+    void touchUp (int touchIndex);
+
     void selectBand (int band);
-    void beginDrag (juce::Point<float> position);
-    void dragTo (juce::Point<float> position);
-    void endDrag();
     void toggleBandOn (int band);
     void stepFilterType (int delta);
 
-    /** Pinch (zweiter Finger): Abstand zum ersten Finger steuert den Q
-        des aktiven Bandes — log-proportional zum Abstandsverhältnis. */
-    void beginPinch (float distance);
-    void pinchTo (float distance);
-    void endPinch();
-
     //==========================================================================
+    [[nodiscard]] Gesture getGesture() const noexcept { return gesture; }
     [[nodiscard]] int getSelectedBand() const noexcept { return selectedBand; }
+    [[nodiscard]] bool isBandSelected (int band) const;
     [[nodiscard]] int getMappedBandCount() const noexcept { return mappedBandCount; }
     [[nodiscard]] bool isBandOn (int band) const;
-    [[nodiscard]] bool isPinchActive() const noexcept { return pinchActive; }
     [[nodiscard]] double getResonanceNorm (int band) const;
+    [[nodiscard]] double getFrequencyNorm (int band) const;
+    [[nodiscard]] double getGainDb (int band) const;
     [[nodiscard]] juce::Point<float> bandPosition (int band) const;   // Plot-Pixel
     [[nodiscard]] int frequencyIndexOf (int band) const;
     [[nodiscard]] int gainIndexOf (int band) const;
     [[nodiscard]] int resonanceIndexOf (int band) const;
+    [[nodiscard]] int outputIndexOf() const noexcept { return outputIndex; }
+    [[nodiscard]] int scaleIndexOf() const noexcept { return scaleIndex; }
 
     juce::Slider qSlider { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     push::TextTile typePrevTile { "<" };
@@ -123,6 +133,11 @@ private:
     void rebuildCurve();
     void setResonanceNorm (Band& band, double newNorm);
 
+    void dragActiveBandTo (juce::Point<float> position);
+    void beginFreeGesture();
+    [[nodiscard]] juce::Point<float> touchCentroid() const;
+    [[nodiscard]] int heldBandTouchIndex() const;   // −1 = kein Punkt gehalten
+
     [[nodiscard]] Shape shapeOf (const Band& band) const;
     [[nodiscard]] bool shapeHasGain (Shape shape) const noexcept;
     [[nodiscard]] juce::Rectangle<float> plotArea() const;
@@ -143,16 +158,31 @@ private:
     std::array<Band, bandCount> bands;
     int mappedBandCount = 0;
     int selectedBand = 0;
+    std::array<bool, bandCount> bandSelected {};   // Mehrfachauswahl
     bool adaptiveQ = true;      // Parameter "Adaptive Q" der Gegenseite
     int adaptiveQIndex = -1;
 
-    // Touch-Zustand: erster Finger zieht, zweiter pincht (Q)
-    bool dragActive = false;
-    bool pinchActive = false;
-    int primaryTouchIndex = -1, secondaryTouchIndex = -1;
-    juce::Point<float> primaryTouchPosition, secondaryTouchPosition;
+    // Globale EQ8-Parameter (3-/4-Finger-Trim)
+    int outputIndex = -1, scaleIndex = -1;
+    double outputValue = 0.0, outputMin = -12.0, outputMax = 12.0;
+    double scaleValue = 1.0, scaleMin = 0.0, scaleMax = 2.0;
+
+    // Touch-/Gesten-Zustand (Kernpfade touchDown/Move/Up)
+    struct TouchPoint
+    {
+        juce::Point<float> start, current;
+        int bandHit = -1;
+    };
+
+    std::map<int, TouchPoint> touches;
+    Gesture gesture = Gesture::none;
+    int primaryTouchIndex = -1;          // hält ein Band (bandDrag/pinchQ)
+    int pinchTouchIndex = -1;
     float pinchStartDistance = 0.0f;
     double pinchStartResonance = 0.5;
+    juce::Point<float> gestureStartCentroid;
+    double gestureStartValue = 0.0;      // Output/Scale beim Gesten-Start
+    std::array<std::pair<double, double>, bandCount> selectionStart {};
 
     juce::Path curve;
     bool curveDirty = true;

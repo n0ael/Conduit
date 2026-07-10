@@ -80,6 +80,8 @@ void TouchLiveEq8Panel::setDevice (const juce::String& deviceKeyToUse,
     bands = {};
     mappedBandCount = 0;
     adaptiveQIndex = -1;
+    outputIndex = -1;
+    scaleIndex = -1;
 
     if (const auto* meta = parmeta.getArray())
     {
@@ -91,6 +93,30 @@ void TouchLiveEq8Panel::setDevice (const juce::String& deviceKeyToUse,
             if (name == "Adaptive Q")
             {
                 adaptiveQIndex = index;
+                continue;
+            }
+
+            if (name == "Output" || name == "Output Gain")
+            {
+                outputIndex = index;
+
+                if (auto* object = entry.getDynamicObject())
+                {
+                    outputMin = (double) object->getProperty ("min");
+                    outputMax = (double) object->getProperty ("max");
+                }
+                continue;
+            }
+
+            if (name == "Scale")
+            {
+                scaleIndex = index;
+
+                if (auto* object = entry.getDynamicObject())
+                {
+                    scaleMin = (double) object->getProperty ("min");
+                    scaleMax = (double) object->getProperty ("max");
+                }
                 continue;
             }
 
@@ -149,9 +175,14 @@ void TouchLiveEq8Panel::setDevice (const juce::String& deviceKeyToUse,
                 break;
             }
 
-    dragActive = false;
-    pinchActive = false;
-    primaryTouchIndex = secondaryTouchIndex = -1;
+    touches.clear();
+    gesture = Gesture::none;
+    primaryTouchIndex = pinchTouchIndex = -1;
+    bandSelected = {};
+
+    if (bands[(size_t) selectedBand].isMapped())
+        bandSelected[(size_t) selectedBand] = true;
+
     curveDirty = true;
     updateFooterFromSelection();
     repaint();
@@ -172,6 +203,14 @@ void TouchLiveEq8Panel::setValues (const juce::var& parvals)
 
     adaptiveQ = valueAt (adaptiveQIndex, adaptiveQ ? 1.0 : 0.0) > 0.5;
 
+    if (gesture != Gesture::trimOutput)
+        outputValue = juce::jlimit (outputMin, outputMax,
+                                    valueAt (outputIndex, outputValue));
+
+    if (gesture != Gesture::trimScale)
+        scaleValue = juce::jlimit (scaleMin, scaleMax,
+                                   valueAt (scaleIndex, scaleValue));
+
     for (int bandIndex = 0; bandIndex < bandCount; ++bandIndex)
     {
         auto& band = bands[(size_t) bandIndex];
@@ -179,9 +218,12 @@ void TouchLiveEq8Panel::setValues (const juce::var& parvals)
         if (! band.isMapped())
             continue;
 
-        // Lokal-optimistisch (§5.1): das gezogene Band folgt NUR dem Finger
-        const auto touched = (dragActive || pinchActive)
-                                 && bandIndex == selectedBand;
+        // Lokal-optimistisch (§5.1): berührte Bänder folgen NUR dem Finger
+        const auto touched = ((gesture == Gesture::bandDrag
+                                   || gesture == Gesture::pinchQ)
+                              && bandIndex == selectedBand)
+                          || (gesture == Gesture::moveSelection
+                              && bandSelected[(size_t) bandIndex]);
 
         band.on = valueAt (band.onIndex, band.on ? 1.0 : 0.0) > 0.5;
         band.typeValue = juce::jlimit (0, juce::jmax (0, band.typeItems.size() - 1),
@@ -264,26 +306,255 @@ void TouchLiveEq8Panel::selectBand (int band)
         return;
 
     selectedBand = band;
+    bandSelected[(size_t) band] = true;
     updateFooterFromSelection();
     repaint();
 }
 
-void TouchLiveEq8Panel::beginDrag (juce::Point<float> position)
+//==============================================================================
+juce::Point<float> TouchLiveEq8Panel::touchCentroid() const
 {
-    const auto band = bandAt (position);
+    juce::Point<float> sum;
 
-    if (band < 0)
-        return;
+    for (const auto& [index, touch] : touches)
+    {
+        juce::ignoreUnused (index);
+        sum += touch.current;
+    }
 
-    selectBand (band);
-    dragActive = true;
+    return touches.empty() ? sum : sum / (float) touches.size();
 }
 
-void TouchLiveEq8Panel::dragTo (juce::Point<float> position)
+int TouchLiveEq8Panel::heldBandTouchIndex() const
 {
-    if (! dragActive || pinchActive)   // Pinch friert Freq/Gain ein
+    return primaryTouchIndex;
+}
+
+void TouchLiveEq8Panel::beginFreeGesture()
+{
+    const auto count = (int) touches.size();
+    gestureStartCentroid = touchCentroid();
+
+    if (count == 2)
+    {
+        gesture = Gesture::moveSelection;
+
+        for (int bandIndex = 0; bandIndex < bandCount; ++bandIndex)
+            selectionStart[(size_t) bandIndex] = { bands[(size_t) bandIndex].frequencyNorm,
+                                                   bands[(size_t) bandIndex].gainDb };
+    }
+    else if (count == 3 && outputIndex >= 0)
+    {
+        gesture = Gesture::trimOutput;
+        gestureStartValue = outputValue;
+    }
+    else if (count == 4 && scaleIndex >= 0)
+    {
+        gesture = Gesture::trimScale;
+        gestureStartValue = scaleValue;
+    }
+    else
+    {
+        gesture = Gesture::none;   // 1 Finger frei / > 4: keine Geste
+    }
+
+    repaint();
+}
+
+void TouchLiveEq8Panel::touchDown (int touchIndex, juce::Point<float> position)
+{
+    touches[touchIndex] = { position, position, bandAt (position) };
+    const auto hit = touches[touchIndex].bandHit;
+
+    if (gesture == Gesture::idle)
+        return;   // Restfinger nach Primär-Release: wirkungslos bis alle oben
+
+    // Band-Familie: ein Finger hält bereits einen Punkt
+    if (primaryTouchIndex >= 0)
+    {
+        if (hit >= 0)
+        {
+            // Punkt HALTEN + weiteren Punkt antippen = zur Auswahl hinzufügen
+            bandSelected[(size_t) hit] = true;
+            repaint();
+        }
+        else if (pinchTouchIndex < 0)
+        {
+            // freier zweiter Finger = Pinch-Q am aktiven Band
+            pinchTouchIndex = touchIndex;
+            pinchStartDistance = juce::jmax (1.0f, position.getDistanceFrom (
+                touches[primaryTouchIndex].current));
+            pinchStartResonance = bands[(size_t) selectedBand].resonanceNorm;
+            gesture = Gesture::pinchQ;
+        }
+
+        return;
+    }
+
+    if (hit >= 0 && touches.size() == 1)
+    {
+        // Erster Finger auf einem Punkt → aktives Band, Drag beginnt
+        primaryTouchIndex = touchIndex;
+
+        if (! bandSelected[(size_t) hit])
+        {
+            bandSelected = {};              // Einzel-Auswahl ersetzt die alte
+            bandSelected[(size_t) hit] = true;
+        }
+
+        selectBand (hit);
+        gesture = Gesture::bandDrag;
+        return;
+    }
+
+    // freie Familie (kein Punkt gehalten): Finger-Anzahl wählt die Geste
+    beginFreeGesture();
+}
+
+void TouchLiveEq8Panel::touchMove (int touchIndex, juce::Point<float> position)
+{
+    const auto it = touches.find (touchIndex);
+
+    if (it == touches.end())
         return;
 
+    it->second.current = position;
+
+    switch (gesture)
+    {
+        case Gesture::bandDrag:
+            if (touchIndex == primaryTouchIndex)
+                dragActiveBandTo (position);
+            break;
+
+        case Gesture::pinchQ:
+        {
+            if (touchIndex != primaryTouchIndex && touchIndex != pinchTouchIndex)
+                break;
+
+            auto& band = bands[(size_t) selectedBand];
+
+            if (! band.isMapped())
+                break;
+
+            const auto distance = touches[primaryTouchIndex].current
+                                      .getDistanceFrom (touches[pinchTouchIndex].current);
+            // Abstand verdoppeln ≈ +0.25 auf der Q-Norm (Faktor ~3.7 in Q)
+            const auto octaves = std::log2 (juce::jmax (1.0f, distance)
+                                            / pinchStartDistance);
+            setResonanceNorm (band, pinchStartResonance + 0.25 * octaves);
+            break;
+        }
+
+        case Gesture::moveSelection:
+        {
+            const auto area = plotArea();
+            const auto delta = touchCentroid() - gestureStartCentroid;
+            const auto freqDelta = area.getWidth() > 0.0f
+                                       ? (double) (delta.x / area.getWidth()) : 0.0;
+            const auto dbDelta = area.getHeight() > 0.0f
+                                     ? -(double) delta.y / (area.getHeight() * 0.5)
+                                           * plotDbRange
+                                     : 0.0;
+
+            for (int bandIndex = 0; bandIndex < bandCount; ++bandIndex)
+            {
+                if (! bandSelected[(size_t) bandIndex])
+                    continue;
+
+                auto& band = bands[(size_t) bandIndex];
+
+                if (! band.isMapped())
+                    continue;
+
+                const auto& start = selectionStart[(size_t) bandIndex];
+                band.frequencyNorm = juce::jlimit (0.0, 1.0, start.first + freqDelta);
+                sendParameter (band.frequencyIndex, (float) band.frequencyNorm, true);
+
+                if (shapeHasGain (shapeOf (band)))
+                {
+                    band.gainDb = juce::jlimit (band.gainMin, band.gainMax,
+                                                start.second + dbDelta);
+                    sendParameter (band.gainIndex, (float) band.gainDb, true);
+                }
+            }
+
+            curveDirty = true;
+            updateFooterFromSelection();
+            repaint();
+            break;
+        }
+
+        case Gesture::trimOutput:
+        {
+            // fein: volle 200 px Bewegung ≈ 10 % der Range
+            const auto dy = (double) (gestureStartCentroid.y - touchCentroid().y);
+            outputValue = juce::jlimit (outputMin, outputMax,
+                                        gestureStartValue
+                                            + dy * (outputMax - outputMin) * 0.0005);
+            sendParameter (outputIndex, (float) outputValue, true);
+            repaint();
+            break;
+        }
+
+        case Gesture::trimScale:
+        {
+            const auto dy = (double) (gestureStartCentroid.y - touchCentroid().y);
+            scaleValue = juce::jlimit (scaleMin, scaleMax,
+                                       gestureStartValue
+                                           + dy * (scaleMax - scaleMin) * 0.0005);
+            sendParameter (scaleIndex, (float) scaleValue, true);
+            repaint();
+            break;
+        }
+
+        case Gesture::none:
+        case Gesture::idle:
+        default:
+            break;
+    }
+}
+
+void TouchLiveEq8Panel::touchUp (int touchIndex)
+{
+    touches.erase (touchIndex);
+
+    if (touchIndex == primaryTouchIndex)
+    {
+        // Haltender Finger weg → Gesten enden; Restfinger bleiben wirkungslos
+        primaryTouchIndex = -1;
+        pinchTouchIndex = -1;
+        gesture = touches.empty() ? Gesture::none : Gesture::idle;
+        return;
+    }
+
+    if (touchIndex == pinchTouchIndex)
+    {
+        pinchTouchIndex = -1;
+
+        if (gesture == Gesture::pinchQ)
+            gesture = Gesture::bandDrag;
+
+        return;
+    }
+
+    if (gesture == Gesture::idle || primaryTouchIndex >= 0)
+    {
+        if (touches.empty())
+            gesture = Gesture::none;
+
+        return;
+    }
+
+    // freie Familie: Finger-Anzahl geändert → Geste mit neuer Baseline
+    if (touches.empty())
+        gesture = Gesture::none;
+    else
+        beginFreeGesture();
+}
+
+void TouchLiveEq8Panel::dragActiveBandTo (juce::Point<float> position)
+{
     auto& band = bands[(size_t) selectedBand];
 
     if (! band.isMapped())
@@ -300,44 +571,6 @@ void TouchLiveEq8Panel::dragTo (juce::Point<float> position)
 
     curveDirty = true;
     repaint();
-}
-
-void TouchLiveEq8Panel::endDrag()
-{
-    dragActive = false;
-}
-
-void TouchLiveEq8Panel::beginPinch (float distance)
-{
-    auto& band = bands[(size_t) selectedBand];
-
-    if (! band.isMapped())
-        return;
-
-    pinchActive = true;
-    pinchStartDistance = juce::jmax (1.0f, distance);
-    pinchStartResonance = band.resonanceNorm;
-}
-
-void TouchLiveEq8Panel::pinchTo (float distance)
-{
-    if (! pinchActive)
-        return;
-
-    auto& band = bands[(size_t) selectedBand];
-
-    if (! band.isMapped())
-        return;
-
-    // Abstand verdoppeln ≈ +0.25 auf der Q-Norm (Faktor ~3.7 in Q)
-    const auto octaves = std::log2 (juce::jmax (1.0f, distance)
-                                    / pinchStartDistance);
-    setResonanceNorm (band, pinchStartResonance + 0.25 * octaves);
-}
-
-void TouchLiveEq8Panel::endPinch()
-{
-    pinchActive = false;
 }
 
 void TouchLiveEq8Panel::toggleBandOn (int band)
@@ -379,9 +612,24 @@ bool TouchLiveEq8Panel::isBandOn (int band) const
     return band >= 0 && band < bandCount && bands[(size_t) band].on;
 }
 
+bool TouchLiveEq8Panel::isBandSelected (int band) const
+{
+    return band >= 0 && band < bandCount && bandSelected[(size_t) band];
+}
+
 double TouchLiveEq8Panel::getResonanceNorm (int band) const
 {
     return band >= 0 && band < bandCount ? bands[(size_t) band].resonanceNorm : 0.0;
+}
+
+double TouchLiveEq8Panel::getFrequencyNorm (int band) const
+{
+    return band >= 0 && band < bandCount ? bands[(size_t) band].frequencyNorm : 0.0;
+}
+
+double TouchLiveEq8Panel::getGainDb (int band) const
+{
+    return band >= 0 && band < bandCount ? bands[(size_t) band].gainDb : 0.0;
 }
 
 int TouchLiveEq8Panel::frequencyIndexOf (int band) const
@@ -660,58 +908,17 @@ void TouchLiveEq8Panel::resized()
 //==============================================================================
 void TouchLiveEq8Panel::mouseDown (const juce::MouseEvent& event)
 {
-    const auto touchIndex = event.source.getIndex();
-
-    if (primaryTouchIndex < 0)
-    {
-        primaryTouchIndex = touchIndex;
-        primaryTouchPosition = event.position;
-        beginDrag (event.position);
-    }
-    else if (secondaryTouchIndex < 0 && touchIndex != primaryTouchIndex)
-    {
-        secondaryTouchIndex = touchIndex;
-        secondaryTouchPosition = event.position;
-        beginPinch (event.position.getDistanceFrom (primaryTouchPosition));
-    }
+    touchDown (event.source.getIndex(), event.position);
 }
 
 void TouchLiveEq8Panel::mouseDrag (const juce::MouseEvent& event)
 {
-    const auto touchIndex = event.source.getIndex();
-
-    if (touchIndex == primaryTouchIndex)
-    {
-        primaryTouchPosition = event.position;
-
-        if (pinchActive)
-            pinchTo (primaryTouchPosition.getDistanceFrom (secondaryTouchPosition));
-        else
-            dragTo (event.position);
-    }
-    else if (touchIndex == secondaryTouchIndex)
-    {
-        secondaryTouchPosition = event.position;
-        pinchTo (primaryTouchPosition.getDistanceFrom (secondaryTouchPosition));
-    }
+    touchMove (event.source.getIndex(), event.position);
 }
 
 void TouchLiveEq8Panel::mouseUp (const juce::MouseEvent& event)
 {
-    const auto touchIndex = event.source.getIndex();
-
-    if (touchIndex == secondaryTouchIndex)
-    {
-        secondaryTouchIndex = -1;
-        endPinch();
-    }
-    else if (touchIndex == primaryTouchIndex)
-    {
-        primaryTouchIndex = -1;
-        secondaryTouchIndex = -1;
-        endPinch();
-        endDrag();
-    }
+    touchUp (event.source.getIndex());
 }
 
 void TouchLiveEq8Panel::mouseDoubleClick (const juce::MouseEvent& event)
@@ -790,8 +997,8 @@ void TouchLiveEq8Panel::paint (juce::Graphics& g)
     g.strokePath (curve, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded));
 
-    // Band-Punkte im Ableton-Look: orange Kreise mit Nummer; Auswahl
-    // gefüllt (dunkle Zahl), aktive als Ring, ausgeschaltete grau
+    // Band-Punkte im Ableton-Look: orange Kreise mit Nummer; SELEKTIERTE
+    // gefüllt (dunkle Zahl), das aktive größer, ausgeschaltete grau
     for (int bandIndex = 0; bandIndex < bandCount; ++bandIndex)
     {
         const auto& band = bands[(size_t) bandIndex];
@@ -799,8 +1006,9 @@ void TouchLiveEq8Panel::paint (juce::Graphics& g)
         if (! band.isMapped())
             continue;
 
-        const auto selected = bandIndex == selectedBand;
-        const auto diameter = selected ? selectedHandleDiameter : handleDiameter;
+        const auto active = bandIndex == selectedBand;
+        const auto selected = bandSelected[(size_t) bandIndex];
+        const auto diameter = active ? selectedHandleDiameter : handleDiameter;
         const auto circle = juce::Rectangle<float> (diameter, diameter)
                                 .withCentre (bandPosition (bandIndex));
 
@@ -819,9 +1027,23 @@ void TouchLiveEq8Panel::paint (juce::Graphics& g)
             g.drawEllipse (circle.reduced (1.0f), 2.0f);
         }
 
-        g.setFont (push::scaledFont (selected ? 18.0f : 15.0f));
+        g.setFont (push::scaledFont (active ? 18.0f : 15.0f));
         g.drawText (juce::String (bandIndex + 1), circle.toNearestInt(),
                     juce::Justification::centred);
+    }
+
+    // Gesten-Readout (3/4 Finger): Output-Gain bzw. Scale gross mittig oben
+    if (gesture == Gesture::trimOutput || gesture == Gesture::trimScale)
+    {
+        const auto text = gesture == Gesture::trimOutput
+            ? "Output  " + juce::String (outputValue >= 0.0 ? "+" : "")
+                  + juce::String (outputValue, 2) + " dB"
+            : "Scale  " + juce::String (scaleValue * 100.0, 0) + " %";
+
+        g.setColour (push::colours::text);
+        g.setFont (push::scaledFont (18.0f));
+        g.drawText (text, area.toNearestInt().reduced (0, 10),
+                    juce::Justification::centredTop);
     }
 
     // Readout des gewählten Bands (oben rechts, Live-Look)

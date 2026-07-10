@@ -28,6 +28,12 @@
   Lives Cyan, orange Nummern-Handles Ø 44/54 px), Kurvenauflösung
   an Pixelbreite gekoppelt; Multi-Touch: Pinch = Q des aktiven
   Bandes. Kreuzcheck im Feld: identische Kurvenform beidseitig.
+- **Gesten-Runde (10.07.2026):** Multi-Touch-Zustandsmaschine
+  (touchDown/Move/Up): Punkt halten + Antippen = Mehrfachauswahl,
+  Pinch-Q nur bei berührtem Punkt, frei 2 Finger = Auswahl gemeinsam
+  verschieben, 3 = Output-Gain fein, 4 = Scale (Readout im Plot);
+  Primär-Release macht Restfinger wirkungslos. 5 Gesten-Sektionen
+  Catch2-getestet.
 - **Nächster Schritt:** Spektrum-Hintergrund via Link Audio + lokaler
   Average (User-Wunsch, eigene Runde); dann M5-Folgerunden
   Compressor/Glue (Kennlinie+GR), Delay/Reverb — oder M6 Modulatoren.

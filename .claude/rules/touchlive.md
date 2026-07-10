@@ -82,6 +82,10 @@ Bespoke-UIs (M5):
   `(1.097+0.611·lgQ)`); „Adaptive Q" aus parvals schaltet den
   Gain-Term. Formeln NIE ohne neue Messkampagne ändern; Y-Range
   ±15 dB wie Live.
+- EQ8-Gesten (§10j): Punkt halten + Antippen = Mehrfachauswahl;
+  Pinch-Q NUR bei berührtem Punkt; frei: 2 Finger = Auswahl schieben,
+  3 = Output, 4 = Scale; Primär-Release → Restfinger idle. Kernpfade
+  touchDown/Move/Up — Maus-Handler NIE eigene Logik geben.
 - Thinning-Kanal von sendTouchValue = Adresse + Argumente OHNE den Wert
   (`touchKeyFor`) — NIE auf die nackte Adresse zurückbauen, sonst
   latchen sich Freq+Gain bzw. Multi-Touch-Fader gegenseitig weg.

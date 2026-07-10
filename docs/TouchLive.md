@@ -628,9 +628,21 @@ analoge RBJ-Prototypen mit eigener Q-Semantik** — kalibriert auf
   Handles im Ableton-Look: orange Nummernkreise Ø 44 px
   (Auswahl gefüllt Ø 54, dunkle Zahl; aus = grau) — User-Wunsch
   „größer als ein Zeigefinger".
-- **Multi-Touch:** zweiter Finger = Pinch → Q des aktiven Bandes
-  (Abstand verdoppeln ≈ +0.25 Q-Norm ≈ Faktor 3.7); während des
-  Pinchs friert der Freq/Gain-Drag ein. Kernpfade beginPinch/pinchTo.
+- **Multi-Touch-Gesten (User-Spezifikation 10.07.2026, Kernpfade
+  touchDown/Move/Up als Zustandsmaschine):**
+  1. Punkt HALTEN + weitere Punkte antippen = Mehrfachauswahl
+     (selektierte Punkte gefüllt, aktiver größer);
+  2. Punkt halten + freier zweiter Finger = Pinch → Q des aktiven
+     Bandes (Abstand verdoppeln ≈ +0.25 Q-Norm ≈ Faktor 3.7; Freq/
+     Gain-Drag friert währenddessen ein) — Q-Geste NUR bei
+     berührtem Punkt;
+  3. OHNE Punktberührung: 2 Finger = alle angewählten Bänder
+     gemeinsam verschieben (Zentroid-Delta auf Freq/Gain, Snapshot
+     beim Gesten-Start) · 3 Finger = Output-Gain fein · 4 Finger =
+     Scale (je vertikal, 200 px ≈ 10 % der Range, großes Readout);
+     Parameter „Output"/„Scale" per Name aus parmeta.
+  4. Lässt der haltende Finger los, sind Restfinger bis zum Abheben
+     wirkungslos (idle) — keine Gesten-Überraschungen.
 - Feldtest-Kreuzcheck: Band 2 auf +12.4 dB gezogen — Lives Display
   zeigt identische Werte UND identische Kurvenform.
 - **Nächster Politur-Schritt (User-Wunsch):** Spektrum-Hintergrund via
