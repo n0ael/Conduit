@@ -10,7 +10,7 @@ namespace conduit
 //==============================================================================
 /**
     Schmales, vertikales Rand-Ribbon für globale Ausdruckswerte (Grid-Page,
-    M1b-3 — Volume/AT-Offset): Antippen/Ziehen setzt den Wert aus der
+    v2 — Pitch/Pressure/Slide): Antippen/Ziehen setzt den Wert aus der
     vertikalen Position (oben = 1, Maximum). Hält keinen eigenen
     Wertezustand außer dem Füllstand fürs Zeichnen — die Engine ist die
     Quelle der Wahrheit, der Besitzer verdrahtet onValueChanged.
@@ -19,7 +19,7 @@ namespace conduit
     Persistenz. Message Thread.
 
     bipolarMode: Füllindikator zeichnet von der vertikalen MITTE zum
-    aktuellen Wert statt von unten (z. B. AT-Offset — Mitte = neutral,
+    aktuellen Wert statt von unten (z. B. Pressure-Offset — Mitte = neutral,
     oben/unten = +/-). valueForNormY liefert unverändert [0, 1]; die
     Bipolar-Umrechnung (z. B. (value01 - 0.5) * 2) macht der Besitzer.
 */
@@ -31,6 +31,12 @@ public:
     /** Feuert bei jedem Down/Drag mit dem aus der Y-Position abgeleiteten
         Wert [0, 1]. */
     std::function<void (float)> onValueChanged;
+
+    /** Füllfarbe des Wertindikators pro Achse (Design-Mock Grid-Page v2:
+        Pitch grün, Pressure orange, Slide cyan) — Default ledWhite. Track
+        und Rahmen bleiben tile/outline. Andockstelle für die spätere
+        konfigurierbare Achsen-Farbe. */
+    void setFillColour (juce::Colour newColour);
 
     void paint (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& event) override;
@@ -46,6 +52,7 @@ private:
     juce::String label;
     bool  bipolar = false;
     float currentValue = 0.0f;
+    juce::Colour fillColour;   // Default push::colours::ledWhite (Ctor)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ExpressionRibbon)
 };

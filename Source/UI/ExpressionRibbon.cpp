@@ -7,10 +7,20 @@ namespace conduit
 
 ExpressionRibbon::ExpressionRibbon (juce::String labelText, bool bipolarMode)
     : label (std::move (labelText)), bipolar (bipolarMode),
-      currentValue (bipolarMode ? 0.5f : 0.0f) // bipolar startet neutral (Mitte), nicht am unteren Anschlag
+      currentValue (bipolarMode ? 0.5f : 0.0f), // bipolar startet neutral (Mitte), nicht am unteren Anschlag
+      fillColour (push::colours::ledWhite)
 {
     setWantsKeyboardFocus (false);
     setInterceptsMouseClicks (true, false);
+}
+
+void ExpressionRibbon::setFillColour (juce::Colour newColour)
+{
+    if (fillColour == newColour)
+        return;
+
+    fillColour = newColour;
+    repaint();
 }
 
 float ExpressionRibbon::valueForNormY (float normY) noexcept
@@ -50,7 +60,7 @@ void ExpressionRibbon::paint (juce::Graphics& g)
         const auto top     = juce::jmin (fillY, middleY);
         const auto bottom  = juce::jmax (fillY, middleY);
 
-        g.setColour (push::colours::ledWhite);
+        g.setColour (fillColour);
         g.fillRoundedRectangle ({ bounds.getX(), top, bounds.getWidth(), bottom - top }, 4.0f);
 
         g.setColour (push::colours::outline);
@@ -58,7 +68,7 @@ void ExpressionRibbon::paint (juce::Graphics& g)
     }
     else
     {
-        g.setColour (push::colours::ledWhite);
+        g.setColour (fillColour);
         g.fillRoundedRectangle (bounds.withTop (fillY), 4.0f);
     }
 
@@ -66,7 +76,7 @@ void ExpressionRibbon::paint (juce::Graphics& g)
     g.drawRoundedRectangle (bounds, 4.0f, 1.0f);
 
     g.setColour (push::colours::textDim);
-    g.setFont (push::scaledFont (13.0f));
+    g.setFont (push::scaledFont (12.0f));   // Design-Mock Grid-Page v2: Jost 12
     g.drawFittedText (label, getLocalBounds().removeFromBottom (20), juce::Justification::centred, 1, 1.0f);
 }
 

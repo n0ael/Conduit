@@ -186,22 +186,37 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
     const auto sunDiameter  = ring.restRadiusPx() * 2.0f;
     const auto moonDiameter = sunDiameter * 0.6f; // 60% der Sonnengröße (User 06.07.2026)
 
+    // Weiche Kanten (Design-Mock Grid-Page v2): radialer Alpha-Gradient am
+    // Rand statt Live-Blur — voll deckend bis (r - blur)/r, transparent bei
+    // r. DPI-sauber, kein vorgerendertes Image nötig.
+    const auto fillSoftCircle = [&g] (juce::Point<float> centre, float diameter, float edgeBlurPx)
+    {
+        const auto radius = diameter * 0.5f;
+        juce::ColourGradient gradient (push::colours::ledWhite, centre.x, centre.y,
+                                       push::colours::ledWhite.withAlpha (0.0f),
+                                       centre.x + radius, centre.y, true);
+        gradient.addColour (juce::jlimit (0.0, 1.0, (double) ((radius - edgeBlurPx) / radius)),
+                            push::colours::ledWhite);
+        g.setGradientFill (gradient);
+        g.fillEllipse (juce::Rectangle<float> (diameter, diameter).withCentre (centre));
+    };
+
     for (const auto& circle : circles)
     {
-        g.setColour (push::colours::ledWhite);
-
         // "Sonne": ausgemalter Punkt am (ggf. mitwandernden) Zentrum des
         // primären Fingers — fixer Zielpunkt für Pitch/Press unabhängig vom
         // Orbit-Radius (User 06.07.2026, wichtig sobald Hold dazukommt).
-        g.fillEllipse (juce::Rectangle<float> (sunDiameter, sunDiameter).withCentre (circle.center));
+        fillSoftCircle (circle.center, sunDiameter, 2.5f);
 
         if (circle.hasOrbit)
         {
             // Umlaufbahn (Orbit): dünner Ring durch die aktuelle (ggf.
-            // eingefrorene) Ring-Distanz, Mond an der Ring-Position.
+            // eingefrorene) Ring-Distanz — bleibt scharf —, Mond an der
+            // Ring-Position mit weicher Kante.
             const auto orbitDiameter = circle.radiusPx * 2.0f;
+            g.setColour (push::colours::ledWhite);
             g.drawEllipse (juce::Rectangle<float> (orbitDiameter, orbitDiameter).withCentre (circle.center), 1.5f);
-            g.fillEllipse (juce::Rectangle<float> (moonDiameter, moonDiameter).withCentre (circle.orbitPos));
+            fillSoftCircle (circle.orbitPos, moonDiameter, 2.0f);
         }
     }
 }

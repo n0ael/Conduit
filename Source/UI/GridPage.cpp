@@ -17,7 +17,6 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     addAndMakeVisible (rootTile);
     addAndMakeVisible (scaleTile);
     addAndMakeVisible (releaseAllButton);
-    addAndMakeVisible (volumeRibbon);
     addAndMakeVisible (atOffsetRibbon);
     addAndMakeVisible (slideOffsetRibbon);
     addAndMakeVisible (pitchOffsetRibbon);
@@ -47,8 +46,6 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     rootState.addListener (this);
     refreshScaleFromState();   // Initialwert beim Konstruieren lesen
 
-    volumeRibbon.onValueChanged = [this] (float value) { engine.setGlobalVolume (value); };
-
     // Bipolar: Mitte (value01 == 0.5) -> Offset 0, oben -> +1, unten -> -1.
     atOffsetRibbon.onValueChanged = [this] (float value) { engine.setPressureOffset ((value - 0.5f) * 2.0f); };
     slideOffsetRibbon.onValueChanged = [this] (float value) { engine.setSlideOffset ((value - 0.5f) * 2.0f); };
@@ -58,6 +55,12 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     {
         engine.setPitchBendOffset ((value - 0.5f) * 2.0f * kPitchBendOffsetSemitones);
     };
+
+    // Achsen-Farben (Design-Mock Grid-Page v2) — spaeter user-konfigurierbar,
+    // setFillColour ist die Andockstelle dafuer.
+    pitchOffsetRibbon.setFillColour (push::colours::ledGreen);
+    atOffsetRibbon.setFillColour    (push::colours::ledOrange);
+    slideOffsetRibbon.setFillColour (push::colours::ledCyan);
 
     // Editor-Dock-Panel: ein Tab „MPE" mit dem MPE-Shaping-Editor (S2c),
     // Breite/Offen-Zustand aus der Persistenz laden, Live-Resize + Commit
@@ -184,12 +187,13 @@ void GridPage::resized()
 
     constexpr int ribbonWidth = 72;
 
-    // Links: Volume, dann Pressure/AT-Offset. Rechts: PitchBend-Offset außen,
-    // dann Slide-Offset -- beide Gruppen wachsen vom Rand zur Mitte.
-    volumeRibbon.setBounds      (bounds.removeFromLeft  (ribbonWidth));
-    atOffsetRibbon.setBounds    (bounds.removeFromLeft  (ribbonWidth));
-    pitchOffsetRibbon.setBounds (bounds.removeFromRight (ribbonWidth));
-    slideOffsetRibbon.setBounds (bounds.removeFromRight (ribbonWidth));
+    // Design-Mock Grid-Page v2: links Pitch in voller Höhe, rechts EINE
+    // Spalte mit Pressure (oben) über Slide (unten) je halber Höhe.
+    pitchOffsetRibbon.setBounds (bounds.removeFromLeft (ribbonWidth));
+
+    auto rightColumn = bounds.removeFromRight (ribbonWidth);
+    atOffsetRibbon.setBounds    (rightColumn.removeFromTop (rightColumn.getHeight() / 2));
+    slideOffsetRibbon.setBounds (rightColumn);
     keyboard.setBounds (bounds);
 }
 

@@ -19,18 +19,17 @@ namespace conduit
 
 //==============================================================================
 /**
-    Grid-Page (Ω, M1 Teil 3 — erster spielbarer Ton; M1b-3 — globale
-    Ausdrucksebene + Panic; M1b-4 — bipolarer Pressure-Offset; M1b-6 —
-    Slide-/PitchBend-Offset-Ribbons): GridKeyboardComponent (Hauptfläche)
-    flankiert von vier Rand-Ribbons — links Volume (unipolar, MPE-Master-
-    Kanal CC7, GridVoiceEngine::setGlobalVolume) und Pressure/AT-Offset
-    (bipolar, Mitte = neutral, GridVoiceEngine::setPressureOffset), rechts
-    Slide-Offset (bipolar, GridVoiceEngine::setSlideOffset) und PitchBend-
-    Offset (bipolar, ±12 Halbtöne, GridVoiceEngine::setPitchBendOffset) —
-    plus ein minimales MIDI-Out-Port-Dropdown und ein Release-All-Button
-    (GridVoiceEngine::allNotesOff). Kein Feinschliff darüber hinaus — reine
-    Funktion, bis der Touch-Controller-Baukasten (CLAUDE.md 14 ADR) als
-    eigener Meilenstein folgt.
+    Grid-Page (Ω, M1 Teil 3 — erster spielbarer Ton; Grid-Page v2 —
+    Ribbon-Umbau nach Design-Mock): GridKeyboardComponent (Hauptfläche)
+    flankiert von drei bipolaren Rand-Ribbons (Mitte = neutral) — links
+    „Pitch" in voller Höhe (±12 Halbtöne,
+    GridVoiceEngine::setPitchBendOffset, grün), rechts EINE Spalte mit
+    „Pressure" oben (GridVoiceEngine::setPressureOffset, orange) über
+    „Slide" unten (GridVoiceEngine::setSlideOffset, cyan) — plus ein
+    minimales MIDI-Out-Port-Dropdown und ein Release-All-Button
+    (GridVoiceEngine::allNotesOff). Das frühere Volume-Ribbon ist
+    entfallen; GridVoiceEngine::setGlobalVolume bleibt für Tests/Zukunft
+    bestehen.
 
     Rechtes Editor-Dock-Panel (S2-Vorstufe MPE-Shaping): EditorDockPanel
     dockt via bounds.removeFromRight (dockPanel.getPreferredWidth()) --
@@ -106,10 +105,9 @@ private:
     push::TextTile rootTile  { "C" };            // Session-Skala: Grundton (Tap = weiterzykeln)
     push::TextTile scaleTile { "Chromatic" };    // Session-Skala: Typ (Tap = weiterzykeln)
     push::TextTile releaseAllButton { "Release All", push::colours::ledRed };
-    ExpressionRibbon volumeRibbon        { "VOL" };
-    ExpressionRibbon atOffsetRibbon      { "AT", true };   // bipolar
-    ExpressionRibbon slideOffsetRibbon   { "SLD", true };  // bipolar
-    ExpressionRibbon pitchOffsetRibbon   { "BND", true };  // bipolar
+    ExpressionRibbon atOffsetRibbon      { "Pressure", true };  // bipolar
+    ExpressionRibbon slideOffsetRibbon   { "Slide", true };     // bipolar
+    ExpressionRibbon pitchOffsetRibbon   { "Pitch", true };     // bipolar
     GridKeyboardComponent keyboard;
     EditorDockPanel dockPanel;
 

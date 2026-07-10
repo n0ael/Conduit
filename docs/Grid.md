@@ -18,10 +18,15 @@
     (Sonne = primärer Finger; Mond = zweiter Finger im Orbit-Greifband,
     Radius → Slide; Orbit friert relativ zur Sonne ein, wandert mit ihr,
     weit weg wieder greifbar).
-  - **Ränder:** ExpressionRibbon ×2 — Volume (unipolar → Master-CC7) und
-    AT-Offset (bipolar, Mitte neutral → interner Pressure-Offset auf jede
-    Stimme; ungeklemmter Rohwert hält den vollen Bereich). Release-All →
-    GridVoiceEngine::allNotesOff.
+  - **Ränder (Grid-Page v2, Ribbon-Umbau 07/2026):** ExpressionRibbon ×3,
+    alle bipolar (Mitte neutral, ungeklemmter Rohwert hält den vollen
+    Bereich) — links „Pitch" in voller Höhe (±12 HT, setPitchBendOffset,
+    grün), rechts eine 72-px-Spalte mit „Pressure" oben (setPressureOffset,
+    orange) über „Slide" unten (setSlideOffset, cyan); Füllfarbe pro Achse
+    via ExpressionRibbon::setFillColour (Andockstelle für spätere
+    Konfigurierbarkeit). Das M1-Volume-Ribbon ist entfallen —
+    GridVoiceEngine::setGlobalVolume (Master-CC7) bleibt für
+    Tests/Zukunft. Release-All → GridVoiceEngine::allNotesOff.
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +
