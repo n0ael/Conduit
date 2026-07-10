@@ -75,6 +75,13 @@ Bespoke-UIs (M5):
 - Live 12 nennt den EQ-Q-Parameter `"{n} Q A"`, NICHT „Resonance A"
   (Alias behalten). Wertesemantik verifiziert: Frequency-Norm →
   Hz = 10·2200^v, Q-Norm → 0.1·180^v, Gain direkt dB.
+- EQ8-Anzeige-Kurven sind gegen Lives Display KALIBRIERT
+  (docs/TouchLive.md §10j, < 0.4 dB): analoge RBJ-Prototypen mit
+  Q_eff-Gesetzen pro Typ (Bell `Q·0.5151·10^(0.04908·|g|)`, Shelf
+  eigene Formel, Cuts/Notch 1:1, 48er = Butterworth-8-Kaskade ×
+  `(1.097+0.611·lgQ)`); „Adaptive Q" aus parvals schaltet den
+  Gain-Term. Formeln NIE ohne neue Messkampagne ändern; Y-Range
+  ±15 dB wie Live.
 - Thinning-Kanal von sendTouchValue = Adresse + Argumente OHNE den Wert
   (`touchKeyFor`) — NIE auf die nackte Adresse zurückbauen, sonst
   latchen sich Freq+Gain bzw. Multi-Touch-Fader gegenseitig weg.

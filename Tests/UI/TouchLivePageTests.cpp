@@ -629,6 +629,47 @@ TEST_CASE ("TouchLiveEq8Panel: bespoke ersetzt die Bank, Drag sendet Freq + Gain
     REQUIRE (device.getParameterName (0) == "1 Filter On A");
 }
 
+TEST_CASE ("TouchLiveEq8Panel: Pinch (zweiter Finger) ändert den Q des aktiven Bandes",
+           "[touchlive][ui]")
+{
+    PageRig rig;
+    rig.loadDemoSet();
+
+    auto& device = rig.page->deviceView;
+    device.setBounds (0, 0, 720, 420);
+    rig.model.applyDiff ("devices", parse ((
+        juce::String (R"({"parmeta:dv:1":)") + eq8Parmeta()
+        + R"(,"parvals:dv:1":)" + eq8Parvals() + "}").toRawUTF8()));
+    device.flushPendingRebuild();
+
+    auto* panel = dynamic_cast<conduit::TouchLiveEq8Panel*> (device.getBespokePanel());
+    REQUIRE (panel != nullptr);
+
+    panel->selectBand (2);
+    const auto before = panel->getResonanceNorm (2);
+    REQUIRE (before == Approx (0.5));
+
+    panel->beginPinch (100.0f);
+    REQUIRE (panel->isPinchActive());
+
+    rig.transport->sent.clear();
+    panel->pinchTo (200.0f);   // Abstand verdoppelt → +0.25 auf der Q-Norm
+
+    REQUIRE (panel->getResonanceNorm (2) == Approx (before + 0.25).margin (1e-4));
+    REQUIRE (panel->qSlider.getValue() == Approx (before + 0.25).margin (1e-4));
+
+    const auto sent = rig.transport->sentTo ("/live/device/set/parameter");
+    REQUIRE (sent.size() == 1);
+    REQUIRE (sent.front()[1].getInt32() == panel->resonanceIndexOf (2));
+
+    // Halbierter Abstand vom Start: −0.25 (Ziel unter dem Startwert)
+    panel->pinchTo (50.0f);
+    REQUIRE (panel->getResonanceNorm (2) == Approx (before - 0.25).margin (1e-4));
+
+    panel->endPinch();
+    REQUIRE_FALSE (panel->isPinchActive());
+}
+
 //==============================================================================
 namespace
 {

@@ -21,8 +21,16 @@
   (touchKeyFor) — vorher latchten sich Freq+Gain und Multi-Touch-Fader
   gegenseitig weg. Suite 607 Cases / 27 274 Assertions grün; Smoke inkl.
   Dogfooding (EQ Eight per M4-Browser geladen).
-- **Nächster Schritt:** M5-Folgerunden Compressor/Glue (Kennlinie+GR),
-  Delay/Reverb — oder M6 Modulator-Zwillinge.
+- **Politur-Runde (10.07.2026): EQ-Kurve gegen Lives Anzeige
+  kalibriert** — User-Messkampagne (70 Screenshots, Band 2 mit
+  ablesbaren Gain/Q/Typ) → Python-Extraktion → Q_eff-Gesetze pro
+  Filtertyp (< 0.4 dB, docs §10j); Ableton-Look (±15 dB, Raster,
+  Lives Cyan, orange Nummern-Handles Ø 44/54 px), Kurvenauflösung
+  an Pixelbreite gekoppelt; Multi-Touch: Pinch = Q des aktiven
+  Bandes. Kreuzcheck im Feld: identische Kurvenform beidseitig.
+- **Nächster Schritt:** Spektrum-Hintergrund via Link Audio + lokaler
+  Average (User-Wunsch, eigene Runde); dann M5-Folgerunden
+  Compressor/Glue (Kennlinie+GR), Delay/Reverb — oder M6 Modulatoren.
 
 ## Meilenstein (10.07.2026) — TouchLive M4 (BROWSER)
 

@@ -10,25 +10,22 @@ namespace conduit
 
 namespace
 {
-    constexpr double sampleRateForDisplay = 48000.0;   // nur Kurven-Näherung
     constexpr double minHz = 10.0, maxHz = 22000.0;
-    constexpr int curvePoints = 96;
 
-    // Band-Punktfarben (Anlehnung an Lives EQ-Eight-Nummerierung)
-    const juce::Colour bandColours[TouchLiveEq8Panel::bandCount] = {
-        juce::Colour (0xffff8447), juce::Colour (0xffffc247),
-        juce::Colour (0xffe8e847), juce::Colour (0xff7ce847),
-        juce::Colour (0xff47e8c2), juce::Colour (0xff47a8ff),
-        juce::Colour (0xffb47cff), juce::Colour (0xffff6b8a),
-    };
+    // Lives Anzeige-Farben (aus den Kalibrier-Screenshots gemessen)
+    const juce::Colour curveColour  { 0xff03cfde };   // Lives Kurven-Cyan
+    const juce::Colour handleColour { 0xfff0a53c };   // Lives Handle-Orange
+    const juce::Colour handleOff    { 0xff6a6f74 };   // Band aus
 
-    // Wire-Norm ↔ Hz (Kalibrier-Kandidat Feldtest, §11): log 10 Hz – 22 kHz
+    // Butterworth-8-Stufen-Qs (48-dB-Cuts, §10j)
+    constexpr double butter8[4] = { 0.5098, 0.6013, 0.8999, 2.5629 };
+
+    // Wire-Norm ↔ Hz / Q — gegen Lives Anzeige verifiziert (§10i)
     [[nodiscard]] double normToHz (double norm)
     {
         return minHz * std::pow (maxHz / minHz, juce::jlimit (0.0, 1.0, norm));
     }
 
-    // Wire-Norm ↔ Q (Kalibrier-Kandidat): log 0.1 – 18
     [[nodiscard]] double normToQ (double norm)
     {
         return 0.1 * std::pow (180.0, juce::jlimit (0.0, 1.0, norm));
@@ -59,13 +56,8 @@ TouchLiveEq8Panel::TouchLiveEq8Panel (TouchLiveClient& clientToUse)
     {
         auto& band = bands[(size_t) selectedBand];
 
-        if (! band.isMapped())
-            return;
-
-        band.resonanceNorm = qSlider.getValue();
-        sendParameter (band.resonanceIndex, (float) band.resonanceNorm, true);
-        curveDirty = true;
-        repaint();
+        if (band.isMapped())
+            setResonanceNorm (band, qSlider.getValue());
     };
 
     addAndMakeVisible (qSlider);
@@ -87,6 +79,7 @@ void TouchLiveEq8Panel::setDevice (const juce::String& deviceKeyToUse,
     deviceKey = deviceKeyToUse;
     bands = {};
     mappedBandCount = 0;
+    adaptiveQIndex = -1;
 
     if (const auto* meta = parmeta.getArray())
     {
@@ -94,6 +87,12 @@ void TouchLiveEq8Panel::setDevice (const juce::String& deviceKeyToUse,
         {
             const auto& entry = meta->getReference (index);
             const auto name = stringField (entry, "name");
+
+            if (name == "Adaptive Q")
+            {
+                adaptiveQIndex = index;
+                continue;
+            }
 
             for (int bandIndex = 0; bandIndex < bandCount; ++bandIndex)
             {
@@ -142,7 +141,6 @@ void TouchLiveEq8Panel::setDevice (const juce::String& deviceKeyToUse,
         if (band.isMapped())
             ++mappedBandCount;
 
-    // Auswahl auf ein gemapptes Band setzen
     if (! bands[(size_t) selectedBand].isMapped())
         for (int bandIndex = 0; bandIndex < bandCount; ++bandIndex)
             if (bands[(size_t) bandIndex].isMapped())
@@ -152,6 +150,8 @@ void TouchLiveEq8Panel::setDevice (const juce::String& deviceKeyToUse,
             }
 
     dragActive = false;
+    pinchActive = false;
+    primaryTouchIndex = secondaryTouchIndex = -1;
     curveDirty = true;
     updateFooterFromSelection();
     repaint();
@@ -170,6 +170,8 @@ void TouchLiveEq8Panel::setValues (const juce::var& parvals)
                    ? (double) values->getReference (index) : fallback;
     };
 
+    adaptiveQ = valueAt (adaptiveQIndex, adaptiveQ ? 1.0 : 0.0) > 0.5;
+
     for (int bandIndex = 0; bandIndex < bandCount; ++bandIndex)
     {
         auto& band = bands[(size_t) bandIndex];
@@ -178,25 +180,25 @@ void TouchLiveEq8Panel::setValues (const juce::var& parvals)
             continue;
 
         // Lokal-optimistisch (§5.1): das gezogene Band folgt NUR dem Finger
-        const auto dragged = dragActive && bandIndex == selectedBand;
+        const auto touched = (dragActive || pinchActive)
+                                 && bandIndex == selectedBand;
 
         band.on = valueAt (band.onIndex, band.on ? 1.0 : 0.0) > 0.5;
         band.typeValue = juce::jlimit (0, juce::jmax (0, band.typeItems.size() - 1),
                                        (int) std::lround (valueAt (band.typeIndex,
                                                                    band.typeValue)));
 
-        if (! dragged)
+        if (! touched)
         {
             band.frequencyNorm = juce::jlimit (0.0, 1.0,
                                                valueAt (band.frequencyIndex,
                                                         band.frequencyNorm));
             band.gainDb = juce::jlimit (band.gainMin, band.gainMax,
                                         valueAt (band.gainIndex, band.gainDb));
+            band.resonanceNorm = juce::jlimit (0.0, 1.0,
+                                               valueAt (band.resonanceIndex,
+                                                        band.resonanceNorm));
         }
-
-        band.resonanceNorm = juce::jlimit (0.0, 1.0,
-                                           valueAt (band.resonanceIndex,
-                                                    band.resonanceNorm));
     }
 
     curveDirty = true;
@@ -222,6 +224,15 @@ void TouchLiveEq8Panel::sendParameter (int parameterIndex, float value, bool con
         client.sendTouchValue (message);
     else
         client.sendCommand (message);
+}
+
+void TouchLiveEq8Panel::setResonanceNorm (Band& band, double newNorm)
+{
+    band.resonanceNorm = juce::jlimit (0.0, 1.0, newNorm);
+    sendParameter (band.resonanceIndex, (float) band.resonanceNorm, true);
+    qSlider.setValue (band.resonanceNorm, juce::dontSendNotification);
+    curveDirty = true;
+    repaint();
 }
 
 //==============================================================================
@@ -270,7 +281,7 @@ void TouchLiveEq8Panel::beginDrag (juce::Point<float> position)
 
 void TouchLiveEq8Panel::dragTo (juce::Point<float> position)
 {
-    if (! dragActive)
+    if (! dragActive || pinchActive)   // Pinch friert Freq/Gain ein
         return;
 
     auto& band = bands[(size_t) selectedBand];
@@ -294,6 +305,39 @@ void TouchLiveEq8Panel::dragTo (juce::Point<float> position)
 void TouchLiveEq8Panel::endDrag()
 {
     dragActive = false;
+}
+
+void TouchLiveEq8Panel::beginPinch (float distance)
+{
+    auto& band = bands[(size_t) selectedBand];
+
+    if (! band.isMapped())
+        return;
+
+    pinchActive = true;
+    pinchStartDistance = juce::jmax (1.0f, distance);
+    pinchStartResonance = band.resonanceNorm;
+}
+
+void TouchLiveEq8Panel::pinchTo (float distance)
+{
+    if (! pinchActive)
+        return;
+
+    auto& band = bands[(size_t) selectedBand];
+
+    if (! band.isMapped())
+        return;
+
+    // Abstand verdoppeln ≈ +0.25 auf der Q-Norm (Faktor ~3.7 in Q)
+    const auto octaves = std::log2 (juce::jmax (1.0f, distance)
+                                    / pinchStartDistance);
+    setResonanceNorm (band, pinchStartResonance + 0.25 * octaves);
+}
+
+void TouchLiveEq8Panel::endPinch()
+{
+    pinchActive = false;
 }
 
 void TouchLiveEq8Panel::toggleBandOn (int band)
@@ -335,6 +379,11 @@ bool TouchLiveEq8Panel::isBandOn (int band) const
     return band >= 0 && band < bandCount && bands[(size_t) band].on;
 }
 
+double TouchLiveEq8Panel::getResonanceNorm (int band) const
+{
+    return band >= 0 && band < bandCount ? bands[(size_t) band].resonanceNorm : 0.0;
+}
+
 int TouchLiveEq8Panel::frequencyIndexOf (int band) const
 {
     return band >= 0 && band < bandCount ? bands[(size_t) band].frequencyIndex : -1;
@@ -343,6 +392,11 @@ int TouchLiveEq8Panel::frequencyIndexOf (int band) const
 int TouchLiveEq8Panel::gainIndexOf (int band) const
 {
     return band >= 0 && band < bandCount ? bands[(size_t) band].gainIndex : -1;
+}
+
+int TouchLiveEq8Panel::resonanceIndexOf (int band) const
+{
+    return band >= 0 && band < bandCount ? bands[(size_t) band].resonanceIndex : -1;
 }
 
 juce::Point<float> TouchLiveEq8Panel::bandPosition (int band) const
@@ -404,6 +458,31 @@ bool TouchLiveEq8Panel::shapeHasGain (Shape shape) const noexcept
         || shape == Shape::highShelf;
 }
 
+double TouchLiveEq8Panel::effectiveQ (Shape shape, double q, double gainDb) const
+{
+    // Kalibrier-Kampagne 10.07.2026 (§10j): Lives Anzeige-Q relativ zum
+    // RBJ-Prototyp. Der Gain-Term ist Lives "Adaptive Q" (alle Messungen
+    // mit On); Off lässt nach dieser Modellierung nur den Term entfallen.
+    const auto g = adaptiveQ ? std::abs (gainDb) : 0.0;
+
+    switch (shape)
+    {
+        case Shape::bell:
+            return q * 0.5151 * std::pow (10.0, 0.04908 * g);
+
+        case Shape::lowShelf:
+        case Shape::highShelf:
+        {
+            const auto lq = std::log10 (juce::jmax (1.0e-3, q));
+            return std::pow (10.0, -0.36661 + 0.45166 * lq
+                                       + 0.04382 * g - 0.00685 * lq * g);
+        }
+
+        default:
+            return q;   // Cuts/Notch: 1:1 (gemessen, kein Adaptive Q)
+    }
+}
+
 double TouchLiveEq8Panel::responseDbAt (double hz) const
 {
     double totalDb = 0.0;
@@ -415,75 +494,65 @@ double TouchLiveEq8Panel::responseDbAt (double hz) const
 
         const auto shape = shapeOf (band);
         const auto f0 = normToHz (band.frequencyNorm);
-        const auto q = juce::jmax (0.05, normToQ (band.resonanceNorm));
-        const auto w0 = juce::MathConstants<double>::twoPi
-                            * juce::jlimit (minHz, sampleRateForDisplay * 0.499, f0)
-                            / sampleRateForDisplay;
-        const auto cw = std::cos (w0);
-        const auto sw = std::sin (w0);
-        const auto alpha = sw / (2.0 * q);
+        const auto q = juce::jmax (0.025,
+                                   effectiveQ (shape, normToQ (band.resonanceNorm),
+                                               band.gainDb));
         const auto a = std::pow (10.0, band.gainDb / 40.0);
         const auto sqrtA = std::sqrt (a);
 
-        double b0, b1, b2, a0, a1, a2;   // RBJ Audio-EQ-Cookbook
+        // Analoge Prototypen (s-Domain) — Lives Anzeige zeigt keine
+        // Bilinear-Stauchung, und alle Fits liefen analog (§10j)
+        const std::complex<double> s (0.0, hz / f0);
+        const auto s2 = s * s;
+        std::complex<double> h;
 
         switch (shape)
         {
             case Shape::bell:
-                b0 = 1.0 + alpha * a;  b1 = -2.0 * cw;      b2 = 1.0 - alpha * a;
-                a0 = 1.0 + alpha / a;  a1 = -2.0 * cw;      a2 = 1.0 - alpha / a;
+                h = (s2 + s * (a / q) + 1.0) / (s2 + s / (a * q) + 1.0);
                 break;
 
             case Shape::lowShelf:
-                b0 = a * ((a + 1.0) - (a - 1.0) * cw + 2.0 * sqrtA * alpha);
-                b1 = 2.0 * a * ((a - 1.0) - (a + 1.0) * cw);
-                b2 = a * ((a + 1.0) - (a - 1.0) * cw - 2.0 * sqrtA * alpha);
-                a0 = (a + 1.0) + (a - 1.0) * cw + 2.0 * sqrtA * alpha;
-                a1 = -2.0 * ((a - 1.0) + (a + 1.0) * cw);
-                a2 = (a + 1.0) + (a - 1.0) * cw - 2.0 * sqrtA * alpha;
+                h = a * (s2 + s * (sqrtA / q) + a)
+                        / (a * s2 + s * (sqrtA / q) + 1.0);
                 break;
 
             case Shape::highShelf:
-                b0 = a * ((a + 1.0) + (a - 1.0) * cw + 2.0 * sqrtA * alpha);
-                b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cw);
-                b2 = a * ((a + 1.0) + (a - 1.0) * cw - 2.0 * sqrtA * alpha);
-                a0 = (a + 1.0) - (a - 1.0) * cw + 2.0 * sqrtA * alpha;
-                a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cw);
-                a2 = (a + 1.0) - (a - 1.0) * cw - 2.0 * sqrtA * alpha;
+                h = a * (a * s2 + s * (sqrtA / q) + 1.0)
+                        / (s2 + s * (sqrtA / q) + a);
                 break;
 
             case Shape::notch:
-                b0 = 1.0;              b1 = -2.0 * cw;      b2 = 1.0;
-                a0 = 1.0 + alpha;      a1 = -2.0 * cw;      a2 = 1.0 - alpha;
+                h = (s2 + 1.0) / (s2 + s / q + 1.0);
                 break;
 
             case Shape::lowCut12:
-            case Shape::lowCut48:
-                b0 = (1.0 + cw) / 2.0; b1 = -(1.0 + cw);    b2 = (1.0 + cw) / 2.0;
-                a0 = 1.0 + alpha;      a1 = -2.0 * cw;      a2 = 1.0 - alpha;
+                h = s2 / (s2 + s / q + 1.0);
                 break;
 
             case Shape::highCut12:
+                h = 1.0 / (s2 + s / q + 1.0);
+                break;
+
+            case Shape::lowCut48:
             case Shape::highCut48:
             default:
-                b0 = (1.0 - cw) / 2.0; b1 = 1.0 - cw;       b2 = (1.0 - cw) / 2.0;
-                a0 = 1.0 + alpha;      a1 = -2.0 * cw;      a2 = 1.0 - alpha;
+            {
+                // Butterworth-8-Kaskade, alle Stufen-Qs skaliert (§10j)
+                const auto lambda = juce::jmax (
+                    0.15, 1.097 + 0.611 * std::log10 (juce::jmax (1.0e-3, q)));
+                h = 1.0;
+
+                for (const auto stageQ : butter8)
+                {
+                    const auto denom = s2 + s / (lambda * stageQ) + 1.0;
+                    h *= shape == Shape::lowCut48 ? s2 / denom : 1.0 / denom;
+                }
                 break;
+            }
         }
 
-        // |H(e^jw)| an der Auswertungsfrequenz
-        const auto w = juce::MathConstants<double>::twoPi * hz / sampleRateForDisplay;
-        const std::complex<double> z1 = std::polar (1.0, -w);
-        const auto z2 = z1 * z1;
-        const auto magnitude = std::abs ((b0 + b1 * z1 + b2 * z2)
-                                         / (a0 + a1 * z1 + a2 * z2));
-        auto db = 20.0 * std::log10 (juce::jmax (1.0e-6, magnitude));
-
-        // 48er-Cuts: vierfach kaskadierte 12er (Anzeige-Näherung)
-        if (shape == Shape::lowCut48 || shape == Shape::highCut48)
-            db *= 4.0;
-
-        totalDb += db;
+        totalDb += 20.0 * std::log10 (juce::jmax (1.0e-9, std::abs (h)));
     }
 
     return totalDb;
@@ -494,10 +563,14 @@ void TouchLiveEq8Panel::rebuildCurve()
     curve.clear();
     const auto area = plotArea();
 
-    for (int i = 0; i < curvePoints; ++i)
+    // Auflösung an die Pixelbreite gekoppelt (User-Feedback: Spitzen
+    // wurden mit fixen 96 Stützstellen eckig)
+    const auto points = juce::jlimit (128, 1024, (int) (area.getWidth() / 2.0f));
+
+    for (int i = 0; i < points; ++i)
     {
-        const auto norm = (double) i / (curvePoints - 1);
-        const auto db = juce::jlimit (-plotDbRange * 1.5, plotDbRange * 1.5,
+        const auto norm = (double) i / (points - 1);
+        const auto db = juce::jlimit (-plotDbRange * 1.4, plotDbRange * 1.4,
                                       responseDbAt (normToHz (norm)));
         const juce::Point<float> point { xForNorm (norm), yForDb (db) };
 
@@ -507,7 +580,6 @@ void TouchLiveEq8Panel::rebuildCurve()
             curve.lineTo (point);
     }
 
-    juce::ignoreUnused (area);
     curveDirty = false;
 }
 
@@ -580,19 +652,61 @@ void TouchLiveEq8Panel::resized()
     curveDirty = true;
 }
 
+//==============================================================================
 void TouchLiveEq8Panel::mouseDown (const juce::MouseEvent& event)
 {
-    beginDrag (event.position);
+    const auto touchIndex = event.source.getIndex();
+
+    if (primaryTouchIndex < 0)
+    {
+        primaryTouchIndex = touchIndex;
+        primaryTouchPosition = event.position;
+        beginDrag (event.position);
+    }
+    else if (secondaryTouchIndex < 0 && touchIndex != primaryTouchIndex)
+    {
+        secondaryTouchIndex = touchIndex;
+        secondaryTouchPosition = event.position;
+        beginPinch (event.position.getDistanceFrom (primaryTouchPosition));
+    }
 }
 
 void TouchLiveEq8Panel::mouseDrag (const juce::MouseEvent& event)
 {
-    dragTo (event.position);
+    const auto touchIndex = event.source.getIndex();
+
+    if (touchIndex == primaryTouchIndex)
+    {
+        primaryTouchPosition = event.position;
+
+        if (pinchActive)
+            pinchTo (primaryTouchPosition.getDistanceFrom (secondaryTouchPosition));
+        else
+            dragTo (event.position);
+    }
+    else if (touchIndex == secondaryTouchIndex)
+    {
+        secondaryTouchPosition = event.position;
+        pinchTo (primaryTouchPosition.getDistanceFrom (secondaryTouchPosition));
+    }
 }
 
-void TouchLiveEq8Panel::mouseUp (const juce::MouseEvent&)
+void TouchLiveEq8Panel::mouseUp (const juce::MouseEvent& event)
 {
-    endDrag();
+    const auto touchIndex = event.source.getIndex();
+
+    if (touchIndex == secondaryTouchIndex)
+    {
+        secondaryTouchIndex = -1;
+        endPinch();
+    }
+    else if (touchIndex == primaryTouchIndex)
+    {
+        primaryTouchIndex = -1;
+        secondaryTouchIndex = -1;
+        endPinch();
+        endDrag();
+    }
 }
 
 void TouchLiveEq8Panel::mouseDoubleClick (const juce::MouseEvent& event)
@@ -605,8 +719,8 @@ void TouchLiveEq8Panel::paint (juce::Graphics& g)
 {
     const auto area = plotArea();
 
-    g.setColour (juce::Colour (0xff16181b));
-    g.fillRoundedRectangle (area, 5.0f);
+    g.setColour (juce::Colour (0xff0e1112));   // Lives Plot-Hintergrund
+    g.fillRoundedRectangle (area, 4.0f);
 
     if (! isUsable())
     {
@@ -618,50 +732,61 @@ void TouchLiveEq8Panel::paint (juce::Graphics& g)
         return;
     }
 
-    // Frequenz-Raster (Dekaden hell, Zwischenwerte dim) + dB-Linien
-    g.setFont (push::scaledFont (9.0f));
+    // Frequenz-Raster wie Live: Zwischenlinien je Dekade dim,
+    // Dekaden (100/1k/10k) heller + Label
+    const auto logSpan = std::log10 (maxHz / minHz);
 
-    for (const auto hz : { 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0,
-                           2000.0, 5000.0, 10000.0, 20000.0 })
+    for (double decade = 10.0; decade < maxHz; decade *= 10.0)
     {
-        const auto norm = std::log (hz / minHz) / std::log (maxHz / minHz);
-        const auto x = xForNorm (norm);
-        const auto decade = hz == 100.0 || hz == 1000.0 || hz == 10000.0;
-
-        g.setColour (push::colours::outline.withAlpha (decade ? 0.5f : 0.2f));
-        g.drawVerticalLine ((int) x, area.getY(), area.getBottom());
-
-        if (decade)
+        for (int k = 1; k < 10; ++k)
         {
-            g.setColour (push::colours::textDim);
-            g.drawText (hzText (hz), (int) x + 3, (int) area.getBottom() - 14,
-                        50, 12, juce::Justification::left);
+            const auto hz = decade * k;
+
+            if (hz <= minHz || hz >= maxHz)
+                continue;
+
+            const auto x = xForNorm (std::log10 (hz / minHz) / logSpan);
+            const auto major = k == 1;
+
+            g.setColour (juce::Colours::white.withAlpha (major ? 0.14f : 0.05f));
+            g.drawVerticalLine ((int) x, area.getY(), area.getBottom());
+
+            if (major && hz >= 100.0)
+            {
+                g.setColour (push::colours::textDim.withAlpha (0.8f));
+                g.setFont (push::scaledFont (10.0f));
+                g.drawText (hz >= 1000.0 ? juce::String (hz / 1000.0, 0) + "k"
+                                         : juce::String (hz, 0),
+                            (int) x + 4, (int) area.getBottom() - 15, 40, 12,
+                            juce::Justification::left);
+            }
         }
     }
 
-    for (const auto db : { -12.0, -6.0, 0.0, 6.0, 12.0 })
+    // dB-Raster ±12/±6, 0-Linie heller — Zahlen links wie Live
+    g.setFont (push::scaledFont (10.0f));
+
+    for (const auto db : { 12.0, 6.0, 0.0, -6.0, -12.0 })
     {
         const auto y = yForDb (db);
-        g.setColour (push::colours::outline.withAlpha (db == 0.0 ? 0.6f : 0.2f));
+        g.setColour (juce::Colours::white.withAlpha (db == 0.0 ? 0.20f : 0.08f));
         g.drawHorizontalLine ((int) y, area.getX(), area.getRight());
+
+        g.setColour (push::colours::textDim.withAlpha (0.8f));
+        g.drawText (juce::String ((int) db),
+                    (int) area.getX() + 4, (int) y - 13, 30, 12,
+                    juce::Justification::left);
     }
 
-    // Summenkurve + dezente Füllung zur 0-dB-Linie
     if (curveDirty)
         rebuildCurve();
 
-    auto fill = curve;
-    fill.lineTo (area.getRight(), yForDb (0.0));
-    fill.lineTo (area.getX(), yForDb (0.0));
-    fill.closeSubPath();
-
-    g.setColour (push::colours::ledCyan.withAlpha (0.10f));
-    g.fillPath (fill);
-    g.setColour (push::colours::ledCyan.withAlpha (0.85f));
+    g.setColour (curveColour);
     g.strokePath (curve, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded));
 
-    // Band-Punkte (gefüllt = an, Ring = Auswahl)
+    // Band-Punkte im Ableton-Look: orange Kreise mit Nummer; Auswahl
+    // gefüllt (dunkle Zahl), aktive als Ring, ausgeschaltete grau
     for (int bandIndex = 0; bandIndex < bandCount; ++bandIndex)
     {
         const auto& band = bands[(size_t) bandIndex];
@@ -669,34 +794,32 @@ void TouchLiveEq8Panel::paint (juce::Graphics& g)
         if (! band.isMapped())
             continue;
 
-        const auto centre = bandPosition (bandIndex);
-        const auto colour = bandColours[bandIndex];
-        const auto circle = juce::Rectangle<float> (22.0f, 22.0f).withCentre (centre);
+        const auto selected = bandIndex == selectedBand;
+        const auto diameter = selected ? selectedHandleDiameter : handleDiameter;
+        const auto circle = juce::Rectangle<float> (diameter, diameter)
+                                .withCentre (bandPosition (bandIndex));
 
-        if (band.on)
+        if (selected)
         {
-            g.setColour (colour.withAlpha (0.9f));
+            g.setColour (band.on ? handleColour : handleOff);
             g.fillEllipse (circle);
-            g.setColour (juce::Colours::black.withAlpha (0.8f));
+            g.setColour (juce::Colour (0xff141414));
         }
         else
         {
-            g.setColour (colour.withAlpha (0.55f));
-            g.drawEllipse (circle, 1.5f);
+            const auto ring = band.on ? handleColour : handleOff;
+            g.setColour (juce::Colour (0xff0e1112).withAlpha (0.55f));
+            g.fillEllipse (circle);   // Punkt hebt sich von der Kurve ab
+            g.setColour (ring);
+            g.drawEllipse (circle.reduced (1.0f), 2.0f);
         }
 
-        g.setFont (push::scaledFont (11.0f));
+        g.setFont (push::scaledFont (selected ? 18.0f : 15.0f));
         g.drawText (juce::String (bandIndex + 1), circle.toNearestInt(),
                     juce::Justification::centred);
-
-        if (bandIndex == selectedBand)
-        {
-            g.setColour (push::colours::text);
-            g.drawEllipse (circle.expanded (3.5f), 1.6f);
-        }
     }
 
-    // Readout des gewählten Bands (oben rechts im Plot)
+    // Readout des gewählten Bands (oben rechts, Live-Look)
     const auto& selected = bands[(size_t) selectedBand];
 
     if (selected.isMapped())

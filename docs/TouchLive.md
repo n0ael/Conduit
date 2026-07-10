@@ -599,6 +599,45 @@ DeviceView-Integration.
   Delay/Reverb; B-Kurve/Edit-Mode, Scale-Einrechnung in die
   Anzeige-Kurve, Rack-Chains (§10g-Scope-Grenze gilt weiter).
 
+## 10j. M5-Politur — EQ-Kurven-Kalibrierung + Ableton-Look (10.07.2026)
+
+User-Messkampagne: 70 Side-by-Side-Screenshots (Conduit + Live, Band 2
+@ 200 Hz, Gain/Q/Typ im Device-Panel ablesbar) → Python-Pipeline im
+Scratchpad (eq8_extract/analyse/fit): Kurven-Pixel per Live-Farbfilter
+(Lives Kurve g/b≈0.93 vs. Conduits ledCyan 0.88!), dB-Skala aus
+Gridlinien + Rechtsrand-Anker, 200-Hz-Anker über den Band-Handle,
+px/Dekade via Log-Raster-Fit. Ergebnis: **Lives Anzeige-Kurven sind
+analoge RBJ-Prototypen mit eigener Q-Semantik** — kalibriert auf
+< 0.4 dB über alle 60+ Messkurven:
+
+| Typ | Prototyp (s-Domain) | Q_eff (Adaptive Q On; g = \|gain dB\|) |
+|---|---|---|
+| Bell | RBJ Peaking | `Q · 0.5151 · 10^(0.04908·g)` |
+| Shelf (Low/High) | RBJ Shelf | `10^(−0.36661 + 0.45166·lgQ + 0.04382·g − 0.00685·lgQ·g)` |
+| Cut 12 | RBJ HP/LP | `Q` (1:1, kein Adaptive Q) |
+| Cut 48 | 4× Butterworth-8-Kaskade (Qs 0.51/0.60/0.90/2.56) | alle Stufen × `(1.097 + 0.611·lgQ)` |
+| Notch | RBJ Notch | `Q` (1:1) |
+
+- Der „Adaptive Q"-Parameter reist in parvals und schaltet den
+  Gain-Term (Off-Verhalten = Annahme, nicht gemessen — bei Bedarf
+  nachmessen). High-Pendants = gespiegelte Gesetze (Annahme).
+- **Anzeige wie Live:** ±15 dB Y-Range (Linien ±12/±6/0 mit Zahlen),
+  Frequenzraster mit Dekaden-Zwischenlinien + 100/1k/10k-Labels,
+  Kurve in Lives Cyan (#03cfde) 2 px, Auflösung an Pixelbreite
+  gekoppelt (Spitzen wurden mit fixen 96 Stützstellen eckig);
+  Handles im Ableton-Look: orange Nummernkreise Ø 44 px
+  (Auswahl gefüllt Ø 54, dunkle Zahl; aus = grau) — User-Wunsch
+  „größer als ein Zeigefinger".
+- **Multi-Touch:** zweiter Finger = Pinch → Q des aktiven Bandes
+  (Abstand verdoppeln ≈ +0.25 Q-Norm ≈ Faktor 3.7); während des
+  Pinchs friert der Freq/Gain-Drag ein. Kernpfade beginPinch/pinchTo.
+- Feldtest-Kreuzcheck: Band 2 auf +12.4 dB gezogen — Lives Display
+  zeigt identische Werte UND identische Kurvenform.
+- **Nächster Politur-Schritt (User-Wunsch):** Spektrum-Hintergrund via
+  Link Audio (Signal des Tracks heimlich empfangen → FFT hinter der
+  Kurve, eigener Average-Parameter LOKAL, nicht an Lives Regler
+  gebunden) — eigene Runde, Audio-Thread + docs/LinkAudio.md-Pflicht.
+
 ## 11. Offen
 
 - Feldtest KOMPLETT bestanden (09.07.2026): Bidirektionalität, Feel
