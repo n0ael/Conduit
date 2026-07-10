@@ -1262,12 +1262,14 @@ void TouchLiveEq8Panel::drawSpectrum (juce::Graphics& g, juce::Rectangle<float> 
     const auto& magnitudes = spectrumTap->getMagnitudesDb();
     const auto logSpan = std::log (maxHz / minHz);
 
-    // dB-Skala des Spektrums: 0 dBFS oben, −78 dB am Boden (Lives Look)
-    constexpr float topDb = 0.0f, bottomDb = -78.0f;
+    // dB-Skala des Spektrums: 0 dBFS oben, −60 dB am Boden (Live-Look —
+    // die gestauchtere −78er-Skala machte Peaks sichtbar flacher)
+    constexpr float topDb = 0.0f, bottomDb = -60.0f;
 
     juce::Path spectrum;
     spectrum.startNewSubPath (area.getX(), area.getBottom());
     auto lastX = area.getX();
+    auto pixelPeakDb = bottomDb;
 
     for (int bin = 1; bin < LiveSpectrumTap::numBins; ++bin)
     {
@@ -1281,16 +1283,17 @@ void TouchLiveEq8Panel::drawSpectrum (juce::Graphics& g, juce::Rectangle<float> 
 
         const auto x = area.getX()
                      + (float) (std::log (hz / minHz) / logSpan) * area.getWidth();
+        pixelPeakDb = juce::jmax (pixelPeakDb, magnitudes[(size_t) bin]);
 
         if (x - lastX < 1.0f && bin > 1)
-            continue;   // mehrere Bins pro Pixel: erster gewinnt (log-x)
+            continue;   // mehrere Bins pro Pixel: das MAXIMUM gewinnt
 
         lastX = x;
-        const auto db = juce::jlimit (bottomDb, topDb,
-                                      magnitudes[(size_t) bin]);
+        const auto db = juce::jlimit (bottomDb, topDb, pixelPeakDb);
         const auto y = juce::jmap (db, bottomDb, topDb,
                                    area.getBottom(), area.getY());
         spectrum.lineTo (x, y);
+        pixelPeakDb = bottomDb;
     }
 
     spectrum.lineTo (area.getRight(), area.getBottom());

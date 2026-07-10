@@ -41,8 +41,11 @@ class LiveSpectrumTap final : private juce::Timer,
                               private juce::ChangeListener
 {
 public:
-    static constexpr int fftOrder = 11;
-    static constexpr int fftSize = 1 << fftOrder;       // 2048
+    // Block 8192 wie Lives Analyzer (User-Vergleich 10.07.2026: mit 2048
+    // wurde aus Lives schmaler Bass-Nadel ein breiter Berg — ~23 Hz
+    // Bin-Breite sind im Log-Plot links riesig)
+    static constexpr int fftOrder = 13;
+    static constexpr int fftSize = 1 << fftOrder;       // 8192
     static constexpr int numBins = fftSize / 2;
 
     explicit LiveSpectrumTap (LinkClock* clockToUse);
