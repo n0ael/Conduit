@@ -42,18 +42,20 @@ TEST_CASE ("PadGridLayout: noteAt konsistent zu padIndexAt/noteForPad", "[grid]"
     REQUIRE (layout.noteAt (1.5f, 0.5f) == -1);
 }
 
-TEST_CASE ("PadGridLayout: pitchBendSemitones — Skala, ungeklemmt (M1b-6)", "[grid]")
+TEST_CASE ("PadGridLayout: pitchBendSemitones — Skala, ungeklemmt (M1b-6, B3-Kalibrierung)", "[grid]")
 {
     grid::PadGridLayout layout;
 
     REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.3f, 0.3f), 0.0f));
 
-    // Eine Pad-Breite (1/cols) nach rechts -> +semitonesPerPadWidth
+    // Eine Pad-Breite (1/cols) nach rechts -> +semitonesPerPadWidth.
+    // Block B3: Default ist 1.0 (aufs isomorphe Raster kalibriert -- n
+    // Spalten Wischweg = n Halbtoene; vorher 2.0, User-Befund C2->D3).
     const auto padWidth = 1.0f / (float) layout.cols();
-    REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.0f, padWidth), 2.0f));
+    REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.0f, padWidth), 1.0f));
 
-    // Große Bewegung -> NICHT geklemmt, Betrag über pitchBendRangeSemitones
-    // (48) hinaus (die pitchBendAxis/der Encoder klemmen erst am Ausgang).
+    // Große Bewegung -> NICHT geklemmt (die pitchBendAxis/der Encoder
+    // klemmen erst am Ausgang). 10 normierte Breiten = 80 Pads = 80 HT.
     REQUIRE (layout.pitchBendSemitones (0.0f, 10.0f) > 48.0f);
     REQUIRE (layout.pitchBendSemitones (10.0f, 0.0f) < -48.0f);
 }
@@ -105,12 +107,76 @@ TEST_CASE ("PadGridLayout: setSemitonesPerPadWidth skaliert pitchBendSemitones l
     grid::PadGridLayout layout;
     const auto padWidth = 1.0f / (float) layout.cols();
 
-    layout.setSemitonesPerPadWidth (0.5f); // x0.25 ggue. Default (2.0)
+    layout.setSemitonesPerPadWidth (0.5f); // = Multiplikator x0.5 auf den B3-Default (1.0)
     REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.0f, padWidth), 0.5f));
 
-    layout.setSemitonesPerPadWidth (4.0f); // x2 ggue. Default
+    layout.setSemitonesPerPadWidth (4.0f); // x4
     REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.0f, padWidth), 4.0f));
 
-    layout.setSemitonesPerPadWidth (16.0f); // x8 ggue. Default
+    layout.setSemitonesPerPadWidth (16.0f); // jenseits der A3-Stufen -- Setter bleibt generisch
     REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.0f, padWidth), 16.0f));
+}
+
+//==============================================================================
+// In-Tune-Staircase (Block B1/B2)
+
+TEST_CASE ("PadGridLayout: pitchBendFromAnchor -- Zone 0 = exakt linear", "[grid]")
+{
+    grid::PadGridLayout::Config config;
+    config.inTuneWidthPercent = 0.0f;
+    grid::PadGridLayout layout (config);
+
+    const auto padWidth = 1.0f / (float) layout.cols();
+
+    for (const auto d : { -2.0f, -0.7f, -0.25f, 0.0f, 0.3f, 1.0f, 3.5f })
+        REQUIRE (layout.pitchBendFromAnchor (0.5f, 0.5f + d * padWidth)
+                 == Catch::Approx (layout.pitchBendSemitones (0.5f, 0.5f + d * padWidth)).margin (1.0e-4));
+}
+
+TEST_CASE ("PadGridLayout: pitchBendFromAnchor -- In-Tune-Zone haelt 0, Nachbar-Zentrum = 1 HT", "[grid]")
+{
+    grid::PadGridLayout::Config config;
+    config.inTuneWidthPercent = 50.0f;
+    grid::PadGridLayout layout (config);
+
+    const auto padWidth = 1.0f / (float) layout.cols();
+    const auto anchor = 0.5f;
+
+    // Innerhalb der Zone (Breite 0.5 Pad-Breiten um den Anker): 0 Bend
+    REQUIRE (juce::exactlyEqual (layout.pitchBendFromAnchor (anchor, anchor), 0.0f));
+    REQUIRE (juce::exactlyEqual (layout.pitchBendFromAnchor (anchor, anchor + 0.2f * padWidth), 0.0f));
+    REQUIRE (juce::exactlyEqual (layout.pitchBendFromAnchor (anchor, anchor - 0.2f * padWidth), 0.0f));
+
+    // Naechstes Pad-Zentrum (+-1 Pad-Breite): exakt +-1 HT (B3-Default 1.0)
+    REQUIRE (layout.pitchBendFromAnchor (anchor, anchor + padWidth) == Catch::Approx (1.0f));
+    REQUIRE (layout.pitchBendFromAnchor (anchor, anchor - padWidth) == Catch::Approx (-1.0f));
+
+    // Auch weiter entfernte Zentren rasten exakt (+3 Pads = +3 HT)
+    REQUIRE (layout.pitchBendFromAnchor (anchor, anchor + 3.0f * padWidth) == Catch::Approx (3.0f));
+
+    // Zwischen den Zonen laeuft der Bend steiler, bleibt aber monoton
+    const auto quarter = layout.pitchBendFromAnchor (anchor, anchor + 0.4f * padWidth);
+    const auto half    = layout.pitchBendFromAnchor (anchor, anchor + 0.5f * padWidth);
+    const auto edge    = layout.pitchBendFromAnchor (anchor, anchor + 0.75f * padWidth);
+    REQUIRE (quarter > 0.0f);
+    REQUIRE (half > quarter);
+    REQUIRE (edge > half);
+    REQUIRE (edge == Catch::Approx (1.0f));   // 0.75 = 1 - Zone/2 -> Rand der Nachbar-Zone
+}
+
+TEST_CASE ("PadGridLayout: pitchBendFromAnchor ist stetig am Zonenrand", "[grid]")
+{
+    grid::PadGridLayout::Config config;
+    config.inTuneWidthPercent = 20.0f;   // Default
+    grid::PadGridLayout layout (config);
+
+    const auto padWidth = 1.0f / (float) layout.cols();
+    const auto anchor = 0.5f;
+
+    // Knapp innerhalb/ausserhalb des Zonenrands (0.1 Pad-Breiten) duerfen
+    // sich nur minimal unterscheiden (Stetigkeit der Treppen-Kennlinie).
+    const auto inside  = layout.pitchBendFromAnchor (anchor, anchor + 0.099f * padWidth);
+    const auto outside = layout.pitchBendFromAnchor (anchor, anchor + 0.101f * padWidth);
+    REQUIRE (juce::exactlyEqual (inside, 0.0f));
+    REQUIRE (outside < 0.01f);
 }

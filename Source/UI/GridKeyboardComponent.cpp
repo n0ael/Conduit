@@ -94,15 +94,25 @@ void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
     if (pad < 0)
         return;
 
-    fingers[fingerId] = { pos.x, pos.y };
+    // In-Tune-Anker (Block B1): pad-Modus = Pad-Zentrum (der Finger bendet
+    // ABSOLUT nach Distanz -- Re-Hit derselben Position ergibt denselben
+    // Pitch), finger-Modus = Aufsetzpunkt (0 Bend beim Anschlag).
+    const auto anchorX = inTuneLocation == grid::InTuneLocation::pad
+                             ? layout.padCentreNormX (pad)
+                             : pos.x;
+
+    fingers[fingerId] = { pos.x, pos.y, anchorX };
 
     // MPE-Member-Kanäle sind gepoolt (VoiceAllocator) und behalten Bend/
     // Pressure vom LETZTEN Voice-Nutzer, bis die neue Note etwas Eigenes
     // sendet — ohne expliziten Startwert läse das Instrument beim ersten
     // Ton also einen zufälligen Alt-Zustand statt 0/Ist-Position (Fund
     // 06.07.2026: Pressure "mal 0, mal 50%" direkt nach dem Touch).
+    // Im pad-Modus ist der Startwert des Bends die absolute Distanz zum
+    // Pad-Zentrum (innerhalb der In-Tune-Zone = 0).
     engine.noteOn (static_cast<uint32_t> (fingerId), layout.noteForPad (pad), 100);
-    engine.setPitchBend (static_cast<uint32_t> (fingerId), 0.0f);
+    engine.setPitchBend (static_cast<uint32_t> (fingerId),
+                          layout.pitchBendFromAnchor (anchorX, pos.x));
     engine.setPressure (static_cast<uint32_t> (fingerId), layout.expressionFromDrag (pos.y, pos.y));
     repaint();
 }
@@ -126,7 +136,7 @@ void GridKeyboardComponent::mouseDrag (const juce::MouseEvent& event)
     const auto pos = normalisedPosition (event);
 
     engine.setPitchBend (static_cast<uint32_t> (fingerId),
-                          layout.pitchBendSemitones (it->second.startNormX, pos.x));
+                          layout.pitchBendFromAnchor (it->second.anchorNormX, pos.x));
     engine.setPressure (static_cast<uint32_t> (fingerId),
                          layout.expressionFromDrag (it->second.startNormY, pos.y));
     repaint();

@@ -93,6 +93,39 @@
     Orbit-Ellipse (y-Radius über den Spielflächen-Aspekt gestaucht).
     Offen: Persistenz der Slots (TODO(design)), Save/Load-Browser +
     Factory-Sets (Meilensteinleiter).
+  - **Sensitivity + Bend-Range (Masterplan Block A, 07/2026):**
+    NumberFieldBracket (Source/UI, wiederverwendbares Zahlenfeld: Swipe,
+    Doppeltipp = Default, eckige Klammern in Akzentfarbe) trägt je ein
+    Sensitivity-Feld (0–100, 50 = Basisverhalten, `GridSensitivity.h`:
+    Faktor 2^((s-50)/25) MULTIPLIZIERT die Geometrie-Spanne) oben in der
+    Pressure-/Slide-Detailspalte der MpeShapingView; PitchBend bekommt dort
+    den BendRangeSelector (¼ ½ ×1 ×2 ×4 ×8, multiplikativ auf
+    `semitonesPerPadWidth`). Neue Laufzeit-Setter: PadGridLayout
+    (setYRangeNorm/setSemitonesPerPadWidth), RingTouchModel (setRadiusRange),
+    Durchreiche GridKeyboardComponent (immer von gecachten BASIS-Werten
+    multiplizieren, nie akkumulieren). Laufzeit-only — Persistenz kommt
+    gebündelt (Masterplan Block K). Die Dev-Werte Schwellbreite/Fade-Zeit
+    wohnen seit Block A4 im floating DevPanel; MpeShapingView pollt sie
+    live in tick() (GridPanelSettings ist bewusst kein ChangeBroadcaster).
+  - **Pitch-Korrektheit + In-Tune + Expression-Modes (Block B, 07/2026):**
+    B3-Kalibrierung: `semitonesPerPadWidth`-Default 2.0 → **1.0** — n
+    Spalten Wischweg = n Halbtöne, aufs isomorphe Raster ausgerichtet
+    (User-Befund: C2 + 8 Pads gewischt ergab +14 statt +8; Regressionstest
+    „Wisch über n Spalten == Re-Hit derselben Position"). B1 In-Tune
+    Location (grid::InTuneLocation, Default **pad** = Push-Paradigma:
+    Pad-Zentrum in tune, Finger bendet ABSOLUT — Re-Hit = identischer
+    Pitch; finger = Aufsetzpunkt 0 Bend als Option). B2 In-Tune Width in
+    Pad-Prozent (Config `inTuneWidthPercent`, Default 20, TODO(design)
+    Feinabstimmung): `PadGridLayout::pitchBendFromAnchor` = stetige
+    Treppen-Kennlinie (Totzone um jedes Pad-Raster, Nachbar-Zentrum exakt
+    ±1 Schritt; Zone 0 = linear). Der Akkord-Latch (moveLatchedBy) bleibt
+    bewusst LINEAR (pitchBendSemitones). B4 ExpressionMode
+    (MpeEncoder/MpeMidiSink): mpe (Kanalspreizung, heute) /
+    polyAftertouch (EIN Kanal, Pressure als 0xA0 pro Note — Note liefert
+    activeNote des Sinks) / monoAftertouch (EIN Kanal, 0xD0);
+    `MpeMidiSink::setExpressionMode` beendet zuerst hängende Noten (alte
+    Kanalzuteilung). UI-Exposition von B1/B2/B4 folgt im Settings-Tab
+    (Block D), Persistenz in Block K.
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +

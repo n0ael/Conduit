@@ -38,14 +38,60 @@ TEST_CASE ("MpeEncoder: Pressure (Channel-Pressure) + Slide (CC74)", "[grid]")
 {
     const grid::MpeEncoder encoder;
 
-    REQUIRE (encoder.pressure (0, 1.0f).getChannelPressureValue() == 127);
-    REQUIRE (encoder.pressure (0, 0.0f).getChannelPressureValue() == 0);
+    REQUIRE (encoder.pressure (0, 60, 1.0f).getChannelPressureValue() == 127);
+    REQUIRE (encoder.pressure (0, 60, 0.0f).getChannelPressureValue() == 0);
 
     const auto slideMsg = encoder.slide (0, 0.5f);
     REQUIRE (slideMsg.isController());
     REQUIRE (slideMsg.getControllerNumber() == 74);
     const int slideValue = slideMsg.getControllerValue();
     REQUIRE ((slideValue == 63 || slideValue == 64));
+}
+
+//==============================================================================
+// Expression Modes (Block B4): Poly-/Mono-Aftertouch fuer Nicht-MPE-Synths
+
+TEST_CASE ("MpeEncoder: polyAftertouch -- ein Kanal, Pressure als Poly-AT pro Note", "[grid]")
+{
+    grid::MpeEncoder encoder;
+    encoder.setExpressionMode (grid::ExpressionMode::polyAftertouch);
+
+    // Alle Stimmen auf dem gemeinsamen Kanal (masterChannel = 1)
+    REQUIRE (encoder.channelForVoice (0) == 1);
+    REQUIRE (encoder.channelForVoice (5) == 1);
+    REQUIRE (encoder.noteOn (3, 62, 90).getChannel() == 1);
+    REQUIRE (encoder.pitchBend (3, 0.0f).getChannel() == 1);
+    REQUIRE (encoder.slide (3, 0.5f).getChannel() == 1);
+
+    // Pressure = Poly-Aftertouch (0xA0) adressiert die Note
+    const auto at = encoder.pressure (3, 62, 1.0f);
+    REQUIRE (at.isAftertouch());
+    REQUIRE (at.getChannel() == 1);
+    REQUIRE (at.getNoteNumber() == 62);
+    REQUIRE (at.getAfterTouchValue() == 127);
+}
+
+TEST_CASE ("MpeEncoder: monoAftertouch -- ein Kanal, Pressure als Channel-Pressure", "[grid]")
+{
+    grid::MpeEncoder encoder;
+    encoder.setExpressionMode (grid::ExpressionMode::monoAftertouch);
+
+    REQUIRE (encoder.channelForVoice (7) == 1);
+
+    const auto at = encoder.pressure (7, 70, 0.5f);
+    REQUIRE (at.isChannelPressure());
+    REQUIRE (at.getChannel() == 1);
+}
+
+TEST_CASE ("MpeEncoder: Rueckschalten auf mpe stellt die Kanalspreizung wieder her", "[grid]")
+{
+    grid::MpeEncoder encoder;
+    encoder.setExpressionMode (grid::ExpressionMode::monoAftertouch);
+    encoder.setExpressionMode (grid::ExpressionMode::mpe);
+
+    REQUIRE (encoder.channelForVoice (0) == 2);
+    REQUIRE (encoder.pressure (0, 60, 1.0f).isChannelPressure());
+    REQUIRE (encoder.pressure (0, 60, 1.0f).getChannel() == 2);
 }
 
 TEST_CASE ("MpeEncoder: Master-Kanal-Controller (Volume) auf memberChannelBase-1", "[grid]")

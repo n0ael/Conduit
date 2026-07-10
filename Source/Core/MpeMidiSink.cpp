@@ -48,8 +48,17 @@ void MpeMidiSink::voicePitchBend (int voiceIndex, float semitones)
 
 void MpeMidiSink::voicePressure (int voiceIndex, float value)
 {
-    if (isValidVoiceIndex (voiceIndex))
-        target.send (encoder.pressure (voiceIndex, value));
+    if (! isValidVoiceIndex (voiceIndex))
+        return;
+
+    // Poly-Aftertouch (Block B4) adressiert die Note -- ohne aktive Note
+    // gibt es nichts zu adressieren (mpe/mono ignorieren den Parameter,
+    // der Guard schadet dort nicht: Pressure ohne Note ist Alt-Zustand).
+    const auto note = activeNote[(size_t) voiceIndex];
+    if (note < 0)
+        return;
+
+    target.send (encoder.pressure (voiceIndex, note, value));
 }
 
 void MpeMidiSink::voiceSlide (int voiceIndex, float value)
@@ -75,6 +84,17 @@ void MpeMidiSink::allNotesOff()
 void MpeMidiSink::setGlobalVolume (float value)
 {
     target.send (encoder.masterVolume (value));
+}
+
+void MpeMidiSink::setExpressionMode (ExpressionMode newMode)
+{
+    if (newMode == encoder.expressionMode())
+        return;
+
+    // Erst haengende Noten auf den ALTEN Kanaelen beenden -- nach dem
+    // Wechsel zeigten Note-Offs sonst auf die neue Kanalzuteilung.
+    allNotesOff();
+    encoder.setExpressionMode (newMode);
 }
 
 } // namespace conduit::grid

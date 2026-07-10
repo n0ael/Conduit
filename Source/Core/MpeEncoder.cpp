@@ -16,6 +16,11 @@ MpeEncoder::MpeEncoder (const Config& cfg) noexcept
 
 int MpeEncoder::channelForVoice (int voiceIndex) const noexcept
 {
+    // Poly-/Mono-Aftertouch (Block B4): Nicht-MPE-Synths hoeren auf EINEM
+    // Kanal -- alle Stimmen (Note/Bend/Slide/Pressure) auf masterChannel.
+    if (mode != ExpressionMode::mpe)
+        return masterChannel();
+
     return config.memberChannelBase + voiceIndex;
 }
 
@@ -40,9 +45,17 @@ juce::MidiMessage MpeEncoder::pitchBend (int voiceIndex, float semitones) const 
     return juce::MidiMessage::pitchWheel (channelForVoice (voiceIndex), juce::jlimit (0, 16383, v));
 }
 
-juce::MidiMessage MpeEncoder::pressure (int voiceIndex, float value01) const noexcept
+juce::MidiMessage MpeEncoder::pressure (int voiceIndex, int note, float value01) const noexcept
 {
     const int v = juce::jlimit (0, 127, (int) std::lround (value01 * 127.0f));
+
+    // Block B4: Poly-Aftertouch adressiert die NOTE (0xA0) auf dem einen
+    // Kanal; mpe/monoAftertouch senden Channel-Pressure (0xD0) -- bei mpe
+    // pro Member-Kanal, bei mono auf dem gemeinsamen Kanal.
+    if (mode == ExpressionMode::polyAftertouch)
+        return juce::MidiMessage::aftertouchChange (channelForVoice (voiceIndex),
+                                                    juce::jlimit (0, 127, note), v);
+
     return juce::MidiMessage::channelPressureChange (channelForVoice (voiceIndex), v);
 }
 

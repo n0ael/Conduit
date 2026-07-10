@@ -33,6 +33,13 @@ public:
 
     void setGlobalVolume (float value) override;
 
+    /** Expression Mode (Block B4, MPE / Poly-AT / Mono-AT) -- beendet zuerst
+        alle haengenden Noten (die Kanalzuteilung wechselt, Note-Offs auf den
+        neuen Kanaelen erreichten die alten Note-Ons sonst nie). Message
+        Thread. */
+    void setExpressionMode (ExpressionMode newMode);
+    [[nodiscard]] ExpressionMode expressionMode() const noexcept { return encoder.expressionMode(); }
+
 private:
     IMidiOutputTarget& target;
     MpeEncoder         encoder;

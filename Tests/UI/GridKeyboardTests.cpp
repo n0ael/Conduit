@@ -136,6 +136,69 @@ TEST_CASE ("GridKeyboardComponent: setPitchBendMultiplier(2) verdoppelt den Bend
     REQUIRE (bendCall (fakeDoubled) == Catch::Approx (bendCall (fakeDefault) * 2.0f));
 }
 
+TEST_CASE ("GridKeyboardComponent: Wisch ueber n Spalten klingt wie Re-Hit derselben Position (Block B1/B3)", "[grid][ui]")
+{
+    // User-Befund (Kalibrierungs-Bug): C2 + 8 Pads nach rechts gewischt
+    // ergab +14 HT, dieselbe Position neu angeschlagen +7. Isomorph muessen
+    // beide Wege denselben klingenden Pitch ergeben: note + bend identisch.
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    const auto soundingPitch = [] (const grid::FakeVoiceSink& fake)
+    {
+        int note = -1;
+        float bend = 0.0f;
+        for (const auto& call : fake.calls)
+        {
+            if (call.kind == grid::FakeVoiceSink::Kind::VoiceStart) note = call.intValue;
+            if (call.kind == grid::FakeVoiceSink::Kind::PitchBend)  bend = call.floatValue;
+        }
+        return (float) note + bend;
+    };
+
+    // Weg 1: Anschlag in Pad (col 0, unterste Reihe), 7 Pad-Breiten nach
+    // rechts wischen (col 7 = letzte Spalte des 8er-Rasters) --
+    // Aufsetzpunkt LEICHT neben dem Pad-Zentrum (12 px), damit der Test
+    // den absoluten pad-Anker wirklich prueft.
+    grid::FakeVoiceSink fakeDrag;
+    grid::GridVoiceEngine engineDrag (fakeDrag);
+    conduit::GridKeyboardComponent keyboardDrag (engineDrag, conduit::GridPage::padLayoutConfig());
+    keyboardDrag.setSize (320, 320);   // 8x8 -> 40 px/Pad
+
+    keyboardDrag.mouseDown (makeEvent (keyboardDrag, { 32.0f, 300.0f }));
+    keyboardDrag.mouseDrag (makeEvent (keyboardDrag, { 32.0f + 7.0f * 40.0f, 300.0f }));
+
+    // Weg 2: dieselbe End-Position frisch anschlagen.
+    grid::FakeVoiceSink fakeHit;
+    grid::GridVoiceEngine engineHit (fakeHit);
+    conduit::GridKeyboardComponent keyboardHit (engineHit, conduit::GridPage::padLayoutConfig());
+    keyboardHit.setSize (320, 320);
+
+    keyboardHit.mouseDown (makeEvent (keyboardHit, { 32.0f + 7.0f * 40.0f, 300.0f }));
+
+    REQUIRE (soundingPitch (fakeDrag) == Catch::Approx (soundingPitch (fakeHit)).margin (1.0e-4));
+
+    // Und die Groessenordnung stimmt: 7 Spalten = +7 HT (B3-Kalibrierung).
+    REQUIRE (soundingPitch (fakeDrag) - 48.0f == Catch::Approx (7.0f).margin (0.3));
+}
+
+TEST_CASE ("GridKeyboardComponent: finger-Modus bendet relativ zum Aufsetzpunkt (Block B1)", "[grid][ui]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+    keyboard.setInTuneLocation (grid::InTuneLocation::finger);
+
+    // Aufsetzpunkt neben dem Pad-Zentrum: im finger-Modus trotzdem 0 Bend.
+    keyboard.mouseDown (makeEvent (keyboard, { 88.0f, 140.0f }));
+
+    REQUIRE (fake.calls.size() == 3);
+    REQUIRE (fake.calls[1].kind == grid::FakeVoiceSink::Kind::PitchBend);
+    REQUIRE (juce::exactlyEqual (fake.calls[1].floatValue, 0.0f));
+}
+
 TEST_CASE ("GridKeyboardComponent: setSlideSensitivity bleibt konsistent mit dem Akkord-Latch (Block A2)", "[grid][ui]")
 {
     // GridKeyboardComponent::latchConstellation baut die Slide-Formel ueber
@@ -156,9 +219,11 @@ TEST_CASE ("GridKeyboardComponent: setSlideSensitivity bleibt konsistent mit dem
     keyboard.latchConstellation ({ { 100.0f / 320.0f, 300.0f / 320.0f,
                                      85.0f / 320.0f, 0.0f, true } });
 
-    const auto slideCall = [] (const grid::FakeVoiceSink& fake)
+    // Clang -Wshadow-uncaptured-local (CI): Parameter darf nicht wie die
+    // lokale Variable "fake" heissen.
+    const auto slideCall = [] (const grid::FakeVoiceSink& recorder)
     {
-        for (auto it = fake.calls.rbegin(); it != fake.calls.rend(); ++it)
+        for (auto it = recorder.calls.rbegin(); it != recorder.calls.rend(); ++it)
             if (it->kind == grid::FakeVoiceSink::Kind::Slide)
                 return it->floatValue;
         return -1.0f;
@@ -280,14 +345,16 @@ TEST_CASE ("GridKeyboardComponent: moveLatchedBy verschiebt starr und aktualisie
     keyboard.latchConstellation ({ { 100.0f / 320.0f, 300.0f / 320.0f, 0.0f, 0.0f, false } });
     REQUIRE (fake.calls.size() == 3);   // Start + Bend 0 + Pressure 0.5 (kein Orbit -> kein Slide)
 
-    // 1 Pad nach rechts (40 px = 2 HT) und 1 Pad hoch (40 px = +0.125 norm
-    // bei Hoehe 320 und yRangeNorm 0.5 -> Pressure 0.5 + 0.25 = 0.75) --
-    // X = Pitch, Y = Ausdruck, exakt wie ein Finger-Drag.
+    // 1 Pad nach rechts (40 px = 1 HT, Block-B3-Kalibrierung: 1 Pad-Breite
+    // = 1 Halbton) und 1 Pad hoch (40 px = +0.125 norm bei Hoehe 320 und
+    // yRangeNorm 0.5 -> Pressure 0.5 + 0.25 = 0.75) -- X = Pitch,
+    // Y = Ausdruck, exakt wie ein Finger-Drag (Latch bleibt LINEAR, ohne
+    // In-Tune-Zone).
     keyboard.moveLatchedBy (40.0f, -40.0f);
 
     REQUIRE (fake.calls.size() == 5);
     REQUIRE (fake.calls[3].kind == grid::FakeVoiceSink::Kind::PitchBend);
-    REQUIRE (fake.calls[3].floatValue == Catch::Approx (2.0).margin (1.0e-4));
+    REQUIRE (fake.calls[3].floatValue == Catch::Approx (1.0).margin (1.0e-4));
     REQUIRE (fake.calls[4].kind == grid::FakeVoiceSink::Kind::Pressure);
     REQUIRE (fake.calls[4].floatValue == Catch::Approx (0.75));
 }

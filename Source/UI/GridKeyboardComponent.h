@@ -97,11 +97,20 @@ public:
         GridVoiceEngine bleibt unangetastet. */
     void setPitchBendMultiplier (float multiplier) noexcept;
 
+    /** In-Tune-Anker des Pitch-Bends (Block B1): pad (Default, Push-
+        Paradigma -- Pad-Zentrum in tune, Finger bendet absolut, Re-Hit
+        derselben Position = identischer Pitch) oder finger (Aufsetzpunkt =
+        0 Bend, bisheriges Verhalten). Wirkt ab dem naechsten Anschlag. */
+    void setInTuneLocation (grid::InTuneLocation newLocation) noexcept { inTuneLocation = newLocation; }
+    [[nodiscard]] grid::InTuneLocation getInTuneLocation() const noexcept { return inTuneLocation; }
+
 private:
     struct FingerState
     {
-        float startNormX = 0.0f;
-        float startNormY = 0.0f;
+        float startNormX  = 0.0f;
+        float startNormY  = 0.0f;
+        float anchorNormX = 0.0f;   // In-Tune-Anker (Block B1): Pad-Zentrum
+                                    // (pad-Modus) oder Aufsetzpunkt (finger)
     };
 
     /** Latched Sonne (Akkord-Abruf): Pixel-Positionen wie die Live-Kreise,
@@ -138,6 +147,8 @@ private:
 
     int       scaleRootNote = 0;
     ScaleType sessionScale  = ScaleType::chromatic;
+
+    grid::InTuneLocation inTuneLocation = grid::InTuneLocation::pad;   // Block B1, Default Pad
 
     std::map<int, FingerState> fingers;
     std::vector<LatchedSun> latched;   // Akkord-Speicher-Abruf (leer = keiner)
