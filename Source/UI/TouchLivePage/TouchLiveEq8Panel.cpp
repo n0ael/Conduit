@@ -478,6 +478,11 @@ double TouchLiveEq8Panel::effectiveQ (Shape shape, double q, double gainDb) cons
                                        + 0.04382 * g - 0.00685 * lq * g);
         }
 
+        case Shape::lowCut12:
+        case Shape::lowCut48:
+        case Shape::highCut12:
+        case Shape::highCut48:
+        case Shape::notch:
         default:
             return q;   // Cuts/Notch: 1:1 (gemessen, kein Adaptive Q)
     }
