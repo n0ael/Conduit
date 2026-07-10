@@ -3,7 +3,40 @@
 > Letzte Aktualisierung: 2026-07-10 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (10.07.2026) — TouchLive M5 (Bespoke EQ Eight)
+## Aktueller Meilenstein (10.07.2026) — Grid-Page v2 (Skala, Ribbons, Achsen-Farben, CC-Baukasten, Akkord-Speicher)
+
+**Nächtlicher autonomer Durchlauf des Design-Handoffs (PROMPT.md + HTML-Mock),
+Branch `feature/grid-page-v2` (lokal, Review offen), ein Commit pro Feature:**
+
+- **Skala-Anzeige (Push-3, `bd99a74`):** Pads nach Session-Skala (Grundton
+  `padRoot` / Skalenton `tile` / fremd `padUnlit`); Root- + Skala-Kachel in
+  der Top-Row binden zyklisch an `id::scaleRoot`/`scaleType` (ValueTree-
+  Listener); Pad-Glow über ALLE Sonnen (Ziel `padGlow`).
+- **Ribbons + weiche Kanten (`c4d0ddc`):** VOL raus; links Pitch (voll),
+  rechts Pressure über Slide; Klartext-Labels, Füllung pro Achse gefärbt
+  (`setFillColour`); Sonne/Mond mit radialem Gradient-Rand (2.5/2 px),
+  Orbit scharf.
+- **Achsen-Farben + ConduitColorPicker (`5540865`):** Farben pro Achse
+  persistent (GridPanelSettings, Hex); „Color"-Sektion in der Detailspalte
+  (5 Swatches, Tap = wählen, Halten 450 ms = Picker); NEU app-weit
+  wiederverwendbarer Picker (SV-Fläche + Hue + 8×5-Presets, live,
+  HSV-Statics 8-bit-exakt getestet).
+- **CC-Baukasten (`7cab81d`):** CC-Tab im EditorDockPanel
+  (`onActiveTabChanged`), 2×2 Werkzeuge (Fader/Push/Toggle/XY);
+  CcControlLayer: Aufziehen (gestrichelte Grid-Snap-Vorschau), Verschieben,
+  ×-Löschen; im MPE-Tab multi-touch spielbar, Pads unter Controls stumm
+  (hitTest); UI-freies CcControlModel getestet; CC-Zuweisung/MIDI-Versand
+  = TODO(design)-Andockstelle.
+- **Akkord-Speicher (`2d52d8e`):** 8 quadratische LCD-Slots (`lcdScreen`)
+  zwischen Raster und Pressure/Slide; Speichern normalisiert (Mond-Offset
+  über Flächenbreite), Mini-Ansicht (Sonne 6 / Mond 4 px, Orbit-Ellipse
+  ×Aspekt); Abruf latcht (noteOn, fingerIds ab 0x10000), Ziehen verschiebt
+  starr X=Bend/Y=Pressure ohne Clamping; Löschen im CC-Tab; Release All
+  löst auch Latched; UI-freie ChordMemory getestet; Slot-Persistenz offen.
+- Suite **631 Cases / 27 566 Assertions** grün, beide Targets /W4 /WX;
+  Details + manueller Smoke-Plan: HANDOFF_RESULT.md.
+
+## Meilenstein (10.07.2026) — TouchLive M5 (Bespoke EQ Eight)
 
 **Erste bespoke Device-UI — EQ-Kurve mit Touch-Punkten statt Fader-Bank:**
 
