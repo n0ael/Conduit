@@ -135,4 +135,10 @@ void RingTouchModel::reset() noexcept
     primaries.clear();
 }
 
+void RingTouchModel::setRadiusRange (float newMinPx, float newMaxPx) noexcept
+{
+    config.minRadiusPx = juce::jmax (0.0f, newMinPx);
+    config.maxRadiusPx = juce::jmax (config.minRadiusPx + 1.0f, newMaxPx);
+}
+
 } // namespace conduit::grid

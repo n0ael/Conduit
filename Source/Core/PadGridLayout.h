@@ -50,6 +50,16 @@ public:
     int cols() const noexcept { return config.cols; }
     int rows() const noexcept { return config.rows; }
 
+    /** Laufzeit-Setter fuer die Sensitivity-Regler (Block A2/A3). Wirkt
+        SOFORT auf laufende Drags -- ein Wert, der waehrend eines gehaltenen
+        Touches geaendert wird, re-mapt die naechste Bewegung relativ zum
+        ursprünglichen Aufsetzpunkt (akzeptierter Nebeneffekt, kein neuer
+        Zustand noetig). Aufrufer multipliziert IMMER vom gecachten
+        Basiswert aus, nie vom aktuellen Config-Wert (sonst Drift bei
+        wiederholtem Setzen). */
+    void setYRangeNorm (float newRangeNorm) noexcept;
+    void setSemitonesPerPadWidth (float newSemitones) noexcept;
+
 private:
     Config config;
 };

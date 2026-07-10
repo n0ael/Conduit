@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "Core/GridPanelSettings.h"
 #include "Core/UiSettings.h"
 
 namespace conduit
@@ -12,7 +13,10 @@ namespace conduit
     Schwebendes Dev-Panel (User-Wunsch 07/2026): kleines always-on-top-Fenster
     für Live-UI-Tweaks — Inhalt ist dieselbe UiSettingsComponent wie der
     „Oberfläche"-Settings-Tab (derselbe UiSettings-Broadcaster hält beide
-    synchron). Nur im Dev Mode erreichbar (Dev-Tile in der TransportBar).
+    synchron), darunter die Grid-Dev-Werte Schwellbreite/Fade-Zeit (Block A4,
+    Umzug aus MpeShapingView -- persistieren weiterhin über
+    GridPanelSettings, MpeShapingView pollt die Werte live in tick()). Nur
+    im Dev Mode erreichbar (Dev-Tile in der TransportBar).
 
     Ownership: unique_ptr im EngineEditor. closeButtonPressed meldet nur
     onClose — der Editor destruiert ASYNC (callAsync + SafePointer, ein
@@ -22,7 +26,7 @@ namespace conduit
 class DevPanel final : public juce::DocumentWindow
 {
 public:
-    explicit DevPanel (UiSettings& uiSettingsToUse);
+    DevPanel (UiSettings& uiSettingsToUse, GridPanelSettings& gridPanelSettingsToUse);
 
     std::function<void()> onClose;
 

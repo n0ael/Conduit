@@ -81,6 +81,22 @@ public:
         Breite, ChordMemory-Konvention). */
     [[nodiscard]] std::vector<grid::StoredSun> constellationNormalized() const;
 
+    //==========================================================================
+    // Sensitivity-/Range-Regler (Block A2/A3, MpeShapingView-Detailspalte):
+    // skalieren IMMER von den beim Ctor gecachten Basiswerten aus, nie vom
+    // aktuellen Config-Wert -- verhindert Drift bei wiederholtem Setzen.
+    // Laufzeit-only, keine Persistenz (kommt gebündelt in Block K).
+
+    /** Pressure-Sensitivity 0..100 (50 = heutiges Verhalten, hoeher = mehr
+        Fingerweg = feiner). Skaliert PadGridLayout::yRangeNorm. */
+    void setPressureSensitivity (double sensitivity0to100) noexcept;
+    /** Slide-Sensitivity 0..100, analog ueber die Ring-Radiusspanne. */
+    void setSlideSensitivity (double sensitivity0to100) noexcept;
+    /** PitchBend-Range-Multiplikator (Block A3: 0.25/0.5/1/2/4/8). Skaliert
+        PadGridLayout::semitonesPerPadWidth; der 48-HT-Ausgangs-Clamp der
+        GridVoiceEngine bleibt unangetastet. */
+    void setPitchBendMultiplier (float multiplier) noexcept;
+
 private:
     struct FingerState
     {
@@ -111,6 +127,14 @@ private:
     grid::GridVoiceEngine& engine;
     grid::PadGridLayout    layout;
     grid::RingTouchModel   ring;
+
+    // Gecachte Basiswerte fuer die Sensitivity-/Range-Regler (Block A2/A3) --
+    // vor jeder Skalierung MULTIPLIZIEREN, nie den aktuellen Config-Wert
+    // weiterskalieren.
+    const float baseYRangeNorm;
+    const float baseSemitonesPerPadWidth;
+    const float baseRingMinPx;
+    const float baseRingSpanPx;
 
     int       scaleRootNote = 0;
     ScaleType sessionScale  = ScaleType::chromatic;

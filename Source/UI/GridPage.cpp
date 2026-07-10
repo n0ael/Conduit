@@ -9,10 +9,9 @@ namespace conduit
 
 GridPage::GridPage (juce::ValueTree rootStateToUse,
                      grid::GridVoiceEngine& engineToUse, grid::MidiDeviceTarget& midiTargetToUse,
-                     GridPanelSettings& panelSettingsToUse, UiSettings& uiSettingsToUse)
+                     GridPanelSettings& panelSettingsToUse)
     : rootState (std::move (rootStateToUse)),
       engine (engineToUse), midiTarget (midiTargetToUse), panelSettings (panelSettingsToUse),
-      uiSettings (uiSettingsToUse),
       // 8×8-Raster der Grid-Page (padLayoutConfig, User 10.07.2026) — Keyboard
       // und ccLayer teilen sich dieselbe Zellgeometrie.
       keyboard (engineToUse, padLayoutConfig()),
@@ -101,7 +100,7 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     // Breite/Offen-Zustand aus der Persistenz laden, Live-Resize + Commit
     // verdrahten. Farbwahl in der MpeShapingView (Quick-Swatch/Picker)
     // aktualisiert die Ribbon-Füllfarben live (Persistenz macht die View).
-    auto mpeView = std::make_unique<MpeShapingView> (engine, panelSettings, uiSettings);
+    auto mpeView = std::make_unique<MpeShapingView> (engine, panelSettings);
     mpeView->onAxisColourChanged = [this] (Axis axis, juce::Colour colour)
     {
         switch (axis)
@@ -110,6 +109,20 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
             case Axis::Slide:     slideOffsetRibbon.setFillColour (colour); break;
             case Axis::PitchBend: pitchOffsetRibbon.setFillColour (colour); break;
         }
+    };
+    // Sensitivity-/Range-Regler (Block A2/A3): die View meldet nur den Wert,
+    // GridPage reicht ihn an das GridKeyboardComponent durch (Laufzeit-only,
+    // keine Persistenz -- Block K).
+    mpeView->onSensitivityChanged = [this] (Axis axis, double sensitivity)
+    {
+        if (axis == Axis::Pressure)
+            keyboard.setPressureSensitivity (sensitivity);
+        else if (axis == Axis::Slide)
+            keyboard.setSlideSensitivity (sensitivity);
+    };
+    mpeView->onPitchBendMultiplierChanged = [this] (float multiplier)
+    {
+        keyboard.setPitchBendMultiplier (multiplier);
     };
     dockPanel.addTab ("mpe", "MPE", std::move (mpeView));
 

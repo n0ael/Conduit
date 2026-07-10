@@ -11,7 +11,6 @@
 #include "Core/GridPanelSettings.h"
 #include "Core/GridVoiceEngine.h"
 #include "Core/MidiDeviceTarget.h"
-#include "Core/UiSettings.h"
 #include "EditorDockPanel.h"
 #include "ExpressionRibbon.h"
 #include "GridKeyboardComponent.h"
@@ -38,11 +37,13 @@ namespace conduit
     Rechtes Editor-Dock-Panel (S2-Vorstufe MPE-Shaping): EditorDockPanel
     dockt via bounds.removeFromRight (dockPanel.getPreferredWidth()) --
     koexistiert mit dem Browser-Panel (das dockt eine Ebene höher im
-    EngineEditor). Tab „MPE" mit MpeShapingView (S2c) -- drei
-    Kurven (Pressure/Slide/PitchBend) + Live-Noten-Kreise, reine Anzeige
-    (Touch-Bearbeitung folgt in S2c-2). Toggle über einen eigenen
-    TransportBar-Button (setDockPanelOpen), Breite/Offen-Zustand persistiert
-    über GridPanelSettings (App-Zustand, Muster MeterSettings).
+    EngineEditor). Tab „MPE" mit MpeShapingView (S2c) -- drei touch-
+    editierbare Kurven (Pressure/Slide/PitchBend) + Live-Noten-Kreise, je
+    Achse eine Detailspalte mit Sensitivity-Regler bzw. PitchBend-Range-
+    Multiplikator (Block A2/A3), Offset-Schloss und Achsfarbe. Toggle über
+    einen eigenen TransportBar-Button (setDockPanelOpen), Breite/Offen-
+    Zustand persistiert über GridPanelSettings (App-Zustand, Muster
+    MeterSettings).
 
     CC-Baukasten (Grid-Page v2): zweiter Tab „CC" (CcPanel, Werkzeuge
     Fader/Push/Toggle/XY) + CcControlLayer als Overlay exakt über den
@@ -76,7 +77,7 @@ class GridPage final : public juce::Component,
 public:
     GridPage (juce::ValueTree rootStateToUse,
               grid::GridVoiceEngine& engineToUse, grid::MidiDeviceTarget& midiTargetToUse,
-              GridPanelSettings& panelSettingsToUse, UiSettings& uiSettingsToUse);
+              GridPanelSettings& panelSettingsToUse);
     ~GridPage() override;
 
     void resized() override;
@@ -143,7 +144,6 @@ private:
     grid::GridVoiceEngine& engine;
     grid::MidiDeviceTarget& midiTarget;
     GridPanelSettings& panelSettings;
-    UiSettings& uiSettings;
     juce::Array<juce::MidiDeviceInfo> devices;
 
     juce::ComboBox outputCombo;

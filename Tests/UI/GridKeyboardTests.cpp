@@ -69,6 +69,104 @@ TEST_CASE ("GridKeyboardComponent: Tap in ein Pad startet die erwartete Note", "
     REQUIRE (fake.calls[3].voiceIndex == 0);
 }
 
+TEST_CASE ("GridKeyboardComponent: setPressureSensitivity(100) viertelt das Pressure-Delta (Block A2)", "[grid][ui]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fakeDefault;
+    grid::GridVoiceEngine engineDefault (fakeDefault);
+    conduit::GridKeyboardComponent keyboardDefault (engineDefault, conduit::GridPage::padLayoutConfig());
+    keyboardDefault.setSize (320, 320);
+
+    keyboardDefault.mouseDown (makeEvent (keyboardDefault, { 100.0f, 140.0f }));
+    keyboardDefault.mouseDrag (makeEvent (keyboardDefault, { 100.0f, 100.0f })); // nach oben
+
+    grid::FakeVoiceSink fakeSensitive;
+    grid::GridVoiceEngine engineSensitive (fakeSensitive);
+    conduit::GridKeyboardComponent keyboardSensitive (engineSensitive, conduit::GridPage::padLayoutConfig());
+    keyboardSensitive.setSize (320, 320);
+    keyboardSensitive.setPressureSensitivity (100.0); // Faktor 4 auf yRangeNorm -> 1/4 Delta
+
+    keyboardSensitive.mouseDown (makeEvent (keyboardSensitive, { 100.0f, 140.0f }));
+    keyboardSensitive.mouseDrag (makeEvent (keyboardSensitive, { 100.0f, 100.0f }));
+
+    const auto pressureCall = [] (const grid::FakeVoiceSink& fake)
+    {
+        for (auto it = fake.calls.rbegin(); it != fake.calls.rend(); ++it)
+            if (it->kind == grid::FakeVoiceSink::Kind::Pressure)
+                return it->floatValue;
+        return 0.0f;
+    };
+
+    const auto deltaDefault   = pressureCall (fakeDefault) - 0.5f;
+    const auto deltaSensitive = pressureCall (fakeSensitive) - 0.5f;
+
+    REQUIRE (deltaSensitive == Catch::Approx (deltaDefault * 0.25f));
+}
+
+TEST_CASE ("GridKeyboardComponent: setPitchBendMultiplier(2) verdoppelt den Bend (Block A3)", "[grid][ui]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fakeDefault;
+    grid::GridVoiceEngine engineDefault (fakeDefault);
+    conduit::GridKeyboardComponent keyboardDefault (engineDefault, conduit::GridPage::padLayoutConfig());
+    keyboardDefault.setSize (320, 320);
+
+    keyboardDefault.mouseDown (makeEvent (keyboardDefault, { 100.0f, 140.0f }));
+    keyboardDefault.mouseDrag (makeEvent (keyboardDefault, { 140.0f, 140.0f }));
+
+    grid::FakeVoiceSink fakeDoubled;
+    grid::GridVoiceEngine engineDoubled (fakeDoubled);
+    conduit::GridKeyboardComponent keyboardDoubled (engineDoubled, conduit::GridPage::padLayoutConfig());
+    keyboardDoubled.setSize (320, 320);
+    keyboardDoubled.setPitchBendMultiplier (2.0f);
+
+    keyboardDoubled.mouseDown (makeEvent (keyboardDoubled, { 100.0f, 140.0f }));
+    keyboardDoubled.mouseDrag (makeEvent (keyboardDoubled, { 140.0f, 140.0f }));
+
+    const auto bendCall = [] (const grid::FakeVoiceSink& fake)
+    {
+        for (auto it = fake.calls.rbegin(); it != fake.calls.rend(); ++it)
+            if (it->kind == grid::FakeVoiceSink::Kind::PitchBend)
+                return it->floatValue;
+        return 0.0f;
+    };
+
+    REQUIRE (bendCall (fakeDoubled) == Catch::Approx (bendCall (fakeDefault) * 2.0f));
+}
+
+TEST_CASE ("GridKeyboardComponent: setSlideSensitivity bleibt konsistent mit dem Akkord-Latch (Block A2)", "[grid][ui]")
+{
+    // GridKeyboardComponent::latchConstellation baut die Slide-Formel ueber
+    // ring.maxRadiusPx()/restRadiusPx() nach (GridKeyboardComponent.cpp) --
+    // beide Getter lesen die per setSlideSensitivity gesetzte Config live,
+    // bleiben also automatisch konsistent (kein zweiter Wertespeicher).
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);   // 8x8 Raster -> 40x40 px pro Pad
+    keyboard.setSlideSensitivity (0.0); // Faktor 0.25 -> Spanne 40..85 (statt 40..220)
+
+    // Sonne (100,300) -> Note 50; Mond-Offset 85 px (die neue maxRadiusPx
+    // bei Sensitivity 0) -> Slide muss exakt 1.0 sein (nicht 0.5, wie es
+    // die Default-Spanne 40..220 an dieser Stelle ergeben wuerde).
+    keyboard.latchConstellation ({ { 100.0f / 320.0f, 300.0f / 320.0f,
+                                     85.0f / 320.0f, 0.0f, true } });
+
+    const auto slideCall = [] (const grid::FakeVoiceSink& fake)
+    {
+        for (auto it = fake.calls.rbegin(); it != fake.calls.rend(); ++it)
+            if (it->kind == grid::FakeVoiceSink::Kind::Slide)
+                return it->floatValue;
+        return -1.0f;
+    };
+
+    REQUIRE (slideCall (fake) == Catch::Approx (1.0f));
+}
+
 TEST_CASE ("GridKeyboardComponent: unterste Reihe bleibt bei 8 Reihen identisch", "[grid][ui]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;

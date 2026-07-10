@@ -261,6 +261,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/NodeCanvas.cpp
     Source/UI/NodeComponent.cpp
     Source/UI/NoteCircleFadeTracker.cpp
+    Source/UI/NumberFieldBracket.cpp
     Source/UI/OscSettingsComponent.cpp
     Source/UI/LooperPage.cpp
     Source/UI/LooperWaveformStrip.cpp
@@ -582,6 +583,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/GridVoiceEngineTests.cpp
         Tests/Core/PadGridLayoutTests.cpp
         Tests/Core/RingTouchModelTests.cpp
+        Tests/Core/GridSensitivityTests.cpp
         Tests/Core/LevelMeterTests.cpp
         Tests/Core/InputLinkSendTests.cpp
         Tests/Core/LinkAudioReceiveTests.cpp
@@ -626,6 +628,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/UI/ConduitColorPickerTests.cpp
         Tests/UI/EditorDockPanelTests.cpp
         Tests/UI/NoteCircleFadeTrackerTests.cpp
+        Tests/UI/NumberFieldBracketTests.cpp
         Tests/UI/TouchKeyboardTests.cpp
         Tests/UI/GridKeyboardTests.cpp
         Tests/UI/FxModulePanelTests.cpp
@@ -814,6 +817,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/NodeCanvas.cpp
         Source/UI/NodeComponent.cpp
         Source/UI/NoteCircleFadeTracker.cpp
+        Source/UI/NumberFieldBracket.cpp
         Source/UI/OscSettingsComponent.cpp
         Source/UI/LooperPage.cpp
         Source/UI/LooperWaveformStrip.cpp

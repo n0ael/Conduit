@@ -1,5 +1,6 @@
 #include "GridKeyboardComponent.h"
 
+#include "Core/GridSensitivity.h"
 #include "PushLookAndFeel.h"
 
 namespace conduit
@@ -7,10 +8,31 @@ namespace conduit
 
 GridKeyboardComponent::GridKeyboardComponent (grid::GridVoiceEngine& engineToUse,
                                                const grid::PadGridLayout::Config& layoutConfig)
-    : engine (engineToUse), layout (layoutConfig)
+    : engine (engineToUse), layout (layoutConfig),
+      baseYRangeNorm (layoutConfig.yRangeNorm),
+      baseSemitonesPerPadWidth (layoutConfig.semitonesPerPadWidth),
+      baseRingMinPx (grid::RingTouchModel::Config{}.minRadiusPx),
+      baseRingSpanPx (grid::RingTouchModel::Config{}.maxRadiusPx - grid::RingTouchModel::Config{}.minRadiusPx)
 {
     setWantsKeyboardFocus (false);
     setInterceptsMouseClicks (true, false);
+}
+
+void GridKeyboardComponent::setPressureSensitivity (double sensitivity0to100) noexcept
+{
+    const auto scale = grid::sensitivityToRangeScale (sensitivity0to100);
+    layout.setYRangeNorm (baseYRangeNorm * scale);
+}
+
+void GridKeyboardComponent::setSlideSensitivity (double sensitivity0to100) noexcept
+{
+    const auto scale = grid::sensitivityToRangeScale (sensitivity0to100);
+    ring.setRadiusRange (baseRingMinPx, baseRingMinPx + baseRingSpanPx * scale);
+}
+
+void GridKeyboardComponent::setPitchBendMultiplier (float multiplier) noexcept
+{
+    layout.setSemitonesPerPadWidth (baseSemitonesPerPadWidth * multiplier);
 }
 
 juce::Point<float> GridKeyboardComponent::normalisedPosition (const juce::MouseEvent& event) const noexcept

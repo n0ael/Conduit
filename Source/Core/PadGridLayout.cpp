@@ -53,4 +53,14 @@ float PadGridLayout::expressionFromDrag (float startNormY, float currentNormY) c
     return 0.5f + (startNormY - currentNormY) / config.yRangeNorm;
 }
 
+void PadGridLayout::setYRangeNorm (float newRangeNorm) noexcept
+{
+    config.yRangeNorm = juce::jmax (0.01f, newRangeNorm);
+}
+
+void PadGridLayout::setSemitonesPerPadWidth (float newSemitones) noexcept
+{
+    config.semitonesPerPadWidth = juce::jmax (0.01f, newSemitones);
+}
+
 } // namespace conduit::grid

@@ -1,4 +1,7 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+
+#include <cmath>
 
 #include "Core/PadGridLayout.h"
 
@@ -71,4 +74,43 @@ TEST_CASE ("PadGridLayout: expressionFromDrag — ungeklemmter Ausdruck relativ 
     // Ungeklemmt: 0.5 nach oben/unten -> über 1 hinaus / unter 0
     REQUIRE (juce::exactlyEqual (layout.expressionFromDrag (0.5f, 0.0f), 1.5f));
     REQUIRE (juce::exactlyEqual (layout.expressionFromDrag (0.5f, 1.0f), -0.5f));
+}
+
+TEST_CASE ("PadGridLayout: setYRangeNorm — groesserer Wert = kleinere Auslenkung (Block A2)", "[grid]")
+{
+    grid::PadGridLayout layout; // Default yRangeNorm = 0.5
+
+    const auto before = layout.expressionFromDrag (0.5f, 0.4f);
+
+    layout.setYRangeNorm (1.0f); // doppelt so gross -> halbe Auslenkung
+    const auto afterDouble = layout.expressionFromDrag (0.5f, 0.4f);
+    REQUIRE (afterDouble - 0.5f == Catch::Approx ((before - 0.5f) * 0.5f));
+
+    layout.setYRangeNorm (0.25f); // halb so gross -> doppelte Auslenkung
+    const auto afterHalf = layout.expressionFromDrag (0.5f, 0.4f);
+    REQUIRE (afterHalf - 0.5f == Catch::Approx ((before - 0.5f) * 2.0f));
+}
+
+TEST_CASE ("PadGridLayout: setYRangeNorm klemmt auf > 0", "[grid]")
+{
+    grid::PadGridLayout layout;
+    layout.setYRangeNorm (-5.0f);
+
+    // Darf nicht durch 0/negativ teilen -- Ergebnis muss endlich sein.
+    REQUIRE (std::isfinite (layout.expressionFromDrag (0.5f, 0.4f)));
+}
+
+TEST_CASE ("PadGridLayout: setSemitonesPerPadWidth skaliert pitchBendSemitones linear (Block A3)", "[grid]")
+{
+    grid::PadGridLayout layout;
+    const auto padWidth = 1.0f / (float) layout.cols();
+
+    layout.setSemitonesPerPadWidth (0.5f); // x0.25 ggue. Default (2.0)
+    REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.0f, padWidth), 0.5f));
+
+    layout.setSemitonesPerPadWidth (4.0f); // x2 ggue. Default
+    REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.0f, padWidth), 4.0f));
+
+    layout.setSemitonesPerPadWidth (16.0f); // x8 ggue. Default
+    REQUIRE (juce::exactlyEqual (layout.pitchBendSemitones (0.0f, padWidth), 16.0f));
 }

@@ -116,9 +116,100 @@ void MpeShapingView::AxisColourRow::timerCallback()
 }
 
 //==============================================================================
-MpeShapingView::MpeShapingView (grid::GridVoiceEngine& engineToUse, GridPanelSettings& panelSettingsToUse,
-                                UiSettings& uiSettingsToUse)
-    : engine (engineToUse), panelSettings (panelSettingsToUse), uiSettings (uiSettingsToUse),
+juce::String MpeShapingView::BendRangeSelector::labelForIndex (int index)
+{
+    switch (index)
+    {
+        case 0: return juce::String::fromUTF8 ("¼");
+        case 1: return juce::String::fromUTF8 ("½");
+        case 2: return "x1";
+        case 3: return "x2";
+        case 4: return "x4";
+        case 5: return "x8";
+        default: return {};
+    }
+}
+
+juce::Rectangle<int> MpeShapingView::BendRangeSelector::cellBounds (int index) const noexcept
+{
+    auto area = getLocalBounds();
+    area.removeFromTop (18);   // Ueberschrift "Bend Range"
+
+    const auto cellW = area.getWidth() / kCols;
+    const auto cellH = area.getHeight() / kRows;
+    const auto row = index / kCols;
+    const auto col = index % kCols;
+
+    return { area.getX() + col * cellW, area.getY() + row * cellH, cellW, cellH };
+}
+
+int MpeShapingView::BendRangeSelector::cellIndexAt (juce::Point<int> pos) const noexcept
+{
+    for (int i = 0; i < (int) kMultipliers.size(); ++i)
+        if (cellBounds (i).contains (pos))
+            return i;
+
+    return -1;
+}
+
+void MpeShapingView::BendRangeSelector::setSelectedIndex (int index) noexcept
+{
+    if (index < 0 || index >= (int) kMultipliers.size() || index == selectedIndex)
+        return;
+
+    selectedIndex = index;
+    repaint();
+}
+
+void MpeShapingView::BendRangeSelector::setAccentColour (juce::Colour newColour) noexcept
+{
+    if (accentColour == newColour)
+        return;
+
+    accentColour = newColour;
+    repaint();
+}
+
+void MpeShapingView::BendRangeSelector::paint (juce::Graphics& g)
+{
+    auto area = getLocalBounds();
+    const auto heading = area.removeFromTop (18);
+
+    g.setColour (push::colours::textDim);
+    g.setFont (push::scaledFont (10.0f));
+    g.drawText ("Bend Range", heading, juce::Justification::centredLeft);
+
+    for (int i = 0; i < (int) kMultipliers.size(); ++i)
+    {
+        const auto cell = cellBounds (i).reduced (2).toFloat();
+        const auto isSelected = i == selectedIndex;
+
+        g.setColour (isSelected ? accentColour : push::colours::tile);
+        g.fillRoundedRectangle (cell, 3.0f);
+        g.setColour (isSelected ? push::colours::ledWhite : push::colours::outline);
+        g.drawRoundedRectangle (cell, 3.0f, 1.0f);
+
+        g.setColour (isSelected ? push::colours::panel : push::colours::text);
+        g.setFont (push::scaledFont (12.0f));
+        g.drawFittedText (labelForIndex (i), cell.toNearestInt(), juce::Justification::centred, 1, 1.0f);
+    }
+}
+
+void MpeShapingView::BendRangeSelector::mouseUp (const juce::MouseEvent& event)
+{
+    const auto index = cellIndexAt (event.getPosition());
+    if (index < 0)
+        return;
+
+    setSelectedIndex (index);
+
+    if (onMultiplierChanged != nullptr)
+        onMultiplierChanged (kMultipliers[(size_t) index]);
+}
+
+//==============================================================================
+MpeShapingView::MpeShapingView (grid::GridVoiceEngine& engineToUse, GridPanelSettings& panelSettingsToUse)
+    : engine (engineToUse), panelSettings (panelSettingsToUse),
       sections {{
           AxisSection { grid::GridVoiceEngine::Axis::Pressure,  "Pressure",
                         panelSettingsToUse.getAxisColour (grid::GridVoiceEngine::Axis::Pressure) },
@@ -131,52 +222,46 @@ MpeShapingView::MpeShapingView (grid::GridVoiceEngine& engineToUse, GridPanelSet
     for (auto& section : sections)
         section.scratch.reserve ((size_t) grid::VoiceAllocator::kMaxVoices);
 
-    addChildComponent (thresholdCaption);
-    addChildComponent (thresholdSlider);
-    addChildComponent (fadeCaption);
-    addChildComponent (fadeSlider);
-
-    thresholdCaption.setJustificationType (juce::Justification::centredLeft);
-    thresholdCaption.setColour (juce::Label::textColourId, push::colours::textDim);
-    fadeCaption.setJustificationType (juce::Justification::centredLeft);
-    fadeCaption.setColour (juce::Label::textColourId, push::colours::textDim);
-
-    thresholdSlider.setSliderStyle (juce::Slider::LinearHorizontal);
-    thresholdSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, kDevRowHeight - 4);
-    thresholdSlider.setRange ((double) GridPanelSettings::minThresholdWidth,
-                             (double) GridPanelSettings::maxThresholdWidth, 1.0);
-    thresholdSlider.setValue (panelSettings.getEditorThresholdWidth(), juce::dontSendNotification);
-    // Live: die Schwellbreite wirkt sofort aufs Layout; persistiert wird erst
-    // beim Loslassen (Muster EditorDockPanel::onWidthCommitted).
-    thresholdSlider.onValueChange = [this] { resized(); };
-    thresholdSlider.onDragEnd = [this]
-    { panelSettings.setEditorThresholdWidth ((int) thresholdSlider.getValue()); };
-
-    fadeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
-    fadeSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, kDevRowHeight - 4);
-    fadeSlider.setRange ((double) GridPanelSettings::minNoteCircleFadeMs,
-                        (double) GridPanelSettings::maxNoteCircleFadeMs, 1.0);
-    fadeSlider.setValue (panelSettings.getNoteCircleFadeMs(), juce::dontSendNotification);
-    // Live: wirkt ab dem nächsten Frame auf alle drei Fade-Tracker;
-    // persistiert wird erst beim Loslassen.
-    fadeSlider.onValueChange = [this]
-    {
-        for (auto& section : sections)
-            section.fadeTracker.setFadeMs ((int) fadeSlider.getValue());
-    };
-    fadeSlider.onDragEnd = [this]
-    { panelSettings.setNoteCircleFadeMs ((int) fadeSlider.getValue()); };
-
     for (auto& section : sections)
         section.fadeTracker.setFadeMs (panelSettings.getNoteCircleFadeMs());
 
+    cachedThresholdWidth = panelSettings.getEditorThresholdWidth();
+    cachedFadeMs         = panelSettings.getNoteCircleFadeMs();
+
     // Schloss-Toggle: nur Pressure/Slide (PitchBend bekommt noch keins,
-    // Platz bleibt frei fürs künftige Range-Element). Akzentfarbe je Achse
-    // = Kurvenfarbe (section.colour).
+    // der Platz gehört dem bendRangeSelector). Akzentfarbe je Achse =
+    // Kurvenfarbe (section.colour).
     setupOffsetToggle (pressureOffsetToggle, pressureOffsetLabel,
                       grid::GridVoiceEngine::Axis::Pressure, sections[0].colour);
     setupOffsetToggle (slideOffsetToggle, slideOffsetLabel,
                       grid::GridVoiceEngine::Axis::Slide, sections[1].colour);
+
+    // Sensitivity-Felder (Block A2): Config kommt aus dem In-Class-
+    // Initialisierer (Header) -- hier nur Akzentfarbe + Verdrahtung.
+    addChildComponent (pressureSensField);
+    pressureSensField.setAccentColour (sections[0].colour);
+    pressureSensField.onValueChanged = [this] (double v)
+    {
+        if (onSensitivityChanged != nullptr)
+            onSensitivityChanged (grid::GridVoiceEngine::Axis::Pressure, v);
+    };
+
+    addChildComponent (slideSensField);
+    slideSensField.setAccentColour (sections[1].colour);
+    slideSensField.onValueChanged = [this] (double v)
+    {
+        if (onSensitivityChanged != nullptr)
+            onSensitivityChanged (grid::GridVoiceEngine::Axis::Slide, v);
+    };
+
+    // PitchBend-Range-Multiplikator (Block A3).
+    addChildComponent (bendRangeSelector);
+    bendRangeSelector.setAccentColour (sections[2].colour);
+    bendRangeSelector.onMultiplierChanged = [this] (float multiplier)
+    {
+        if (onPitchBendMultiplierChanged != nullptr)
+            onPitchBendMultiplierChanged (multiplier);
+    };
 
     // „Color"-Zeile je Achse (alle drei): Tap wählt sofort, Gedrückthalten
     // öffnet den ConduitColorPicker — beides läuft durch applyAxisColour.
@@ -190,8 +275,6 @@ MpeShapingView::MpeShapingView (grid::GridVoiceEngine& engineToUse, GridPanelSet
         row.onColourPicked = [this, index] (juce::Colour colour) { applyAxisColour (index, colour); };
         row.onLongPress    = [this, index] { openColourPicker (index); };
     }
-
-    updateDevSliderVisibility (uiSettings.isDevModeEnabled());
 }
 
 MpeShapingView::~MpeShapingView()
@@ -214,11 +297,22 @@ void MpeShapingView::applyAxisColour (int sectionIndex, juce::Colour colour)
 
     colourRows[(size_t) sectionIndex].setSelectedColour (colour);
 
-    // LockToggle-Akzent folgt der Achsfarbe (setAccentColour repaintet selbst).
+    // LockToggle-/Sensitivity-/Range-Akzent folgt der Achsfarbe (die
+    // setAccentColour-Aufrufe repainten selbst).
     if (section.axis == grid::GridVoiceEngine::Axis::Pressure)
+    {
         pressureOffsetToggle.setAccentColour (colour);
+        pressureSensField.setAccentColour (colour);
+    }
     else if (section.axis == grid::GridVoiceEngine::Axis::Slide)
+    {
         slideOffsetToggle.setAccentColour (colour);
+        slideSensField.setAccentColour (colour);
+    }
+    else
+    {
+        bendRangeSelector.setAccentColour (colour);
+    }
 
     panelSettings.setAxisColour (section.axis, colour);
 
@@ -270,16 +364,6 @@ void MpeShapingView::setupOffsetToggle (LockToggle& toggle, juce::Label& label,
     label.setColour (juce::Label::textColourId, push::colours::textDim);
 }
 
-void MpeShapingView::updateDevSliderVisibility (bool devModeEnabled)
-{
-    devSlidersVisible = devModeEnabled;
-
-    thresholdCaption.setVisible (devSlidersVisible);
-    thresholdSlider.setVisible (devSlidersVisible);
-    fadeCaption.setVisible (devSlidersVisible);
-    fadeSlider.setVisible (devSlidersVisible);
-}
-
 void MpeShapingView::tick()
 {
     const auto nowMs = juce::Time::getMillisecondCounterHiRes();
@@ -292,11 +376,21 @@ void MpeShapingView::tick()
         section.fadeTracker.update (section.scratch, deltaMs);
     }
 
-    const auto devModeEnabled = uiSettings.isDevModeEnabled();
-    if (devModeEnabled != devSlidersVisible)
+    // Live-Rückweg vom DevPanel (Block A4): GridPanelSettings ist kein
+    // ChangeBroadcaster, daher Polling -- billig genug für zwei ints/Frame.
+    const auto thresholdWidth = panelSettings.getEditorThresholdWidth();
+    if (thresholdWidth != cachedThresholdWidth)
     {
-        updateDevSliderVisibility (devModeEnabled);
+        cachedThresholdWidth = thresholdWidth;
         resized();
+    }
+
+    const auto fadeMs = panelSettings.getNoteCircleFadeMs();
+    if (fadeMs != cachedFadeMs)
+    {
+        cachedFadeMs = fadeMs;
+        for (auto& section : sections)
+            section.fadeTracker.setFadeMs (cachedFadeMs);
     }
 
     repaint();
@@ -480,19 +574,6 @@ void MpeShapingView::resized()
 {
     auto bounds = getLocalBounds();
 
-    if (devSlidersVisible)
-    {
-        auto devRow = bounds.removeFromBottom (kDevRowHeight * 2 + 4);
-
-        auto thresholdRow = devRow.removeFromTop (kDevRowHeight);
-        thresholdCaption.setBounds (thresholdRow.removeFromLeft (100));
-        thresholdSlider.setBounds (thresholdRow.reduced (4, 2));
-
-        devRow.removeFromTop (4);
-        fadeCaption.setBounds (devRow.removeFromLeft (100));
-        fadeSlider.setBounds (devRow.reduced (4, 2));
-    }
-
     const auto sectionHeight = bounds.getHeight() / (int) sections.size();
     const auto showDetail = getWidth() >= panelSettings.getEditorThresholdWidth();
 
@@ -508,6 +589,21 @@ void MpeShapingView::resized()
         section.detailBounds = showDetail ? sectionBounds.removeFromRight (kDetailColumnWidth)
                                           : juce::Rectangle<int>{};
         section.curveBounds  = sectionBounds;
+
+        // Sensitivity-Feld (Block A2): OBERSTER Detailspalten-Eintrag --
+        // nur Pressure/Slide, vor dem Bottom-Stacking abgezogen, damit der
+        // Platzhalter-Text (paintAxis) automatisch schrumpft.
+        if (section.axis != grid::GridVoiceEngine::Axis::PitchBend)
+        {
+            const auto isPressure = section.axis == grid::GridVoiceEngine::Axis::Pressure;
+            auto& sensField = isPressure ? pressureSensField : slideSensField;
+
+            sensField.setVisible (showDetail);
+
+            if (showDetail)
+                sensField.setBounds (section.detailBounds.removeFromTop (NumberFieldBracket::kRowHeight)
+                                         .reduced (4, 0));
+        }
 
         // „Color"-Zeile: UNTERSTER Punkt der Detailspalte, alle drei Achsen
         // (bei PitchBend unter dem freien Platzhalter-Bereich). Zuerst von
@@ -525,9 +621,8 @@ void MpeShapingView::resized()
 
         // Schloss-Toggle + Label: über der Color-Zeile (Detailspalte von
         // unten), Rest bleibt für den Platzhalter-Text oben (paintAxis
-        // liest section.detailBounds live). PitchBend: kein Toggle, Platz
-        // bleibt frei.
-        // TODO: PitchBend-Range-Element (¼…×8 / Halbtöne) -- späterer Schritt.
+        // liest section.detailBounds live). PitchBend: kein Toggle -- der
+        // Platz gehört stattdessen dem bendRangeSelector (Block A3).
         if (section.axis != grid::GridVoiceEngine::Axis::PitchBend)
         {
             const auto isPressure = section.axis == grid::GridVoiceEngine::Axis::Pressure;
@@ -543,6 +638,14 @@ void MpeShapingView::resized()
                 toggle.setBounds (toggleRow.removeFromLeft (LockToggle::kComponentSize));
                 label.setBounds (toggleRow.reduced (4, 0));
             }
+        }
+        else
+        {
+            bendRangeSelector.setVisible (showDetail);
+
+            if (showDetail)
+                bendRangeSelector.setBounds (
+                    section.detailBounds.removeFromBottom (BendRangeSelector::kRowHeight).reduced (2));
         }
     }
 }

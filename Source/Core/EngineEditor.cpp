@@ -32,7 +32,7 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
               &engineProcessor.getInputLevels(), &engineProcessor.getOutputLevels(),
               &engineProcessor.getInputLinkSend(), &engineProcessor.getUiSettings()),
       gridPage (rootState, engineProcessor.getGridVoiceEngine(), engineProcessor.getGridMidiDeviceTarget(),
-               engineProcessor.getGridPanelSettings(), engineProcessor.getUiSettings()),
+               engineProcessor.getGridPanelSettings()),
       touchLivePage (engineProcessor.getLiveSetModel(), engineProcessor.getTouchLiveClient(),
                      engineProcessor.getTouchLiveMeterBus(), engineProcessor.getTouchLiveSettings(),
                      &engineProcessor.getLiveSpectrumTap()),
@@ -443,7 +443,7 @@ void EngineEditor::toggleDevPanel()
     }
     else
     {
-        devPanel = std::make_unique<DevPanel> (engine.getUiSettings());
+        devPanel = std::make_unique<DevPanel> (engine.getUiSettings(), engine.getGridPanelSettings());
         devPanel->onClose = [this] { closeDevPanelAsync(); };
         devPanel->centreAroundComponent (this, devPanel->getWidth(), devPanel->getHeight());
     }

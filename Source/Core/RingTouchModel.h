@@ -79,6 +79,14 @@ public:
         Mond-Offsets mit derselben Formel wie onMove in Slide um. */
     [[nodiscard]] float maxRadiusPx() const noexcept { return config.maxRadiusPx; }
 
+    /** Laufzeit-Setter fuer die Slide-Sensitivity (Block A2). grabRadiusPx
+        bleibt unangetastet -- nur die Slide-Spanne aendert sich. Erzwingt
+        maxPx > minPx (Mindestabstand 1 px). Aufrufer (GridKeyboardComponent)
+        multipliziert IMMER vom gecachten Basiswert aus, nie vom aktuellen
+        Config-Wert. Der Latch-Nachbau in GridKeyboardComponent liest die
+        Getter oben live -- bleibt automatisch konsistent. */
+    void setRadiusRange (float newMinPx, float newMaxPx) noexcept;
+
 private:
     struct PrimaryFinger
     {

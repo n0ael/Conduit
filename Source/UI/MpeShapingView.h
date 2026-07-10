@@ -10,9 +10,9 @@
 #include "Core/CurveEditInteraction.h"
 #include "Core/GridPanelSettings.h"
 #include "Core/GridVoiceEngine.h"
-#include "Core/UiSettings.h"
 #include "LockToggle.h"
 #include "NoteCircleFadeTracker.h"
+#include "NumberFieldBracket.h"
 #include "PushTiles.h"
 
 namespace conduit
@@ -28,12 +28,16 @@ namespace conduit
     der Kurve wandern und nach dem Loslassen ausfaden
     (NoteCircleFadeTracker).
 
-    Rein Anzeige -- keine Touch-Bearbeitung der Kurve (Punkte/Krümmung/
-    Min-Max-Griffe kommen erst mit S2c-2). Ab editorThresholdWidth (Dev-Wert)
-    klappt pro Sektion eine Detailspalte auf (Platzhalter-Text oben,
-    Offset-Schloss + „Color"-Zeile unten). Zwei Dev-Slider unten
-    (Schwellbreite, Fade-Zeit) sind nur im Dev-Modus sichtbar und
-    persistieren über GridPanelSettings.
+    Die Kurve ist per Touch bearbeitbar (S2c-2a, CurveEditInteraction):
+    Endpunkt-Griffe (Min/Max) ziehen, Krümmungs-Wisch im Schwarzbereich,
+    Endpunkt schlägt Krümmung bei Kollision. Ab editorThresholdWidth (Dev-
+    Wert, DevPanel) klappt pro Sektion eine Detailspalte auf: Sensitivity-
+    Feld (Pressure/Slide, Block A2) bzw. PitchBend-Range-Multiplikator
+    (Block A3) oben, Platzhalter-Text darunter, Offset-Schloss (Pressure/
+    Slide) + „Color"-Zeile unten. Die frühere Schwellbreite-/Fade-Zeit-
+    Bedienung sitzt seit Block A4 im floating Dev-Window (DevPanel) --
+    diese View pollt die beiden GridPanelSettings-Werte in tick() nur noch
+    passiv, um live zu reagieren.
 
     Achsen-Farben (Grid-Page v2): section.colour kommt aus GridPanelSettings
     (persistent); die „Color"-Zeile je Achse wählt per Quick-Swatch-Tap
@@ -49,8 +53,7 @@ namespace conduit
 class MpeShapingView final : public juce::Component
 {
 public:
-    MpeShapingView (grid::GridVoiceEngine& engineToUse, GridPanelSettings& panelSettingsToUse,
-                    UiSettings& uiSettingsToUse);
+    MpeShapingView (grid::GridVoiceEngine& engineToUse, GridPanelSettings& panelSettingsToUse);
     ~MpeShapingView() override;
 
     /** Feuert bei jeder Achsen-Farbänderung (Quick-Swatch-Tap oder
@@ -58,6 +61,17 @@ public:
         damit die ExpressionRibbon-Füllfarben. Persistenz (GridPanelSettings)
         übernimmt die View selbst. */
     std::function<void (grid::GridVoiceEngine::Axis, juce::Colour)> onAxisColourChanged;
+
+    /** Feuert live beim Swipe der Sensitivity-Felder (Block A2) -- Pressure
+        oder Slide, nie PitchBend. Der Besitzer (GridPage) reicht den Wert an
+        GridKeyboardComponent::setPressureSensitivity/setSlideSensitivity
+        durch. Laufzeit-only, keine Persistenz (Block K). */
+    std::function<void (grid::GridVoiceEngine::Axis, double)> onSensitivityChanged;
+
+    /** Feuert bei Auswahl eines PitchBend-Range-Multiplikators (Block A3,
+        ¼…×8). Der Besitzer reicht den Wert an
+        GridKeyboardComponent::setPitchBendMultiplier durch. */
+    std::function<void (float)> onPitchBendMultiplierChanged;
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -111,6 +125,43 @@ private:
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AxisColourRow)
     };
 
+    //==========================================================================
+    /** PitchBend-Range-Multiplikator (Block A3, an der ehemaligen TODO-Stelle
+        der PitchBend-Detailspalte): 2×3 Mini-Kacheln in der 120-px-Spalte,
+        zeilenweise ¼ ½ / ×1 ×2 / ×4 ×8. Zellen unterschreiten die 44-px-
+        Touch-Regel bewusst -- derselbe präzedenzierte Kompromiss wie die
+        16-px-Swatches der AxisColourRow (Design-Vorgabe der 120-px-Spalte). */
+    class BendRangeSelector final : public juce::Component
+    {
+    public:
+        BendRangeSelector() = default;
+
+        void setSelectedIndex (int index) noexcept;
+        [[nodiscard]] int getSelectedIndex() const noexcept { return selectedIndex; }
+        void setAccentColour (juce::Colour newColour) noexcept;
+
+        std::function<void (float)> onMultiplierChanged;
+
+        void paint (juce::Graphics& g) override;
+        void mouseUp (const juce::MouseEvent& event) override;
+
+        static constexpr std::array<float, 6> kMultipliers { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f };
+        static constexpr int kCols = 2;
+        static constexpr int kRows = 3;
+        static constexpr int kRowHeight = 110;   // Ueberschrift + 3 Zeilen Kacheln
+
+        [[nodiscard]] static juce::String labelForIndex (int index);
+
+    private:
+        [[nodiscard]] juce::Rectangle<int> cellBounds (int index) const noexcept;
+        [[nodiscard]] int cellIndexAt (juce::Point<int> pos) const noexcept;
+
+        int selectedIndex = 2;   // Default ×1
+        juce::Colour accentColour = push::colours::ledCyan;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BendRangeSelector)
+    };
+
     struct AxisSection
     {
         grid::GridVoiceEngine::Axis axis;
@@ -143,7 +194,6 @@ private:
     void tick();
     void paintAxis (juce::Graphics& g, const AxisSection& section,
                     grid::CurveEditInteraction::Target activeTarget) const;
-    void updateDevSliderVisibility (bool devModeEnabled);
 
     /** Verdrahtet ein "Offset"-Schloss-Toggle + graues Label für eine Achse
         (Pressure/Slide -- PitchBend bekommt noch keins, siehe resized()):
@@ -186,7 +236,6 @@ private:
     static constexpr int   kCurveSamples       = 48;   // >= 48 Stützstellen
     static constexpr int   kHeaderRowHeight    = 18;
     static constexpr int   kDetailColumnWidth  = 120;
-    static constexpr int   kDevRowHeight       = 28;
     static constexpr int   kSectionGap         = 6;    // Abstand zwischen den Achsen-Kacheln
     static constexpr float kTileCornerRadius   = 6.0f; // Looper-Kachel-Stil
     static constexpr float kMarkerWidth        = 6.0f; // Höhenmarke (combinedValue)
@@ -210,25 +259,32 @@ private:
 
     grid::GridVoiceEngine& engine;
     GridPanelSettings& panelSettings;
-    UiSettings& uiSettings;
 
     std::array<AxisSection, 3> sections;
 
     std::map<int, EditGesture> gestures;   // Key = Touch-Source-Index (Multi-Touch)
 
-    juce::Label  thresholdCaption { {}, "Schwellbreite" };
-    juce::Slider thresholdSlider;
-    juce::Label  fadeCaption { {}, "Fade-Zeit" };
-    juce::Slider fadeSlider;
-
     // Schloss-Toggle je Achse (unteres Ende der Detailspalte) + graues
     // Label -- eigene Member statt Teil von AxisSection (Button ist nicht
     // kopier-/verschiebbar, siehe setupOffsetToggle()). PitchBend bekommt
-    // noch kein Schloss -- Platz bleibt frei fürs künftige Range-Element.
+    // noch kein Schloss -- der Platz wird stattdessen vom bendRangeSelector
+    // belegt (Block A3).
     LockToggle  pressureOffsetToggle;
     juce::Label pressureOffsetLabel { {}, "Offset" };
     LockToggle  slideOffsetToggle;
     juce::Label slideOffsetLabel { {}, "Offset" };
+
+    // Sensitivity-Felder (Block A2, OBERSTER Detailspalten-Eintrag) --
+    // Pressure/Slide, nie PitchBend. Eigene Member statt Teil von AxisSection
+    // (Components sind nicht kopier-/verschiebbar). Config direkt als
+    // In-Class-Initialisierer -- NumberFieldBracket ist wie jedes
+    // JUCE_DECLARE_NON_COPYABLE-Widget weder kopier- noch zuweisbar.
+    NumberFieldBracket pressureSensField { NumberFieldBracket::Config { 0.0, 100.0, 50.0, 1.0, 0, 0.5, "Sens" } };
+    NumberFieldBracket slideSensField    { NumberFieldBracket::Config { 0.0, 100.0, 50.0, 1.0, 0, 0.5, "Sens" } };
+
+    // PitchBend-Range-Multiplikator (Block A3) -- an der ehemaligen TODO-
+    // Stelle in der PitchBend-Detailspalte.
+    BendRangeSelector bendRangeSelector;
 
     // „Color"-Zeile je Achse (unterster Punkt der Detailspalte, ALLE drei
     // Achsen) — Index parallel zu sections. Eigene Member statt Teil von
@@ -240,7 +296,13 @@ private:
     // geschlossenen Fenster hinterherzuzeigen.
     juce::Component::SafePointer<juce::CallOutBox> activeColourPicker;
 
-    bool devSlidersVisible = false;   // gecachter Dev-Modus-Zustand (tick())
+    // Live-Rückweg vom DevPanel (Block A4): GridPanelSettings ist kein
+    // ChangeBroadcaster -- tick() pollt beide Werte pro VBlank-Frame und
+    // reagiert nur bei tatsächlicher Änderung (Layout-Neuberechnung bzw.
+    // Fade-Tracker-Update sind zu teuer für jeden Frame ungeprüft).
+    int cachedThresholdWidth = 0;
+    int cachedFadeMs         = 0;
+
     double lastTickMs = 0.0;
 
     juce::VBlankAttachment vblank { this, [this] (double) { tick(); } };

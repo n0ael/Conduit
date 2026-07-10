@@ -216,3 +216,40 @@ TEST_CASE ("RingTouchModel: activeCircles spiegelt Radius wider", "[grid]")
     REQUIRE (circles.size() == 1); // Ring-Finger bekommt keinen eigenen Kreis
     REQUIRE (circles[0].radiusPx == Approx (100.0f));
 }
+
+TEST_CASE ("RingTouchModel: setRadiusRange wirkt auf onMove-Slide und die Getter (Block A2)", "[grid]")
+{
+    grid::RingTouchModel model;
+    model.setRadiusRange (10.0f, 60.0f); // halb so grosse Spanne wie Default (40..220)
+
+    REQUIRE (model.restRadiusPx() == Approx (10.0f));
+    REQUIRE (model.maxRadiusPx() == Approx (60.0f));
+
+    model.onDown (1, { 0.0f, 0.0f });
+    model.onDown (2, { 30.0f, 0.0f });
+
+    const auto atMax = model.onMove (2, { 60.0f, 0.0f });
+    REQUIRE (atMax.slide01 == Approx (1.0f));
+
+    const auto atMin = model.onMove (2, { 10.0f, 0.0f });
+    REQUIRE (atMin.slide01 == Approx (0.0f));
+}
+
+TEST_CASE ("RingTouchModel: setRadiusRange erzwingt maxPx > minPx", "[grid]")
+{
+    grid::RingTouchModel model;
+    model.setRadiusRange (100.0f, 50.0f); // widersinnig -- max < min
+
+    REQUIRE (model.maxRadiusPx() > model.restRadiusPx());
+}
+
+TEST_CASE ("RingTouchModel: reset() behaelt eine per setRadiusRange gesetzte Spanne", "[grid]")
+{
+    grid::RingTouchModel model;
+    model.setRadiusRange (5.0f, 25.0f);
+    model.onDown (1, { 0.0f, 0.0f });
+    model.reset();
+
+    REQUIRE (model.restRadiusPx() == Approx (5.0f));
+    REQUIRE (model.maxRadiusPx() == Approx (25.0f));
+}
