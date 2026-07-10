@@ -72,6 +72,11 @@ TouchLiveDeviceView::TouchLiveDeviceView (TouchLiveClient& clientToUse,
     addAndMakeVisible (bankPrevTile);
     addAndMakeVisible (bankNextTile);
 
+    viewTile.setTooltip (juce::String::fromUTF8 (
+        "Bespoke-UI und Parameter-Bank umschalten"));
+    viewTile.onClick = [this] { setBespokePreferred (! bespokePreferred); };
+    addChildComponent (viewTile);
+
     rebuild();
     startTimerHz (30);   // GR-Meter-Refresh (roh, §5.1); ohne Sicht kostenlos
 }
@@ -217,6 +222,7 @@ void TouchLiveDeviceView::selectDevice (const juce::String& deviceKey)
     bank = 0;
     grSeen = false;   // GR-Spalte gehört zum Device
     grLevel = 0.0f;
+    bespokePreferred = true;   // frisches Device → bespoke zuerst (falls da)
     rebuild();
 }
 
@@ -366,10 +372,69 @@ void TouchLiveDeviceView::rebuild()
     onTile.setActive (deviceActive && selectedDevice.isNotEmpty());
     onTile.setEnabled (selectedDevice.isNotEmpty());
 
+    // Bespoke-Registry (M5, §6b): Panel folgt der class_name des Devices
+    const auto className = selectedItem.isValid()
+                               ? selectedItem.getProperty ("class_name").toString()
+                               : juce::String();
+
+    if (className != bespokeClassName)
+    {
+        bespokeClassName = className;
+        bespokePanel = createBespokePanel (className, client);
+
+        if (bespokePanel != nullptr)
+            addChildComponent (*bespokePanel);
+    }
+
+    if (bespokePanel != nullptr && selectedDevice.isNotEmpty())
+    {
+        const auto domain = devicesDomain();
+        bespokePanel->setDevice (selectedDevice,
+                                 domain.getProperty ("parmeta:" + selectedDevice));
+        bespokePanel->setValues (domain.getProperty ("parvals:" + selectedDevice));
+    }
+
+    updateBespokeVisibility();
+
     bank = juce::jlimit (0, juce::jmax (0, getBankCount() - 1), bank);
     rebuildParameterBank();
-    layoutChips();
+    resized();   // layoutet Chips, Footer-Kacheln und Bespoke-Panel
     repaint();
+}
+
+//==============================================================================
+bool TouchLiveDeviceView::isBespokeActive() const noexcept
+{
+    return bespokePreferred && bespokePanel != nullptr && bespokePanel->isUsable();
+}
+
+void TouchLiveDeviceView::setBespokePreferred (bool shouldPreferBespoke)
+{
+    if (bespokePreferred == shouldPreferBespoke)
+        return;
+
+    bespokePreferred = shouldPreferBespoke;
+    updateBespokeVisibility();
+    rebuildParameterBank();
+    resized();
+    repaint();
+}
+
+void TouchLiveDeviceView::updateBespokeVisibility()
+{
+    const auto bespoke = isBespokeActive();
+    const auto available = bespokePanel != nullptr && bespokePanel->isUsable();
+
+    if (bespokePanel != nullptr)
+        bespokePanel->setVisible (bespoke);
+
+    // Umschalter zeigt das ZIEL: BANK (aus bespoke raus) bzw. Geräte-Kürzel
+    viewTile.setVisible (available);
+    viewTile.setText (bespoke ? "BANK" : bespokeClassName.toUpperCase());
+    viewTile.setActive (bespoke);
+
+    bankPrevTile.setVisible (! bespoke);
+    bankNextTile.setVisible (! bespoke);
 }
 
 void TouchLiveDeviceView::rebuildParameterBank()
@@ -383,7 +448,8 @@ void TouchLiveDeviceView::rebuildParameterBank()
         auto& strip = strips[(size_t) column];
         const auto parameterIndex = 1 + bank * parametersPerBank + column;
 
-        if (meta == nullptr || parameterIndex >= meta->size())
+        // Bespoke aktiv → Bank komplett stumm (Umschalter rebuildet sie)
+        if (meta == nullptr || parameterIndex >= meta->size() || isBespokeActive())
         {
             strip.parameterIndex = -1;
             strip.slider.setVisible (false);
@@ -425,6 +491,9 @@ void TouchLiveDeviceView::refreshValues()
 {
     const auto vals = devicesDomain().getProperty ("parvals:" + selectedDevice);
     const auto* array = vals.getArray();
+
+    if (bespokePanel != nullptr && selectedDevice.isNotEmpty())
+        bespokePanel->setValues (vals);
 
     for (auto& strip : strips)
     {
@@ -519,10 +588,16 @@ void TouchLiveDeviceView::resized()
     footer.removeFromLeft (4);
     bankNextTile.setBounds (footer.removeFromLeft (44));
     onTile.setBounds (footer.removeFromRight (56));
+    footer.removeFromRight (4);
+    viewTile.setBounds (footer.removeFromRight (64));
 
     // Bank-Spalten; rechts die (immer reservierte) GR-Spalte
     auto bankArea = area.reduced (0, 4);
     grBounds = bankArea.removeFromRight (18).reduced (3, nameHeight);
+
+    if (bespokePanel != nullptr)
+        bespokePanel->setBounds (bankArea);
+
     const auto columnWidth = bankArea.getWidth() / parametersPerBank;
 
     for (int column = 0; column < parametersPerBank; ++column)
@@ -616,8 +691,8 @@ void TouchLiveDeviceView::paint (juce::Graphics& g)
                     juce::Justification::centred);
     }
 
-    // Bank-Anzeige mittig im Footer
-    const auto bankCount = getBankCount();
+    // Bank-Anzeige mittig im Footer (im Bespoke-Modus keine Bänke)
+    const auto bankCount = isBespokeActive() ? 0 : getBankCount();
 
     if (bankCount > 1)
     {

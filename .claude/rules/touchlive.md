@@ -67,6 +67,18 @@ Devices (M3):
   `/live/device/set/is_active`. `/live/device/set/parameter` gehört auf
   die FAST_WHITELIST.
 
+Bespoke-UIs (M5):
+- Registry `createBespokePanel (class_name)` (TouchLiveBespokePanel.h);
+  Panel ersetzt die Bank NUR wenn `isUsable()` (Mapping gelungen) —
+  sonst Bank-Fallback; viewTile schaltet jederzeit um. Parameter-Mapping
+  IMMER über parmeta-NAMEN (nie Indizes), Typ-Semantik aus items-Strings.
+- Live 12 nennt den EQ-Q-Parameter `"{n} Q A"`, NICHT „Resonance A"
+  (Alias behalten). Wertesemantik verifiziert: Frequency-Norm →
+  Hz = 10·2200^v, Q-Norm → 0.1·180^v, Gain direkt dB.
+- Thinning-Kanal von sendTouchValue = Adresse + Argumente OHNE den Wert
+  (`touchKeyFor`) — NIE auf die nackte Adresse zurückbauen, sonst
+  latchen sich Freq+Gain bzw. Multi-Touch-Fader gegenseitig weg.
+
 Browser (M4):
 - KEINE Domain — Request/Response (`/remote/browser/roots|children` →
   `/remote/browser/list`, gleiche [seq,chunk,chunks,json]-Hülle, Chunks

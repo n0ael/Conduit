@@ -3,7 +3,28 @@
 > Letzte Aktualisierung: 2026-07-10 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (10.07.2026) — TouchLive M4 (BROWSER)
+## Aktueller Meilenstein (10.07.2026) — TouchLive M5 (Bespoke EQ Eight)
+
+**Erste bespoke Device-UI — EQ-Kurve mit Touch-Punkten statt Fader-Bank:**
+
+- **Registry** `createBespokePanel` (class_name → Panel) + Interface
+  `TouchLiveBespokePanel` (setDevice/setValues/isUsable); DeviceView
+  ersetzt die Bank nur bei nutzbarem Mapping (sonst Fallback — im
+  Feldtest bewiesen: vor dem Q-A-Fix blieb die Bank), viewTile
+  BANK ↔ EQ8.
+- **TouchLiveEq8Panel:** RBJ-Summenkurve, 8 Touch-Punkte (X=Freq,
+  Y=Gain, Doppeltipp=Band-Toggle), Typ-Stepper/Q-Slider/Band-ON;
+  Mapping über Live-Parameternamen der A-Kurve — Live 12 nennt Q
+  „{n} Q A" (nicht „Resonance A"). Wertesemantik im Smoke gegen Live
+  verifiziert (1.58 kHz/+6.3 dB/Q 0.71 beidseitig identisch).
+- **Thinning-Fix im Client:** Drosselkanal = Adresse + Args ohne Wert
+  (touchKeyFor) — vorher latchten sich Freq+Gain und Multi-Touch-Fader
+  gegenseitig weg. Suite 607 Cases / 27 274 Assertions grün; Smoke inkl.
+  Dogfooding (EQ Eight per M4-Browser geladen).
+- **Nächster Schritt:** M5-Folgerunden Compressor/Glue (Kennlinie+GR),
+  Delay/Reverb — oder M6 Modulator-Zwillinge.
+
+## Meilenstein (10.07.2026) — TouchLive M4 (BROWSER)
 
 **Lives Browser in Conduit — der letzte Sub-Tab-Platzhalter ist Geschichte:**
 

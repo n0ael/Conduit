@@ -233,7 +233,7 @@ Hardware mit echter Audio-Rate — 10 m vom Ableton-Rechner entfernt.
 | M2 | Meter-Pfad (TouchLiveMeterBus), Feinschliff Fader-Gesten, Feel-Abnahme gegen Roto-Messlatte — **KOMPLETT 09.07.2026**: Meter-Pfad (§10c) + Fast-Path v2 (§10e); Feel-Abnahme im Feldtest Runde 3 bestanden („working perfectly"). Offen nur noch LiveFaderScale-Feinkalibrierung (§11) |
 | M3 | DEVICE generisch: Device-Domain, Ketten-Navigation, Parameter-Bänke, On/Off (§6b) — **erledigt 09.07.2026** (§10g; Feldtest offen) |
 | M4 | BROWSER: Baum via `load_children`-Muster, Laden auf Track/Chain, Preview — **erledigt + Feldtest bestanden 10.07.2026** (§10h) |
-| M5 | Bespoke Device-UIs: EQ Eight → Compressor/Glue → Delay/Reverb (§6b) |
+| M5 | Bespoke Device-UIs (§6b): **EQ Eight erledigt + Smoke gegen Live verifiziert 10.07.2026** (§10i) — Compressor/Glue → Delay/Reverb offen |
 | M6 | Modulator-Zwillinge: LFO zuerst, dann Shaper/Envelope Follower (§6c) |
 
 ## 8. Tests
@@ -560,6 +560,44 @@ Beidseitig: `browser.py` (Script, BrowserService) + `TouchLiveBrowserView`
 - **Feldtest offen:** Performance sehr großer Packs (children ist im
   Tick synchron — bei Riesenordnern spürbar?), Laden-auf-Chain
   (M5-Umfeld).
+
+## 10i. M5 — Bespoke EQ Eight: Implementierungs-Notizen (10.07.2026)
+
+Conduit-seitig, KEINE Script-Änderung (die devices-Domain aus M3 reicht):
+`TouchLiveBespokePanel.h` (Interface + Registry) · `TouchLiveEq8Panel` ·
+DeviceView-Integration.
+
+- **Registry (§6b):** `createBespokePanel (class_name, client)` → Panel
+  oder nullptr; die DeviceView zeigt das Panel statt der Bank NUR wenn
+  es zusätzlich `isUsable()` meldet (Parameter-Mapping gelungen) —
+  sonst Bank-Fallback, jedes Device bleibt IMMER steuerbar. viewTile
+  (BANK ↔ Kürzel) schaltet jederzeit um; die Bank behält alle
+  Rest-Parameter (Scale, Adaptive Q, Output …).
+- **Parameter-Mapping über Namen der A-Kurve**, nie Indizes:
+  `"{n} Filter On A"` · `"{n} Filter Type A"` (items!) ·
+  `"{n} Frequency A"` · `"{n} Gain A"` · **`"{n} Q A"` — Live 12 nennt
+  den Q-Parameter „Q A", NICHT „Resonance A"** (Feldtest-Befund;
+  „Resonance A" bleibt als Alias). Typ-SEMANTIK aus den items-Strings
+  (lowcut/shelf/bell/notch…), Fallback Live-12-Reihenfolge.
+- **Wertesemantik im Smoke gegen Live VERIFIZIERT** (Kreuzcheck
+  Band 3: Conduit 1.58 kHz/+6.3 dB/Q 0.71 == Lives Anzeige
+  1.58 kHz/6.31 dB/0.71): Frequency-Norm → Hz = 10·2200^v (log
+  10 Hz–22 kHz), Q-Norm → Q = 0.1·180^v (log 0.1–18), Gain direkt dB
+  (parmeta min/max ±15).
+- **UI:** RBJ-Biquad-Summenkurve als Display-Näherung (48er-Cuts =
+  vierfach kaskadierte 12er), 8 Touch-Punkte (Drag: X=Frequenz,
+  Y=Gain nur bei Bell/Shelf; Doppeltipp = Band an/aus; Trefferzone
+  26 px), Footer: Typ-Stepper ‹ › · Q-Slider · Band-ON; Readout
+  oben rechts. Punkte folgen §5.1 lokal-optimistisch (setValues lässt
+  das gezogene Band in Ruhe), Suppression-Key wie die Bank.
+- **Thinning-Fix im Client (drüber gestolpert):** der Drosselkanal
+  von sendTouchValue war die OSC-ADRESSE — Frequenz + Gain
+  (/live/device/set/parameter) latchten sich gegenseitig weg, genauso
+  Multi-Touch auf zwei Fadern (/live/track/set/volume). Kanal ist
+  jetzt Adresse + Argumente OHNE den Wert (`touchKeyFor`).
+- **Offen (M5-Folgerunden):** Compressor/Glue (Kennlinie + GR),
+  Delay/Reverb; B-Kurve/Edit-Mode, Scale-Einrechnung in die
+  Anzeige-Kurve, Rack-Chains (§10g-Scope-Grenze gilt weiter).
 
 ## 11. Offen
 

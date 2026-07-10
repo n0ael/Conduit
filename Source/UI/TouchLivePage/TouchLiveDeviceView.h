@@ -10,6 +10,7 @@
 #include "TouchLive/TouchLiveClient.h"
 #include "TouchLive/TouchLiveMeterBus.h"
 #include "TouchLive/TouchLiveSettings.h"
+#include "TouchLiveBespokePanel.h"
 #include "UI/PushTiles.h"
 
 namespace conduit
@@ -41,6 +42,12 @@ namespace conduit
     senden ihre GR als dv:-Tripel im Meter-Frame — die View pollt den
     MeterBus @ 30 Hz (roh, §5.1) und zeigt eine GR-Spalte rechts der Bank,
     sobald das gewählte Device je einen Wert geliefert hat.
+
+    Bespoke-UIs (M5, §6b): liefert die Registry (createBespokePanel) für
+    die class_name des gewählten Devices ein Panel UND meldet es
+    isUsable(), ersetzt es die Bank; die viewTile (BANK ↔ Kürzel) schaltet
+    jederzeit aufs generische Panel zurück — dort bleiben ALLE Parameter
+    erreichbar. Kein Treffer/nicht nutzbar → Bank wie gehabt.
 */
 class TouchLiveDeviceView final : public juce::Component,
                                   private juce::ValueTree::Listener,
@@ -71,6 +78,12 @@ public:
     [[nodiscard]] int getBankCount() const;
 
     //==========================================================================
+    // Bespoke (M5)
+    [[nodiscard]] bool isBespokeActive() const noexcept;
+    [[nodiscard]] TouchLiveBespokePanel* getBespokePanel() noexcept { return bespokePanel.get(); }
+    void setBespokePreferred (bool shouldPreferBespoke);
+
+    //==========================================================================
     // Test-Seams
     void flushPendingRebuild();
 
@@ -86,6 +99,7 @@ public:
     push::TextTile onTile { "ON", push::colours::ledOrange };
     push::TextTile bankPrevTile { "<" };
     push::TextTile bankNextTile { ">" };
+    push::TextTile viewTile { "BANK", push::colours::ledCyan };
 
 private:
     //==========================================================================
@@ -110,6 +124,7 @@ private:
     void rebuild();
     void rebuildParameterBank();
     void refreshValues();
+    void updateBespokeVisibility();
     void layoutChips();
     void sendParameter (int parameterIndex, float value);
     void toggleDeviceActive();
@@ -138,6 +153,11 @@ private:
     std::vector<std::unique_ptr<push::TextTile>> deviceChips;
 
     std::array<ParameterStrip, parametersPerBank> strips;
+
+    // Bespoke-Panel (M5): pro class_name höchstens eins, Laufzeit-Zustand
+    std::unique_ptr<TouchLiveBespokePanel> bespokePanel;
+    juce::String bespokeClassName;
+    bool bespokePreferred = true;
 
     juce::String selectedTrack, selectedDevice;
     int bank = 0;

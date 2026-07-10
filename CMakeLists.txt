@@ -151,6 +151,7 @@ set(CONDUIT_CPP_SOURCES
     Source/TouchLive/TouchLiveSettings.cpp
     Source/UI/TouchLivePage/TouchLiveBrowserView.cpp
     Source/UI/TouchLivePage/TouchLiveDeviceView.cpp
+    Source/UI/TouchLivePage/TouchLiveEq8Panel.cpp
     Source/UI/TouchLivePage/TouchLiveFader.cpp
     Source/UI/TouchLivePage/TouchLiveGridView.cpp
     Source/UI/TouchLivePage/TouchLiveMixerView.cpp
@@ -328,8 +329,10 @@ target_sources(Conduit PRIVATE
     Source/TouchLive/TouchLiveClient.h
     Source/TouchLive/TouchLiveMeterBus.h
     Source/TouchLive/TouchLiveSettings.h
+    Source/UI/TouchLivePage/TouchLiveBespokePanel.h
     Source/UI/TouchLivePage/TouchLiveBrowserView.h
     Source/UI/TouchLivePage/TouchLiveDeviceView.h
+    Source/UI/TouchLivePage/TouchLiveEq8Panel.h
     Source/UI/TouchLivePage/TouchLiveFader.h
     Source/UI/TouchLivePage/TouchLiveGridView.h
     Source/UI/TouchLivePage/TouchLiveMixerView.h
@@ -683,6 +686,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/TouchLive/TouchLiveSettings.cpp
         Source/UI/TouchLivePage/TouchLiveBrowserView.cpp
         Source/UI/TouchLivePage/TouchLiveDeviceView.cpp
+        Source/UI/TouchLivePage/TouchLiveEq8Panel.cpp
         Source/UI/TouchLivePage/TouchLiveFader.cpp
         Source/UI/TouchLivePage/TouchLiveGridView.cpp
         Source/UI/TouchLivePage/TouchLiveMixerView.cpp

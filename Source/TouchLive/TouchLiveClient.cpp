@@ -268,6 +268,32 @@ bool TouchLiveClient::sendCommand (const juce::OSCMessage& message)
     return transport->send (message);
 }
 
+juce::String TouchLiveClient::touchKeyFor (const juce::OSCMessage& message)
+{
+    // Thinning-Kanal = Adresse + alle Argumente AUSSER dem letzten (dem
+    // Wert): /live/device/set/parameter [dvid, index, v] trennt so pro
+    // Parameter, /live/track/set/volume [tid, v] pro Track — sonst latchen
+    // sich verschiedene Ziele derselben Adresse gegenseitig weg (M5-Befund:
+    // EQ-Punkt-Drag sendet Frequenz + Gain im selben Fenster; genauso
+    // Multi-Touch auf zwei Fadern).
+    auto key = message.getAddressPattern().toString();
+
+    for (int i = 0; i < message.size() - 1; ++i)
+    {
+        const auto& argument = message[i];
+        key << '|';
+
+        if (argument.isString())
+            key << argument.getString();
+        else if (argument.isInt32())
+            key << juce::String (argument.getInt32());
+        else if (argument.isFloat32())
+            key << juce::String (argument.getFloat32());
+    }
+
+    return key;
+}
+
 void TouchLiveClient::sendTouchValue (const juce::OSCMessage& message)
 {
     JUCE_ASSERT_MESSAGE_THREAD
@@ -275,22 +301,22 @@ void TouchLiveClient::sendTouchValue (const juce::OSCMessage& message)
     if (status == Status::disabled || ! transportConnected)
         return;
 
-    const auto address = message.getAddressPattern().toString();
+    const auto key = touchKeyFor (message);
     const auto now = nowMs();
-    const auto lastSent = lastTouchSendMs.find (address);
+    const auto lastSent = lastTouchSendMs.find (key);
 
     if (lastSent == lastTouchSendMs.end()
         || now - lastSent->second >= touchThinningIntervalMs)
     {
-        lastTouchSendMs[address] = now;
-        pendingTouchValues.erase (address);  // Zwischenwert ist überholt
+        lastTouchSendMs[key] = now;
+        pendingTouchValues.erase (key);  // Zwischenwert ist überholt
         transport->send (message);
         ++stats.touchValuesSent;
         return;
     }
 
     // Fenster noch zu — letzter Wert gewinnt, der Timer flusht den Rest
-    pendingTouchValues.insert_or_assign (address, message);
+    pendingTouchValues.insert_or_assign (key, message);
     startTimer (thinningTimerId, static_cast<int> (touchThinningIntervalMs));
 }
 

@@ -437,6 +437,44 @@ TEST_CASE ("TouchLiveClient: Touch-Thinning — 100 Sends in 100 ms werden gedro
     REQUIRE (datagrams.back()[1].getFloat32() == Approx (0.99f));  // letzter Wert
 }
 
+TEST_CASE ("TouchLiveClient: Thinning trennt Ziele derselben Adresse (M5)", "[touchlive]")
+{
+    ClientRig rig;
+    rig.enable();
+
+    const juce::String address = "/live/device/set/parameter";
+
+    const auto send = [&rig, &address] (int parameterIndex, float value)
+    {
+        juce::OSCMessage message { juce::OSCAddressPattern (address) };
+        message.addString ("dv:1");
+        message.addInt32 (parameterIndex);
+        message.addFloat32 (value);
+        rig.client->sendTouchValue (message);
+    };
+
+    // EQ-Punkt-Drag (M5): Frequenz + Gain im SELBEN Fenster — verschiedene
+    // Ziele derselben Adresse dürfen sich nicht gegenseitig wegdrosseln
+    send (3, 0.5f);
+    send (4, 2.0f);
+
+    auto sent = rig.transport->sentTo (address);
+    REQUIRE (sent.size() == 2);
+    REQUIRE (sent[0][1].getInt32() == 3);
+    REQUIRE (sent[1][1].getInt32() == 4);
+
+    // Dasselbe Ziel bleibt im Fenster gedrosselt (letzter Wert gewinnt)
+    send (3, 0.6f);
+    REQUIRE (rig.transport->sentTo (address).size() == 2);
+
+    rig.fakeNowMs += 20.0;
+    rig.client->flushPendingTouchValues();
+    sent = rig.transport->sentTo (address);
+    REQUIRE (sent.size() == 3);
+    REQUIRE (sent.back()[1].getInt32() == 3);
+    REQUIRE (sent.back()[2].getFloat32() == Approx (0.6f));
+}
+
 TEST_CASE ("TouchLiveClient: Heartbeat-Timeout → disconnected, Reconnect subscribed neu", "[touchlive]")
 {
     ClientRig rig;

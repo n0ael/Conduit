@@ -9,6 +9,7 @@
 #include "TouchLive/TouchLiveClient.h"
 #include "TouchLive/TouchLiveMeterBus.h"
 #include "TouchLive/TouchLiveSettings.h"
+#include "UI/TouchLivePage/TouchLiveEq8Panel.h"
 #include "UI/TouchLivePage/TouchLivePage.h"
 
 using Catch::Approx;
@@ -523,6 +524,109 @@ TEST_CASE ("TouchLiveDeviceView: Kette entfernt → Auswahl fällt sauber zurüc
     REQUIRE (rig.page->deviceView.getDeviceChipCount() == 0);
     REQUIRE (rig.page->deviceView.getParameterSlider (0) != nullptr);
     REQUIRE_FALSE (rig.page->deviceView.getParameterSlider (0)->isVisible());
+}
+
+//==============================================================================
+namespace
+{
+
+/** Realistisches EQ-Eight-parmeta (A-Kurve, Live-12-Namen/Typliste). */
+[[nodiscard]] juce::String eq8Parmeta()
+{
+    juce::String meta = R"([{"name":"Device On","min":0,"max":1,"quant":false})";
+
+    for (int n = 1; n <= 8; ++n)
+    {
+        const auto p = juce::String (n);
+        meta << R"(,{"name":")" << p << R"( Filter On A","min":0,"max":1,"quant":true})"
+             << R"(,{"name":")" << p << R"( Filter Type A","min":0,"max":7,"quant":true,)"
+             << R"("items":["48dB/Oct Low Cut","12dB/Oct Low Cut","Low Shelf","Bell",)"
+             << R"("Notch","High Shelf","12dB/Oct High Cut","48dB/Oct High Cut"]})"
+             << R"(,{"name":")" << p << R"( Frequency A","min":0,"max":1,"quant":false})"
+             << R"(,{"name":")" << p << R"( Gain A","min":-15,"max":15,"quant":false})"
+             << R"(,{"name":")" << p << R"( Q A","min":0,"max":1,"quant":false})";   // Live-12-Name
+    }
+
+    meta << "]";
+    return meta;
+}
+
+/** Passende parvals-Zeile: alle Bänder an, Bell, Freq gestaffelt, 0 dB. */
+[[nodiscard]] juce::String eq8Parvals()
+{
+    juce::String vals = "[1.0";
+
+    for (int n = 1; n <= 8; ++n)
+        vals << ",1,3," << juce::String (0.1 * n, 2) << ",0.0,0.5";
+
+    vals << "]";
+    return vals;
+}
+
+} // namespace
+
+TEST_CASE ("TouchLiveEq8Panel: bespoke ersetzt die Bank, Drag sendet Freq + Gain (M5)",
+           "[touchlive][ui]")
+{
+    PageRig rig;
+    rig.loadDemoSet();
+
+    auto& device = rig.page->deviceView;
+    device.setBounds (0, 0, 720, 420);
+    device.flushPendingRebuild();
+
+    // Der Demo-EQ trägt class_name Eq8, aber generische P-Namen →
+    // nicht zuordenbar → Bank bleibt (Fallback-Garantie §6b)
+    REQUIRE (device.getSelectedDeviceKey() == "dv:1");
+    REQUIRE_FALSE (device.isBespokeActive());
+    REQUIRE (device.getParameterSlider (0)->isVisible());
+
+    // Echte EQ-Eight-Parameter → Panel übernimmt, Bank verschwindet
+    rig.model.applyDiff ("devices", parse ((
+        juce::String (R"({"parmeta:dv:1":)") + eq8Parmeta()
+        + R"(,"parvals:dv:1":)" + eq8Parvals() + "}").toRawUTF8()));
+    device.flushPendingRebuild();
+
+    REQUIRE (device.isBespokeActive());
+    REQUIRE_FALSE (device.getParameterSlider (0)->isVisible());
+
+    auto* panel = dynamic_cast<conduit::TouchLiveEq8Panel*> (device.getBespokePanel());
+    REQUIRE (panel != nullptr);
+    REQUIRE (panel->getMappedBandCount() == 8);
+    REQUIRE (panel->isBandOn (0));
+
+    // Drag an Band 4 (Bell): Freq + Gain reisen als getrennte Touch-Sends
+    const auto start = panel->bandPosition (3);
+    panel->beginDrag (start);
+    REQUIRE (panel->getSelectedBand() == 3);
+
+    rig.transport->sent.clear();
+    panel->dragTo (start.translated (30.0f, -25.0f));
+    panel->endDrag();
+
+    const auto sent = rig.transport->sentTo ("/live/device/set/parameter");
+    REQUIRE (sent.size() == 2);
+    REQUIRE (sent[0][0].getString() == "dv:1");
+    REQUIRE (sent[0][1].getInt32() == panel->frequencyIndexOf (3));
+    REQUIRE (sent[1][1].getInt32() == panel->gainIndexOf (3));
+    REQUIRE (sent[1][2].getFloat32() > 0.0f);   // nach oben gezogen → mehr Gain
+
+    // Doppeltipp-Kernpfad: Band aus
+    panel->toggleBandOn (3);
+    REQUIRE_FALSE (panel->isBandOn (3));
+
+    // parvals-Diff bewegt einen NICHT berührten Punkt (Modell-Weg)
+    const auto before = panel->bandPosition (0).x;
+    rig.model.applyDiff ("devices", parse (
+        R"({"parvals:dv:1":[1.0,1,3,0.9,0.0,0.5,1,3,0.2,0.0,0.5,1,3,0.3,0.0,0.5,)"
+        R"(0,3,0.4,3.5,0.5,1,3,0.5,0.0,0.5,1,3,0.6,0.0,0.5,1,3,0.7,0.0,0.5,1,3,0.8,0.0,0.5]})"));
+    REQUIRE (panel->bandPosition (0).x > before);
+
+    // Umschalter: zurück zur generischen Bank (alle Parameter erreichbar)
+    device.viewTile.onClick();
+    REQUIRE_FALSE (device.isBespokeActive());
+    REQUIRE (device.getParameterSlider (0)->isVisible());
+    REQUIRE (device.getParameterName (0) == "1 Filter On A");
 }
 
 //==============================================================================

@@ -87,8 +87,9 @@ public:
         false wenn disabled oder Transport nicht verbunden. */
     bool sendCommand (const juce::OSCMessage& message);
 
-    /** Hochraten-Touch-Pfad: max. ein Send pro ~16 ms pro Adresse, der
-        letzte Wert gewinnt (Nachzügler flusht der Thinning-Timer). */
+    /** Hochraten-Touch-Pfad: max. ein Send pro ~16 ms pro ZIEL (Adresse +
+        Argumente ohne den Wert — trennt Parameter derselben Adresse, M5),
+        der letzte Wert gewinnt (Nachzügler flusht der Thinning-Timer). */
     void sendTouchValue (const juce::OSCMessage& message);
 
     //==========================================================================
@@ -246,9 +247,12 @@ private:
     std::vector<juce::OSCMessage> pendingIncoming;
 
     // Touch-Pfad + Echo-Suppression (nur Message Thread)
+    /** Thinning-Kanal: Adresse + Argumente ohne den Wert (M5). */
+    [[nodiscard]] static juce::String touchKeyFor (const juce::OSCMessage& message);
+
     std::function<double()> nowMs;
-    std::map<juce::String, double> lastTouchSendMs;              // Adresse → Zeit
-    std::map<juce::String, juce::OSCMessage> pendingTouchValues; // Adresse → letzter Wert
+    std::map<juce::String, double> lastTouchSendMs;              // Touch-Key → Zeit
+    std::map<juce::String, juce::OSCMessage> pendingTouchValues; // Touch-Key → letzter Wert
     std::map<juce::String, double> touchedUntilMs;               // Suppression-Key → Ablauf
 
     // IP-Learn (Muster OscController)
