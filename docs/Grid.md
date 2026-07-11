@@ -185,6 +185,32 @@
     Setter -- nie vom aktuellen Config-Wert weiterspringen). Die
     Layout-Modus-Kacheln (64 Pads/XY+Fader) sitzen jetzt kompakt oben
     links (28-px-Streifen) statt neben Release-All.
+  - **Macro-System (Block E, 07/2026):** Long-Press (~450 ms ohne
+    nennenswerte Bewegung, `CcControlLayer` + Timer, Drag bricht ab) auf
+    einem Control im Play-Modus öffnet den vierten Dock-Tab „Macro"
+    (`MacroPanel`) mit der Ziel-Liste des Controls. Bis zu 16 Ziele pro
+    Control-WERT (`MacroBindings`, keyed nach Layer[system/diy] +
+    controlId + Achse — XY-Pads haben zwei Achsen, X/Y-Umschalter oben;
+    y wird für Macro-Semantik invertiert, oben = 1). Ziel-Typen gemischt
+    (final): `MidiCcTarget` (Kanal + CC über den Grid-MIDI-Ausgang,
+    7-bit-Dedupe — Glättung ist Sache der Zielschicht) und
+    `AbletonParamTarget` (Track→Device→Parameter-Dropdowns aus dem
+    LiveSetModel; Versand exakt wie TouchLiveDeviceView::sendParameter:
+    noteTouchedParameter + `/live/device/set/parameter [dvid,index,value]`
+    über den 16-ms-Fast-Path, Wert nativ in [min,max] aus parmeta,
+    quantisiert gerundet; dvid = Laufzeit-ID, NIE serialisieren —
+    Block-K-Persistenz braucht Namens-Re-Resolve, nach onReconnected
+    potenziell stale, TODO(design)). Pro Ziel ein `CurveEditorTile`
+    (Component-Extraktion der Block-C-Helfer: Endpunkte + Mittelpunkt-Drag
+    + Segment-Krümmung, OHNE Offset/Drehgeste — Mini-Format);
+    `MacroBindings::applyValue` klemmt den Kurvenausgang auf [0,1].
+    Compact-View: gewählte Zeile groß (Editor), übrige eingeklappt als
+    Linie mit Punkt (zuletzt gesendeter Wert, VBlank-Poll) + Min/Max-
+    Strichen; „+ Ziel" ergänzt Slots, Liste scrollt (Viewport).
+    `onControlValueChanged` beider Layer (System + DIY) ist damit
+    verdrahtet (GridPage::feedMacros). Offen: CC-Funktionsnamen aus der
+    Geräte-Datenbank (Block L), Bindings-Invalidierung bei Control-Löschung
+    im Edit-Modus (Ids recyceln erst bei clear() — TODO(design)).
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +

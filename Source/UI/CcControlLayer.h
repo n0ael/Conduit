@@ -33,7 +33,8 @@ namespace conduit
     das gegriffene Control (JUCE liefert Touch als per-Source-Mouse-Events;
     ein setAcceptsTouchEvents braucht juce::Component nicht). Message Thread.
 */
-class CcControlLayer final : public juce::Component
+class CcControlLayer final : public juce::Component,
+                             private juce::Timer
 {
 public:
     CcControlLayer (grid::CcControlModel& modelToUse, int colsToUse, int rowsToUse);
@@ -46,10 +47,15 @@ public:
     void setActiveTool (grid::CcTool tool);
     [[nodiscard]] grid::CcTool getActiveTool() const noexcept { return activeTool; }
 
-    /** TODO(design): hier dockt später der MIDI-CC-Versand an — feuert bei
-        jeder Wertänderung eines Controls (Fader/Push/Toggle/XY); der Versand
-        selbst ist NICHT Teil dieses Meilensteins. */
+    /** Feuert bei jeder Wertänderung eines Controls (Fader/Push/Toggle/XY) —
+        seit Block E laeuft hier der Macro-Fluss an (GridPage →
+        MacroBindings → MidiCcTarget/AbletonParamTarget). */
     std::function<void (const grid::CcControl&)> onControlValueChanged;
+
+    /** Long-Press auf einem Control im Play-Modus (Block E, ~450 ms ohne
+        nennenswerte Bewegung) — der Besitzer oeffnet damit die
+        Macro-Ansicht des Controls. */
+    std::function<void (int controlId)> onLongPressControl;
 
     /** MPE-Modus: nur Control-Flächen sind Ziel — freie Flächen fallen zum
         Keyboard durch. CC-Modus: alles wird abgefangen. */
@@ -101,6 +107,18 @@ private:
 
     // Spielen (MPE-Modus), Multi-Touch: MouseInputSource-Index → Control-Id.
     std::map<int, int> grabbedControls;
+
+    // Long-Press-Kandidat (Block E): ein Finger, Timer-basiert, Bewegung
+    // ueber der Toleranz bricht ab (Muster AxisColourRow + Drag-Abbruch).
+    void cancelLongPress();
+    void timerCallback() override;
+
+    static constexpr int   kLongPressMs             = 450;
+    static constexpr float kLongPressMoveTolerancePx = 8.0f;
+
+    int longPressFinger    = -1;
+    int longPressControlId = -1;
+    juce::Point<float> longPressStart;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CcControlLayer)
 };

@@ -148,6 +148,8 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/Capture/CaptureWriter.cpp
     Source/Core/Capture/InputMeter.cpp
     Source/Core/Capture/LevelMeter.cpp
+    Source/Core/MacroBindings.cpp
+    Source/TouchLive/AbletonParamTarget.cpp
     Source/TouchLive/LiveSetModel.cpp
     Source/TouchLive/LiveSpectrumTap.cpp
     Source/TouchLive/TouchLiveClient.cpp
@@ -250,6 +252,8 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/GridKeyboardComponent.cpp
     Source/UI/GridPage.cpp
     Source/UI/GridSettingsView.cpp
+    Source/UI/CurveEditorTile.cpp
+    Source/UI/MacroPanel.cpp
     Source/UI/InputSendButton.cpp
     Source/UI/LevelMeterBar.cpp
     Source/UI/LinkAudioReceivePanel.cpp
@@ -606,6 +610,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/MetronomeTests.cpp
         Tests/Core/MpeEncoderTests.cpp
         Tests/Core/MpeMidiSinkTests.cpp
+        Tests/Core/MacroBindingsTests.cpp
         Tests/Core/OscControllerTests.cpp
         Tests/Core/OscSendServiceTests.cpp
         Tests/Core/PatchingTests.cpp
@@ -705,6 +710,8 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/Capture/CaptureWriter.cpp
         Source/Core/Capture/InputMeter.cpp
         Source/Core/Capture/LevelMeter.cpp
+        Source/Core/MacroBindings.cpp
+        Source/TouchLive/AbletonParamTarget.cpp
         Source/TouchLive/LiveSetModel.cpp
         Source/TouchLive/LiveSpectrumTap.cpp
         Source/TouchLive/TouchLiveClient.cpp
@@ -807,6 +814,8 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/GridKeyboardComponent.cpp
         Source/UI/GridPage.cpp
         Source/UI/GridSettingsView.cpp
+        Source/UI/CurveEditorTile.cpp
+        Source/UI/MacroPanel.cpp
         Source/UI/InputSendButton.cpp
         Source/UI/LevelMeterBar.cpp
         Source/UI/LinkAudioReceivePanel.cpp

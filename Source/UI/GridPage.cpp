@@ -2,6 +2,7 @@
 
 #include "CcPanel.h"
 #include "GridSettingsView.h"
+#include "MacroPanel.h"
 #include "Modules/ConduitModule.h"
 #include "MpeShapingView.h"
 
@@ -10,10 +11,12 @@ namespace conduit
 
 GridPage::GridPage (juce::ValueTree rootStateToUse,
                      grid::GridVoiceEngine& engineToUse, grid::MidiDeviceTarget& midiTargetToUse,
-                     GridPanelSettings& panelSettingsToUse, grid::MpeMidiSink& mpeMidiSinkToUse)
+                     GridPanelSettings& panelSettingsToUse, grid::MpeMidiSink& mpeMidiSinkToUse,
+                     LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse)
     : rootState (std::move (rootStateToUse)),
       engine (engineToUse), midiTarget (midiTargetToUse), panelSettings (panelSettingsToUse),
       mpeMidiSink (mpeMidiSinkToUse),
+      liveSetModel (liveSetModelToUse), touchLiveClient (touchLiveClientToUse),
       systemControlRowsAtStartup (panelSettingsToUse.getSystemControlRows()),
       // 8×8-Raster der Grid-Page (padLayoutConfig, User 10.07.2026) — Keyboard
       // und ccLayer teilen sich dieselbe Zellgeometrie.
@@ -136,6 +139,25 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     auto ccPanel = std::make_unique<CcPanel>();
     ccPanel->onToolChanged = [this] (grid::CcTool tool) { ccLayer.setActiveTool (tool); };
     dockPanel.addTab ("cc", "CC", std::move (ccPanel));
+
+    // Tab 4 „Macro" (Block E): Ziel-Listen der Controls. Der rohe Zeiger
+    // bleibt gueltig, solange das dockPanel (GridPage-Member) lebt.
+    auto macroView = std::make_unique<MacroPanel> (macroBindings, midiTarget,
+                                                   liveSetModel, touchLiveClient);
+    macroPanel = macroView.get();
+    dockPanel.addTab ("macro", "Macro", std::move (macroView));
+
+    // Macro-Wertfluss + Long-Press (Block E), beide Layer: System-Controls
+    // des XY+Fader-Modus (layer 0) und DIY-CC-Baukasten (layer 1).
+    systemLayer.onControlValueChanged = [this] (const grid::CcControl& control)
+    { feedMacros (grid::MacroControlKey::system, control); };
+    ccLayer.onControlValueChanged = [this] (const grid::CcControl& control)
+    { feedMacros (grid::MacroControlKey::diy, control); };
+
+    systemLayer.onLongPressControl = [this] (int controlId)
+    { openMacroViewFor (grid::MacroControlKey::system, controlId, systemCcModel); };
+    ccLayer.onLongPressControl = [this] (int controlId)
+    { openMacroViewFor (grid::MacroControlKey::diy, controlId, ccModel); };
 
     // Tab 3 „Settings" (Block D1): In-Tune Location/Width + Expression Mode
     // (Block B1/B2/B4), Layout-Feinabstimmung (Edit-Grid-Ersatz), Modwheel-
@@ -271,6 +293,65 @@ void GridPage::applyLayoutMode()
 void GridPage::applyRibbonWidth()
 {
     resized();   // liest panelSettings.getRibbonWidthPx() live -- voll dynamisch
+}
+
+//==============================================================================
+// Macro-System (Block E)
+
+void GridPage::feedMacros (int layer, const grid::CcControl& control)
+{
+    switch (control.type)
+    {
+        case grid::CcTool::fader:
+            macroBindings.applyValue ({ layer, control.id, 0 }, control.value);
+            break;
+
+        case grid::CcTool::push:
+        case grid::CcTool::toggle:
+            macroBindings.applyValue ({ layer, control.id, 0 }, control.on ? 1.0f : 0.0f);
+            break;
+
+        case grid::CcTool::xy:
+            // control.y ist 0 = oben -- fuer Macro-Semantik invertieren
+            // (oben = 1, wie beim Fader).
+            macroBindings.applyValue ({ layer, control.id, 0 }, control.x);
+            macroBindings.applyValue ({ layer, control.id, 1 }, 1.0f - control.y);
+            break;
+
+        case grid::CcTool::none:
+        default:
+            break;
+    }
+}
+
+void GridPage::openMacroViewFor (int layer, int controlId, grid::CcControlModel& model)
+{
+    const auto* control = model.find (controlId);
+    if (control == nullptr || macroPanel == nullptr)
+        return;
+
+    const auto typeName = [&]() -> juce::String
+    {
+        switch (control->type)
+        {
+            case grid::CcTool::fader:  return "Fader";
+            case grid::CcTool::push:   return "Push";
+            case grid::CcTool::toggle: return "Toggle";
+            case grid::CcTool::xy:     return "XY-Pad";
+            case grid::CcTool::none:
+            default:                   return "Control";
+        }
+    }();
+
+    macroPanel->showControl (layer, controlId,
+                             typeName + " " + juce::String (controlId),
+                             control->type == grid::CcTool::xy);
+
+    dockPanel.setPanelOpen (true);
+    panelSettings.setEditorPanelOpen (true);
+    dockPanel.setActiveTab ("macro");
+    updateCcMode();
+    resized();
 }
 
 void GridPage::resized()

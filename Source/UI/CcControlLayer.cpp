@@ -248,6 +248,19 @@ void CcControlLayer::handlePlayDown (const juce::MouseEvent& event)
         return;
 
     grabbedControls[event.source.getIndex()] = id;
+
+    // Long-Press (Block E): Halten ohne nennenswerte Bewegung oeffnet die
+    // Macro-Ansicht (Muster AxisColourRow). Nur EIN Kandidat zur Zeit --
+    // ein zweiter Finger bricht den laufenden Kandidaten nicht ab, startet
+    // aber keinen neuen.
+    if (longPressFinger < 0)
+    {
+        longPressFinger = event.source.getIndex();
+        longPressControlId = id;
+        longPressStart = event.position;
+        startTimer (kLongPressMs);
+    }
+
     applyPlayGesture (*control, event.position, true);
     repaint();
 }
@@ -257,6 +270,12 @@ void CcControlLayer::handlePlayDrag (const juce::MouseEvent& event)
     const auto it = grabbedControls.find (event.source.getIndex());
     if (it == grabbedControls.end())
         return;
+
+    // Bewegung ueber der Toleranz bricht den Long-Press ab (ein Fader-
+    // Sweep/XY-Drag darf die Macro-Ansicht nicht oeffnen).
+    if (event.source.getIndex() == longPressFinger
+        && event.position.getDistanceFrom (longPressStart) > kLongPressMoveTolerancePx)
+        cancelLongPress();
 
     if (auto* control = model.find (it->second))
     {
@@ -271,6 +290,9 @@ void CcControlLayer::handlePlayUp (const juce::MouseEvent& event)
     if (it == grabbedControls.end())
         return;
 
+    if (event.source.getIndex() == longPressFinger)
+        cancelLongPress();
+
     if (auto* control = model.find (it->second);
         control != nullptr && control->type == grid::CcTool::push && control->on)
     {
@@ -280,6 +302,22 @@ void CcControlLayer::handlePlayUp (const juce::MouseEvent& event)
 
     grabbedControls.erase (it);
     repaint();
+}
+
+void CcControlLayer::cancelLongPress()
+{
+    stopTimer();
+    longPressFinger = -1;
+    longPressControlId = -1;
+}
+
+void CcControlLayer::timerCallback()
+{
+    const auto id = longPressControlId;
+    cancelLongPress();
+
+    if (id >= 0 && onLongPressControl != nullptr)
+        onLongPressControl (id);
 }
 
 void CcControlLayer::applyPlayGesture (grid::CcControl& control,

@@ -10,16 +10,21 @@
 #include "Core/ChordMemory.h"
 #include "Core/GridPanelSettings.h"
 #include "Core/GridVoiceEngine.h"
+#include "Core/MacroBindings.h"
 #include "Core/MidiDeviceTarget.h"
 #include "Core/MpeMidiSink.h"
 #include "EditorDockPanel.h"
 #include "ExpressionRibbon.h"
 #include "GridKeyboardComponent.h"
 #include "PushTiles.h"
+#include "TouchLive/LiveSetModel.h"
+#include "TouchLive/TouchLiveClient.h"
 #include "Util/ScaleQuantizer.h"
 
 namespace conduit
 {
+
+class MacroPanel;
 
 //==============================================================================
 /**
@@ -94,7 +99,8 @@ class GridPage final : public juce::Component,
 public:
     GridPage (juce::ValueTree rootStateToUse,
               grid::GridVoiceEngine& engineToUse, grid::MidiDeviceTarget& midiTargetToUse,
-              GridPanelSettings& panelSettingsToUse, grid::MpeMidiSink& mpeMidiSinkToUse);
+              GridPanelSettings& panelSettingsToUse, grid::MpeMidiSink& mpeMidiSinkToUse,
+              LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse);
     ~GridPage() override;
 
     void resized() override;
@@ -162,6 +168,20 @@ private:
     grid::MidiDeviceTarget& midiTarget;
     GridPanelSettings& panelSettings;
     grid::MpeMidiSink& mpeMidiSink;   // Block D1: Expression-Mode-Umschaltung (Settings-Tab)
+    LiveSetModel& liveSetModel;       // Block E: Ableton-Parameter-Browser (Macro-Ziele)
+    TouchLiveClient& touchLiveClient;
+
+    // Macro-System (Block E): Bindings-Store der Controls (System + DIY),
+    // Laufzeit-only (Persistenz Block K). macroPanel zeigt in den vom
+    // dockPanel besessenen Tab-Content (GridPage besitzt das dockPanel --
+    // Lebensdauer identisch, roher Zeiger ist hier sicher).
+    grid::MacroBindings macroBindings;
+    MacroPanel* macroPanel = nullptr;
+
+    /** Wertfluss Control → Macro-Ziele (beide Layer, Block E). */
+    void feedMacros (int layer, const grid::CcControl& control);
+    /** Long-Press: Macro-Ansicht des Controls oeffnen. */
+    void openMacroViewFor (int layer, int controlId, grid::CcControlModel& model);
 
     // XY+Fader-Modus: Zeilenzahl des systemLayer -- CcControlLayer::rows ist
     // const (kein Laufzeit-Resize), daher bei GridPage-Konstruktion aus
