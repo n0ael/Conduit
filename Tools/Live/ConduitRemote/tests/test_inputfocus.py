@@ -265,3 +265,62 @@ def test_listener_and_poll_do_not_double_fire():
     service.on_state_changed = lambda: calls.append(1)
     service.poll()   # gleicher Zustand -> Dedupe greift
     assert not calls
+
+
+# -- Feldtest-Runde 3 (11.07.2026): zustandsbasiertes Routing ---------------------
+
+def test_follow_previously_selected_all_ins_goes_off():
+    # Der zuvor selektierte Track stand (noch/wieder) auf All Ins --
+    # beim Wechsel muss er wie die anderen auf Monitor Off gehen.
+    song = make_song()
+    service = InputFocusService(song)
+    service.set_focus(song.tracks[0], GRID, MASTER, True)
+
+    song.view.selected_track = song.tracks[1]
+    # Ausfall-Simulation: waehrend der Selektion stellt jemand den Track
+    # manuell zurueck auf All Ins (oder unser Move kam nie an)
+    song.tracks[1].input_routing_type = \
+        song.tracks[1].available_input_routing_types[0]
+    song.tracks[1].current_monitoring_state = 1
+
+    song.view.selected_track = song.tracks[2]
+
+    assert routing(song.tracks[1]) == "All Ins"
+    assert monitor(song.tracks[1]) == 2   # Off wie die anderen
+
+
+def test_follow_never_touches_foreign_inputs():
+    # User-Regel: ein Track mit FREMDER Quelle (Sequencer/Hardware, hier
+    # "K1 (Port 1)") verliert durch Selektion/Deselektion NICHTS --
+    # weder Input noch Monitor.
+    song = make_song()
+    seq = song.tracks[1]
+    seq.input_routing_type = seq.available_input_routing_types[3]  # K1
+    seq.current_monitoring_state = 0   # User hoert den Sequencer (In)
+
+    service = InputFocusService(song)
+    service.set_focus(song.tracks[0], GRID, MASTER, True)
+
+    assert routing(seq) == "K1 (Port 1)"
+    assert monitor(seq) == 0   # set_focus liess ihn in Ruhe
+
+    song.view.selected_track = seq          # selektieren (Knobs drehen)
+    assert routing(seq) == "K1 (Port 1)"
+    assert monitor(seq) == 0
+
+    song.view.selected_track = song.tracks[2]   # wieder deselektieren
+    assert routing(seq) == "K1 (Port 1)"
+    assert monitor(seq) == 0
+
+
+def test_routing_pass_is_idempotent():
+    # Doppelter Pass (Listener + poll-Wettlauf) darf nichts veraendern.
+    song = make_song()
+    song.view.selected_track = song.tracks[1]
+    service = InputFocusService(song)
+    service.set_focus(song.tracks[0], GRID, MASTER, True)
+
+    before = [(routing(t), monitor(t)) for t in song.tracks[:3]]
+    service._apply_routing()
+    after = [(routing(t), monitor(t)) for t in song.tracks[:3]]
+    assert before == after

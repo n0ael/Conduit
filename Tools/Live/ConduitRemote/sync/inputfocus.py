@@ -16,10 +16,14 @@ Focus semantics (set_focus):
     OFF) but only if its input still is the grid port - i.e. only if WE
     set it; user re-routings are never overwritten.
 
-Follow selection (selected_track listener, active only while follow is on
-AND a focus exists): the previously moved track is restored to "All Ins" +
-monitor OFF (user decision 11.07.2026), the newly selected midi track (on
-"All Ins", not the focus) moves to master_input + monitor AUTO.
+Follow selection (selected_track listener + manager-tick poll, active only
+while follow is on AND a focus exists) is STATE-BASED (Feldtest-Runde 3,
+11.07.2026): every routing pass decides per track from its CURRENT input -
+"All Ins" and master_input/grid_input are "ours" (managed: deselected ->
+"All Ins" + OFF, selected -> master_input + AUTO), any OTHER input
+(sequencer, hardware port, ...) is never touched, neither input nor
+monitor (User-Regel: ein sequencer-gespeister Track darf durch Selektion
+nichts verlieren). No move-tracking -> self-healing and idempotent.
 
 "All Ins" detection is robust against localisation: entry 0 of
 available_input_routing_types IS "All Ins" in Live - matched via
@@ -65,9 +69,12 @@ def find_routing_type(track, wanted_name):
 
 def apply_track_input(track, monitor_state, input_name):
     """Set a track's monitor + input routing; every sub-operation is
-    LOM-defensive, an empty input_name leaves the routing untouched."""
+    LOM-defensive, an empty input_name leaves the routing untouched.
+    Writes only on actual change (idempotenter Routing-Pass darf Lives
+    Undo-/Listener-Maschinerie nicht mit No-op-Writes fluten)."""
     try:
-        track.current_monitoring_state = monitor_state
+        if track.current_monitoring_state != monitor_state:
+            track.current_monitoring_state = monitor_state
     except Exception:
         logger.debug("input focus: monitoring not settable on %r",
                      getattr(track, "name", "?"))
@@ -75,7 +82,9 @@ def apply_track_input(track, monitor_state, input_name):
     if routing is None:
         return
     try:
-        track.input_routing_type = routing
+        wanted = getattr(routing, "display_name", None)
+        if _current_input_name(track) != wanted:
+            track.input_routing_type = routing
     except Exception:
         logger.debug("input focus: input routing not settable on %r",
                      getattr(track, "name", "?"))
@@ -115,7 +124,6 @@ class InputFocusService(object):
     def __init__(self, song):
         self._song = song
         self._focus_key = None    # stable_ids._identity of the focus track
-        self._moved_key = None    # identity of the track we moved to master
         self._follow = True
         self._grid_input = ""
         self._master_input = ""
@@ -144,51 +152,65 @@ class InputFocusService(object):
         self._notify()
 
     def set_focus(self, target, grid_input, master_input, follow):
-        """Route target to the grid (monitor IN + grid_input), silence other
-        All-Ins midi tracks, move Live's selection to master_input."""
+        """Route target to the grid (monitor IN + grid_input), then apply
+        the state-based routing rules to everything else."""
         if target is None:
             return
         self._grid_input = str(grid_input or "")
         self._master_input = str(master_input or "")
         self._follow = bool(follow)
 
-        song = self._song
-        target_key = stable_ids._identity(target)
-
-        # Previous focus: give it back (only if its input still is OUR port)
-        previous = self._find_by_key(self._focus_key)
-        if previous is not None and self._focus_key != target_key:
-            self._restore_to_all_ins(previous, only_if_input=self._grid_input)
-
-        selected = self._selected_track()
-        selected_key = (stable_ids._identity(selected)
-                        if selected is not None else None)
-
-        # Feldtest-Fix 11.07.2026: einen frueher bewegten Track IMMER
-        # restaurieren, wenn er weder neues Ziel noch aktuell selektiert
-        # ist -- sonst bleibt er auf dem Master-Input haengen.
-        moved = self._find_by_key(self._moved_key)
-        if (moved is not None and self._moved_key != target_key
-                and self._moved_key != selected_key):
-            self._restore_to_all_ins(moved, only_if_input=self._master_input)
-
-        self._focus_key = target_key
-        self._moved_key = None
-        self._last_selected_key = selected_key
+        self._focus_key = stable_ids._identity(target)
+        self._last_selected_key = self._selected_key()
         self._ensure_listener()
 
-        for track in song.tracks:
+        self._apply_routing()
+        self._notify()
+
+    def _apply_routing(self):
+        """State-based routing pass (Feldtest-Runde 3, 11.07.2026 --
+        ersetzt das moved-Tracking, dadurch selbstheilend/idempotent).
+        Pro MIDI-Track entscheidet der IST-Input:
+
+          * focus track          -> grid_input + monitor IN
+          * selected (not focus) -> if on "All Ins" OR master_input:
+                                    master_input + AUTO (playable)
+          * everything else      -> if on grid_input or master_input
+                                    (i.e. WE routed it earlier): back to
+                                    "All Ins" + OFF; if on "All Ins":
+                                    monitor OFF (input untouched)
+          * any OTHER input (sequencer, hardware, ...) -> NEVER touched,
+            neither input nor monitor (User-Regel 11.07.2026: ein Track,
+            den ein Sequencer speist, darf durch Selektion nichts
+            verlieren).
+        """
+        if self._focus_key is None:
+            return
+
+        selected_key = self._selected_key()
+
+        try:
+            tracks = list(self._song.tracks)
+        except Exception:
+            return
+
+        for track in tracks:
             if not _is_midi(track):
                 continue
             key = stable_ids._identity(track)
-            if key == target_key:
+            if key == self._focus_key:
                 apply_track_input(track, MONITOR_IN, self._grid_input)
-            elif key == selected_key and _is_on_all_ins(track):
-                apply_track_input(track, MONITOR_AUTO, self._master_input)
-                self._moved_key = key
+            elif key == selected_key:
+                if (_is_on_all_ins(track)
+                        or self._input_matches(track, self._master_input)):
+                    apply_track_input(track, MONITOR_AUTO, self._master_input)
+            elif (self._input_matches(track, self._grid_input)
+                  or self._input_matches(track, self._master_input)):
+                # von UNS geroutet (alter Fokus / alte Selektion) -> aufraeumen
+                all_ins = _all_ins_name(track)
+                apply_track_input(track, MONITOR_OFF, all_ins or "")
             elif _is_on_all_ins(track):
                 apply_track_input(track, MONITOR_OFF, "")
-        self._notify()
 
     # -- follow selection ---------------------------------------------------------
 
@@ -206,31 +228,18 @@ class InputFocusService(object):
         self._handle_selection_change()
 
     def _handle_selection_change(self):
-        selected = self._selected_track()
-        selected_key = (stable_ids._identity(selected)
-                        if selected is not None else None)
+        selected_key = self._selected_key()
 
         if selected_key == self._last_selected_key:
             return   # kein Wechsel (oder Listener war schneller als poll)
         self._last_selected_key = selected_key
 
-        if not self._follow or self._focus_key is None:
-            self._notify()   # selected-Feld der Domain trotzdem frisch
-            return
-
-        if selected_key != self._moved_key:
-            # Restore the previously moved track: All Ins + monitor OFF
-            moved = self._find_by_key(self._moved_key)
-            if moved is not None and self._moved_key != self._focus_key:
-                self._restore_to_all_ins(moved, only_if_input=self._master_input)
-            self._moved_key = None
-
-            # Move the new selection out of All Ins (unless it is the focus)
-            if (selected is not None and selected_key != self._focus_key
-                    and _is_midi(selected) and _is_on_all_ins(selected)):
-                apply_track_input(selected, MONITOR_AUTO, self._master_input)
-                self._moved_key = selected_key
-        self._notify()
+        # Zustandsbasierter Routing-Pass: raeumt den vorher selektierten
+        # Track auf (master -> All Ins + Off, All Ins -> Off) und bewegt
+        # die neue Selektion -- fremde Inputs bleiben komplett unberuehrt.
+        if self._follow and self._focus_key is not None:
+            self._apply_routing()
+        self._notify()   # selected-Feld der Domain in jedem Fall frisch
 
     # -- lifecycle ---------------------------------------------------------------
 
@@ -276,18 +285,21 @@ class InputFocusService(object):
                 return track
         return None
 
-    def _restore_to_all_ins(self, track, only_if_input):
-        """Back to "All Ins" + monitor OFF - but never overwrite an input
-        the USER changed meanwhile (current input must still be ours)."""
+    def _selected_key(self):
+        selected = self._selected_track()
+        return stable_ids._identity(selected) if selected is not None else None
+
+    def _input_matches(self, track, wanted_name):
+        """IST-Input des Tracks == wanted_name (exakt oder Praefix, wie das
+        Routing-Matching -- Live haengt Port-Suffixe an)? False bei leerem
+        wanted_name oder unlesbarem Routing."""
+        if not wanted_name:
+            return False
         current = _current_input_name(track)
-        if only_if_input and current is not None:
-            if not (current == only_if_input
-                    or current.lower().startswith(only_if_input.lower())):
-                return
-        all_ins = _all_ins_name(track)
-        if all_ins is None:
-            return
-        apply_track_input(track, MONITOR_OFF, all_ins)
+        if current is None:
+            return False
+        return (current == wanted_name
+                or current.lower().startswith(wanted_name.lower()))
 
     def _notify(self):
         if self.on_state_changed is not None:

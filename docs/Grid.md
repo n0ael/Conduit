@@ -289,12 +289,17 @@
     11.07.2026):** das Script läuft als KOPIE in Lives User Library
     (`robocopy Tools\Live\ConduitRemote → …\Remote Scripts\ConduitRemote
     /MIR /XD __pycache__ tests`) + Live-Neustart — sonst „passiert
-    nichts in Ableton". **Feldtest-Fixes (Runde 2, 11.07.2026):** der
+    nichts in Ableton". **Feldtest-Fixes (Runde 2+3, 11.07.2026):** der
     selected_track-Listener kann in Live STILL ausfallen → Follow läuft
     zusätzlich als `poll()` im Manager-Tick (~100 ms, Dedupe über
-    `_last_selected_key`, Listener bleibt Schnellpfad); `set_focus`
-    restauriert einen früher bewegten Track IMMER (nicht Ziel, nicht
-    selektiert → All Ins + Off — sonst hing er auf dem Master-Input).
+    `_last_selected_key`, Listener bleibt Schnellpfad). Das Routing ist
+    ZUSTANDSBASIERT (`_apply_routing`, kein moved-Tracking —
+    selbstheilend/idempotent, Writes nur bei echter Differenz): pro
+    MIDI-Track entscheidet der IST-Input — All Ins/master/grid = „von
+    uns verwaltet" (deselektiert → All Ins + Off bzw. Off, selektiert →
+    master + Auto, Fokus → grid + In); JEDER ANDERE Input (Sequencer,
+    Hardware) ist TABU, weder Input noch Monitor (User-Regel: ein
+    sequencer-gespeister Track darf durch Selektion nichts verlieren).
     Grid-MPE-Port als EIGENES Setting (`gridMidiInputName`, Dropdown
     „Grid MPE Port (independent from selection)" neben „MIDI Master
     (follows selection)" in der Sektion „Ableton -
