@@ -144,23 +144,9 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
     {
         auto panel = std::make_unique<TrackSelectorPanel> (engine.getLiveSetModel());
 
+        // Gemeinsamer Command-Weg mit den Track-Tabs (Block H3).
         panel->onTrackChosen = [this] (const juce::String& trackKey)
-        {
-            auto& settings = engine.getGridPanelSettings();
-
-            // Grid-MPE-Port: explizit gewählter Ableton-Routing-Name
-            // (Settings-Tab, User-Feldtest 11.07.2026 — kann vom
-            // Conduit-MIDI-Out-Portnamen abweichen); leer = Fallback
-            // auf den Namen des offenen Grid-MIDI-Out-Ports.
-            auto gridInput = settings.getGridMidiInputName();
-            if (gridInput.isEmpty())
-                gridInput = engine.getGridMidiDeviceTarget().currentDeviceName();
-
-            engine.getTouchLiveClient().sendCommand (
-                TrackSelectorPanel::makeMidiInputFocusCommand (
-                    trackKey, gridInput,
-                    settings.getMasterMidiInputName()));
-        };
+        { gridPage.sendFocusCommand (trackKey); };
 
         juce::CallOutBox::launchAsynchronously (
             std::move (panel),

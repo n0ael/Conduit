@@ -125,6 +125,13 @@ public:
     [[nodiscard]] juce::String getGridMidiInputName() const noexcept { return gridMidiInputName; }
     void setGridMidiInputName (const juce::String& newName);
 
+    /** Master-Device-Favoriten (Block H3): Ableton-Routing-Namen für den
+        Quick-Switch oben links auf der Grid-Page (Push ↔ Keyboard …) —
+        gepflegt über das „+" im Settings-Tab, persistiert als
+        „;"-getrennte Liste. */
+    [[nodiscard]] juce::StringArray getMasterMidiFavourites() const { return masterMidiFavourites; }
+    void setMasterMidiFavourites (const juce::StringArray& newFavourites);
+
 private:
     void loadFromFile();
 
@@ -145,6 +152,7 @@ private:
 
     juce::String masterMidiInputName;
     juce::String gridMidiInputName;
+    juce::StringArray masterMidiFavourites;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GridPanelSettings)
 };

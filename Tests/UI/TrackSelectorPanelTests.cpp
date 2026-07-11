@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "UI/GridPage.h"
+#include "UI/MasterDeviceSwitch.h"
 #include "UI/TrackFocusBadge.h"
 #include "UI/TrackSelectorPanel.h"
+#include "UI/TrackTabsStrip.h"
 
 namespace
 {
@@ -149,3 +151,85 @@ TEST_CASE ("HoldIconTile: Loslassen ausserhalb ist kein Tap, Bewegung erlaubt Ta
     REQUIRE (taps == 1);
     REQUIRE (longPresses == 0);
 }
+
+//==============================================================================
+// Block H3: TrackTabsStrip + MasterDeviceSwitch + Favoriten
+
+TEST_CASE ("TrackTabsStrip: Tabs aus der tracks-Domain, Tap trifft den Index", "[grid][tracktabs]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    conduit::LiveSetModel model;
+
+    model.applySnapshot ("tracks",
+        parse (R"({"tr:1":{"name":"Bass","color":255,"kind":"midi","index":0},)"
+               R"("tr:2":{"name":"Keys","color":65280,"kind":"midi","index":1},)"
+               R"("tr:3":{"name":"Audio","color":0,"kind":"audio","index":2}})"));
+
+    conduit::TrackTabsStrip tabs (model);
+    tabs.setSize (400, 28);
+
+    REQUIRE (tabs.tabCount() == 2);
+    REQUIRE (tabs.tabIndexAt (10) == 0);
+    REQUIRE (tabs.tabIndexAt (210) == 1);   // Tab-Breite 200 (400/2 < max 220)
+    REQUIRE (tabs.tabIndexAt (399) == 1);
+
+    // refresh nach Domain-Update nimmt neue Tracks auf
+    model.applySnapshot ("tracks",
+        parse (R"({"tr:1":{"name":"Bass","color":255,"kind":"midi","index":0},)"
+               R"("tr:2":{"name":"Keys","color":65280,"kind":"midi","index":1},)"
+               R"("tr:4":{"name":"Pad","color":123,"kind":"midi","index":2}})"));
+    tabs.refresh();
+    REQUIRE (tabs.tabCount() == 3);
+}
+
+TEST_CASE ("MasterDeviceSwitch: Tap zykelt, Drag scrollt, Commit meldet", "[grid][masterswitch]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    conduit::MasterDeviceSwitch sw;
+    sw.setFavourites ({ "FromPush", "K1 (Port 1)", "TouchOSC" });
+    sw.setCurrent ("FromPush");
+
+    juce::StringArray chosen;
+    sw.onMasterChosen = [&] (const juce::String& name) { chosen.add (name); };
+
+    // Tap = naechster Favorit (zyklisch)
+    sw.beginGesture();
+    sw.endGesture (true);
+    REQUIRE (chosen.strings.getLast() == "K1 (Port 1)");
+    REQUIRE (sw.currentName() == "K1 (Port 1)");
+
+    // Drag: ein Schritt je 44 px nach oben, live sichtbar, Commit beim Ende
+    sw.beginGesture();
+    sw.dragGesture (-conduit::MasterDeviceSwitch::kPixelsPerStep);
+    REQUIRE (sw.currentName() == "TouchOSC");
+    sw.dragGesture (-2 * conduit::MasterDeviceSwitch::kPixelsPerStep);   // wrap
+    REQUIRE (sw.currentName() == "FromPush");
+    sw.endGesture (false);
+    REQUIRE (chosen.strings.getLast() == "FromPush");
+
+    // Tap vom letzten Eintrag wrappt an den Anfang
+    sw.setCurrent ("TouchOSC");
+    sw.beginGesture();
+    sw.endGesture (true);
+    REQUIRE (sw.currentName() == "FromPush");
+}
+
+TEST_CASE ("MasterDeviceSwitch: ohne Favoriten keine Bewegung", "[grid][masterswitch]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    conduit::MasterDeviceSwitch sw;
+    sw.setCurrent ("FromPush");
+
+    int commits = 0;
+    sw.onMasterChosen = [&] (const juce::String&) { ++commits; };
+
+    sw.beginGesture();
+    sw.dragGesture (-200);
+    sw.endGesture (true);
+
+    REQUIRE (sw.currentName() == "FromPush");   // Liste leer -> unveraendert
+    REQUIRE (commits == 1);                     // Commit meldet den Ist-Wert
+}
+

@@ -18,10 +18,12 @@
 #include "EditorDockPanel.h"
 #include "ExpressionRibbon.h"
 #include "GridKeyboardComponent.h"
+#include "MasterDeviceSwitch.h"
 #include "PushTiles.h"
 #include "TouchLive/LiveSetModel.h"
 #include "TouchLive/TouchLiveClient.h"
 #include "TrackFocusBadge.h"
+#include "TrackTabsStrip.h"
 #include "Util/ScaleQuantizer.h"
 
 namespace conduit
@@ -128,6 +130,13 @@ public:
         Modus-Kacheln oben links sind entfallen). */
     std::function<void (GridPanelSettings::GridLayoutMode)> onLayoutModeChanged;
 
+    /** Block H v2 rev5: Fokus-Command senden (Track-Tabs, Selector,
+        Master-Switch-Re-Route) — Grid-MPE-Port aus den Settings (leer =
+        Portname des offenen Grid-MIDI-Outs), Master aus den Settings. */
+    void sendFocusCommand (const juce::String& trackKey);
+
+    void paint (juce::Graphics& g) override;
+
     //==========================================================================
     // Kachel-Zyklen der Skala-Anzeige (Session-Skala, Design-Mock Grid-Page
     // v2) — pure functions, testbar ohne GridPage-Instanz.
@@ -180,9 +189,13 @@ private:
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child,
                                 int index) override;
 
-    /** Block H v2: Badge (Fokus-Track), Arm-LED und Master-Input-Optionen
-        aus dem LiveSetModel aktualisieren (tracks-/mixer-Domain). */
+    /** Block H v2: Tabs (Fokus-Track), Arm-LED, Grid-Rahmen und Master-
+        Input-Optionen aus dem LiveSetModel aktualisieren (tracks-/mixer-
+        Domain). */
     void refreshTrackFocus();
+
+    /** Block H3: Quick-Switch mit Favoriten + aktuellem Master füttern. */
+    void refreshMasterSwitch();
 
     // Bereich des PitchBend-Offset-Ribbons: Mitte = 0, ±Ende = ±12 Halbtöne.
     // Spätere 1–96-Range-UI ersetzt diese Konstante.
@@ -236,10 +249,12 @@ private:
     // (TODO(design): echtes Laufzeit-Resize braucht CcControlLayer-Umbau).
     const int systemControlRowsAtStartup;
 
-    // Block H v2: Badge „welchen Ableton-Track spielt das Grid" (ersetzt
-    // die Modus-Kacheln — der Layout-Modus wird jetzt über den Page-Button
-    // getoggelt und am Page-Icon abgelesen) + Arm-Button für den Fokus-Track.
-    TrackFocusBadge trackBadge;
+    // Block H3: Track-Tabs (alle MIDI-Tracks, Tap = Fokus) + Master-Quick-
+    // Switch oben links; currentFocus speist Arm-LED und den Grid-Rahmen
+    // in der Track-Farbe (paint). Arm-Button für den Fokus-Track.
+    TrackTabsStrip trackTabs;
+    MasterDeviceSwitch masterSwitch;
+    TrackFocusBadge::FocusRow currentFocus;
     push::TextTile armButton { "Arm", push::colours::ledRed };
     push::TextTile releaseAllButton { "Release All", push::colours::ledRed };
     push::TextTile octaveUpTile   { "Oct +" };

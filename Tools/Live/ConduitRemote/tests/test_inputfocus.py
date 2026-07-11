@@ -197,3 +197,41 @@ def test_tracks_domain_exposes_focus_selected_and_options():
         song.tracks[1], stable_ids.TRACK_PREFIX)
     assert "Conduit Grid MPE" in state["input_options"]
     assert state["input_options"][0] == "All Ins"
+
+
+# -- Block H3: Master-Quick-Switch (Wanderung zwischen Master-Devices) ------------
+
+def test_master_switch_moves_tracks_from_old_master():
+    song = make_song()
+    service = InputFocusService(song)
+    service.set_focus(song.tracks[0], GRID, MASTER)
+    assert routing(song.tracks[1]) == MASTER
+
+    # Quick-Switch: gleicher Fokus, neues Master-Device
+    service.set_focus(song.tracks[0], GRID, "K1 (Port 1)")
+
+    assert routing(song.tracks[1]) == "K1 (Port 1)"
+    assert routing(song.tracks[2]) == "K1 (Port 1)"
+    assert routing(song.tracks[0]) == GRID   # Fokus unangetastet
+
+    # und wieder zurueck
+    service.set_focus(song.tracks[0], GRID, MASTER)
+    assert routing(song.tracks[1]) == MASTER
+
+
+def test_master_switch_still_respects_foreign_inputs():
+    song = make_song()
+    seq = song.tracks[2]
+    seq.input_routing_type = seq.available_input_routing_types[3]  # K1, fremd
+    seq.current_monitoring_state = 0
+
+    service = InputFocusService(song)
+    service.set_focus(song.tracks[0], GRID, MASTER)
+
+    # Das Session-Set kennt nur je benutzte Master ("FromPush") -- der
+    # fremde K1-Track matcht keinen davon und bleibt komplett in Ruhe.
+    # (Bewusste Grenze: waehlt der User K1 selbst als Master, gehoeren
+    # K1-Tracks ab dann zum verwalteten System.)
+    service.set_focus(song.tracks[0], GRID, MASTER)
+    assert routing(seq) == "K1 (Port 1)"
+    assert monitor(seq) == 0

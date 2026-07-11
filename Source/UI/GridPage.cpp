@@ -20,6 +20,7 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
       liveSetModel (liveSetModelToUse), touchLiveClient (touchLiveClientToUse),
       midiControlInput (midiControlInputToUse),
       systemControlRowsAtStartup (panelSettingsToUse.getSystemControlRows()),
+      trackTabs (liveSetModelToUse),
       // 8×8-Raster der Grid-Page (padLayoutConfig, User 10.07.2026) — Keyboard
       // und ccLayer teilen sich dieselbe Zellgeometrie.
       keyboard (engineToUse, padLayoutConfig()),
@@ -28,7 +29,8 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
       // den oberen N Pad-Reihen (resized), N = systemControlRowsAtStartup.
       systemLayer (systemCcModel, padLayoutConfig().cols, systemControlRowsAtStartup)
 {
-    addChildComponent (trackBadge);   // sichtbar nur mit Conduit-Fokus-Track
+    addAndMakeVisible (trackTabs);
+    addAndMakeVisible (masterSwitch);
     addAndMakeVisible (armButton);
     addAndMakeVisible (releaseAllButton);
     addAndMakeVisible (octaveUpTile);
@@ -45,6 +47,22 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
                                      // sichtbar nur im XY+Fader-Modus.
     addAndMakeVisible (chordStrip);  // eigene Spalte NEBEN Keyboard/ccLayer
     addChildComponent (dockPanel);   // sichtbar nur wenn offen (setPanelOpen)
+
+    // Track-Tabs (Block H3): Tap = Fokus-Wechsel, gleicher Command-Weg wie
+    // der Long-Press-Selector (EngineEditor ruft ebenfalls sendFocusCommand).
+    trackTabs.onTrackChosen = [this] (const juce::String& trackKey)
+    { sendFocusCommand (trackKey); };
+
+    // Master-Quick-Switch (Block H3): Commit persistiert und re-routet die
+    // verwalteten Tracks sofort (Fokus-Command mit neuem Master).
+    masterSwitch.onMasterChosen = [this] (const juce::String& name)
+    {
+        panelSettings.setMasterMidiInputName (name);
+
+        const auto focusKey = TrackFocusBadge::focusRowFrom (liveSetModel).key;
+        if (focusKey.isNotEmpty())
+            sendFocusCommand (focusKey);
+    };
 
     // Arm-Button (Block H v2): armt/entwaffnet den Conduit-Fokus-Track --
     // dessen Input ist der Grid-MIDI-Out, Record nimmt also Grid-Noten auf.
@@ -211,6 +229,7 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     { mpeMidiSink.setExpressionMode (mode); };
     settingsView->onLayoutSettingsChanged = [this] { applyRibbonWidth(); };
     settingsView->onModwheelToggled = [this] (bool enabled) { modwheelRibbon.setVisible (enabled); resized(); };
+    settingsView->onMasterFavouritesChanged = [this] { refreshMasterSwitch(); };
     dockPanel.addTab ("settings", "Settings", std::move (settingsView));
 
     dockPanel.setPanelWidth (panelSettings.getEditorPanelWidth());
@@ -225,6 +244,7 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     liveSetState = liveSetModel.getState();
     liveSetState.addListener (this);
     refreshTrackFocus();
+    refreshMasterSwitch();
 
     updateCcMode();   // Initialzustand (Panel-Open aus panelSettings, aktiver Tab "mpe")
     applyLayoutMode();   // Initialer Layout-Modus aus der Persistenz
@@ -279,6 +299,17 @@ grid::PadGridLayout::Config GridPage::padLayoutConfig() noexcept
     return config;
 }
 
+void GridPage::paint (juce::Graphics& g)
+{
+    // Block H3: dünner Rahmen in der Live-Farbe des Fokus-Tracks um die
+    // Pad-Fläche -- „welchen Track spielt das Grid" auf einen Blick.
+    if (currentFocus.key.isEmpty())
+        return;
+
+    g.setColour (currentFocus.colour);
+    g.drawRect (keyboard.getBounds().expanded (2), 2);
+}
+
 void GridPage::refreshScaleFromState()
 {
     const auto rootNote = juce::jlimit (0, 11, (int) rootState.getProperty (id::scaleRoot, 0));
@@ -313,11 +344,34 @@ void GridPage::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree&,
         refreshTrackFocus();
 }
 
+void GridPage::sendFocusCommand (const juce::String& trackKey)
+{
+    // Grid-MPE-Port aus den Settings (User-Feldtest 11.07.2026: kann vom
+    // Conduit-MIDI-Out-Portnamen abweichen); leer = Portname-Fallback.
+    auto gridInput = panelSettings.getGridMidiInputName();
+    if (gridInput.isEmpty())
+        gridInput = midiTarget.currentDeviceName();
+
+    touchLiveClient.sendCommand (TrackSelectorPanel::makeMidiInputFocusCommand (
+        trackKey, gridInput, panelSettings.getMasterMidiInputName()));
+}
+
+void GridPage::refreshMasterSwitch()
+{
+    masterSwitch.setFavourites (panelSettings.getMasterMidiFavourites());
+    masterSwitch.setCurrent (panelSettings.getMasterMidiInputName());
+}
+
 void GridPage::refreshTrackFocus()
 {
     const auto focus = TrackFocusBadge::focusRowFrom (liveSetModel);
-    trackBadge.setFocus (focus);
-    trackBadge.setVisible (focus.key.isNotEmpty());
+    trackTabs.refresh();
+
+    if (focus.key != currentFocus.key || focus.colour != currentFocus.colour)
+    {
+        currentFocus = focus;
+        repaint();   // Grid-Rahmen in der Track-Farbe (paint)
+    }
 
     armButton.setEnabled (focus.key.isNotEmpty());
     auto mixerItem = liveSetModel.findItem ("mixer", focus.key);
@@ -524,12 +578,12 @@ void GridPage::resized()
     // übergebenen bounds steckt.
     dockPanel.setBounds (bounds.removeFromRight (dockPanel.getPreferredWidth()));
 
-    // Block H v2: oben links zeigt das Badge den vom Grid gespielten
-    // Ableton-Track (Farbe + Name) -- die Layout-Modus-Kacheln sind
-    // entfallen (Toggle über den Page-Button, Anzeige am Page-Icon).
+    // Block H3: oben links der Master-Quick-Switch, daneben die Track-Tabs
+    // über die volle Breite (alle MIDI-Tracks, Tap = Fokus-Wechsel).
     auto topStrip = bounds.removeFromTop (28);
-    trackBadge.setBounds (topStrip.getX() + 4, topStrip.getY() + 2,
-                          juce::jmin (220, topStrip.getWidth() - 8), 24);
+    masterSwitch.setBounds (topStrip.removeFromLeft (panelSettings.getRibbonWidthPx() + 28)
+                                .reduced (2, 1));
+    trackTabs.setBounds (topStrip.reduced (2, 0));
 
     const auto ribbonWidth = panelSettings.getRibbonWidthPx();   // Block D1, live
 
@@ -542,8 +596,9 @@ void GridPage::resized()
                                                  / (float) padLayoutConfig().rows);
     octaveUpTile.setBounds (pitchColumn.removeFromTop (padHeight));
     octaveDownTile.setBounds (pitchColumn.removeFromTop (padHeight));
-    auto releaseRow = pitchColumn.removeFromBottom (36);
-    releaseAllButton.setBounds (releaseRow.reduced (2));
+    // Block H3 (User-Feedback): Arm unten LINKS (unter Pitch), Release All
+    // wandert nach unten rechts -- beide in Pad-Höhe.
+    armButton.setBounds (pitchColumn.removeFromBottom (padHeight).reduced (2));
     pitchOffsetRibbon.setBounds (pitchColumn);
 
     // Modwheel (Block D1): eigene Spalte direkt neben Pitch, Breite nur
@@ -551,10 +606,10 @@ void GridPage::resized()
     if (modwheelRibbon.isVisible())
         modwheelRibbon.setBounds (bounds.removeFromLeft (ribbonWidth));
 
-    // Arm-Button (Block H v2): unten rechts, Oktav-Button-Maße (ein Pad
-    // hoch, Ribbon-Breite breit) -- darüber Pressure/Slide je zur Hälfte.
+    // Release All (Block H3): unten rechts in Pad-Höhe -- darüber
+    // Pressure/Slide je zur Hälfte.
     auto rightColumn = bounds.removeFromRight (ribbonWidth);
-    armButton.setBounds (rightColumn.removeFromBottom (padHeight));
+    releaseAllButton.setBounds (rightColumn.removeFromBottom (padHeight).reduced (2));
     atOffsetRibbon.setBounds    (rightColumn.removeFromTop (rightColumn.getHeight() / 2));
     slideOffsetRibbon.setBounds (rightColumn);
 

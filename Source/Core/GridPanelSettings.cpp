@@ -17,6 +17,7 @@ namespace
     constexpr const char* modwheelEnabledKey      = "modwheelEnabled";
     constexpr const char* masterMidiInputNameKey  = "masterMidiInputName";
     constexpr const char* gridMidiInputNameKey    = "gridMidiInputName";
+    constexpr const char* masterMidiFavouritesKey = "masterMidiFavourites";
 
     // Achsen-Farben (Grid-Page v2) — Index = GridPanelSettings::axisIndex
     // (Pressure 0, Slide 1, PitchBend 2).
@@ -81,6 +82,9 @@ void GridPanelSettings::loadFromFile()
         modwheelEnabled = file->getBoolValue (modwheelEnabledKey, false);
         masterMidiInputName = file->getValue (masterMidiInputNameKey, {});
         gridMidiInputName   = file->getValue (gridMidiInputNameKey, {});
+        masterMidiFavourites.addTokens (file->getValue (masterMidiFavouritesKey, {}),
+                                        ";", {});
+        masterMidiFavourites.removeEmptyStrings();
 
         for (size_t i = 0; i < axisColours.size(); ++i)
         {
@@ -235,6 +239,22 @@ void GridPanelSettings::setGridMidiInputName (const juce::String& newName)
     if (auto* file = applicationProperties.getUserSettings())
     {
         file->setValue (gridMidiInputNameKey, gridMidiInputName);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setMasterMidiFavourites (const juce::StringArray& newFavourites)
+{
+    if (newFavourites == masterMidiFavourites)
+        return;
+
+    masterMidiFavourites = newFavourites;
+    masterMidiFavourites.removeEmptyStrings();
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (masterMidiFavouritesKey,
+                        masterMidiFavourites.joinIntoString (";"));
         file->saveIfNeeded();
     }
 }

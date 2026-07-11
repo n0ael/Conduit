@@ -138,6 +138,10 @@ class InputFocusService(object):
         self._focus_key = None    # stable_ids._identity of the focus track
         self._grid_input = ""
         self._master_input = ""
+        # Alle in dieser Session je benutzten Master-Namen: beim Wechsel
+        # des Master-Devices (Quick-Switch, Block H3) wandern Tracks vom
+        # ALTEN Master zum neuen -- fremde Inputs bleiben weiter tabu.
+        self._managed_inputs = set()
 
         # wired by the manager: tracks domain mark_dirty
         self.on_state_changed = None
@@ -160,6 +164,8 @@ class InputFocusService(object):
             return
         self._grid_input = str(grid_input or "")
         self._master_input = str(master_input or "")
+        if self._master_input:
+            self._managed_inputs.add(self._master_input)
         self._focus_key = stable_ids._identity(target)
 
         logger.info("input focus rev5: focus=%s grid=%r master=%r",
@@ -195,6 +201,10 @@ class InputFocusService(object):
                 if _current_monitor(track) == MONITOR_OFF:
                     set_monitor(track, MONITOR_AUTO)
                 set_input(track, self._master_input)
+            elif self._on_managed_master(track):
+                # Master-Quick-Switch (Block H3): Tracks vom ALTEN Master
+                # wandern zum neuen (Monitor unangetastet).
+                set_input(track, self._master_input)
             # jeder andere Input: komplett tabu (Sequencer/Hardware-Regel)
 
     # -- lifecycle ---------------------------------------------------------------
@@ -215,6 +225,14 @@ class InputFocusService(object):
             if stable_ids._identity(track) == key:
                 return track
         return None
+
+    def _on_managed_master(self, track):
+        """IST-Input ist einer der in dieser Session benutzten
+        Master-Namen (Quick-Switch-Wanderung)."""
+        for name in self._managed_inputs:
+            if self._input_matches(track, name):
+                return True
+        return False
 
     def _input_matches(self, track, wanted_name):
         """IST-Input des Tracks == wanted_name (exakt oder Praefix, wie das

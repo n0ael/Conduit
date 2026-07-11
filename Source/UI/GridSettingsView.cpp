@@ -54,6 +54,7 @@ GridSettingsView::GridSettingsView (juce::ValueTree rootStateToUse, grid::MidiDe
     addAndMakeVisible (gridInputCombo);
     addAndMakeVisible (masterInputLabel);
     addAndMakeVisible (gridInputLabel);
+    addAndMakeVisible (masterFavouritesTile);
 
     for (auto* label : { &masterInputLabel, &gridInputLabel })
     {
@@ -159,6 +160,11 @@ GridSettingsView::GridSettingsView (juce::ValueTree rootStateToUse, grid::MidiDe
     setMasterInputOptions ({});
     masterInputCombo.onChange = [this] { handleMasterInputSelected(); };
     gridInputCombo.onChange   = [this] { handleGridInputSelected(); };
+
+    // Master-Favoriten fuer den Quick-Switch (Block H3): "+" oeffnet die
+    // Optionsliste, Haekchen = Favorit, Klick toggelt.
+    masterFavouritesTile.setTooltip ("Master-Favoriten (Quick-Switch auf der Grid-Page)");
+    masterFavouritesTile.onClick = [this] { showMasterFavouritesMenu(); };
 
     modwheelToggle.setActive (panelSettings.isModwheelEnabled());
     modwheelToggle.onClick = [this]
@@ -291,6 +297,41 @@ void GridSettingsView::handleGridInputSelected()
     panelSettings.setGridMidiInputName (routingNameForSelection (gridInputCombo));
 }
 
+void GridSettingsView::showMasterFavouritesMenu()
+{
+    juce::PopupMenu menu;
+    const auto favourites = panelSettings.getMasterMidiFavourites();
+
+    if (masterInputOptions.isEmpty())
+        menu.addItem (juce::PopupMenu::Item ("Keine Optionen (Ableton verbunden?)")
+                          .setEnabled (false));
+
+    for (int i = 0; i < masterInputOptions.size(); ++i)
+        menu.addItem (juce::PopupMenu::Item (masterInputOptions[i])
+                          .setID (i + 1)
+                          .setTicked (favourites.contains (masterInputOptions[i])));
+
+    menu.showMenuAsync (juce::PopupMenu::Options()
+                            .withTargetComponent (masterFavouritesTile),
+        [this] (int result)
+        {
+            const auto index = result - 1;
+            if (index < 0 || index >= masterInputOptions.size())
+                return;
+
+            auto updated = panelSettings.getMasterMidiFavourites();
+            const auto& name = masterInputOptions[index];
+            if (updated.contains (name))
+                updated.removeString (name);
+            else
+                updated.add (name);
+            panelSettings.setMasterMidiFavourites (updated);
+
+            if (onMasterFavouritesChanged != nullptr)
+                onMasterFavouritesChanged();
+        });
+}
+
 void GridSettingsView::paint (juce::Graphics& g)
 {
     g.fillAll (push::colours::panel);
@@ -366,7 +407,9 @@ void GridSettingsView::resized()
     // Ableton (Block H v2): Don't-Follow-Routing — MIDI Master (folgt der
     // Selektion) + Grid MPE Port (unabhängig, Input des Fokus-Tracks).
     abletonHeadingBounds = area.removeFromTop (kHeadingHeight);
-    masterInputLabel.setBounds (area.removeFromTop (16));
+    auto masterLabelRow = area.removeFromTop (18);
+    masterFavouritesTile.setBounds (masterLabelRow.removeFromRight (22));
+    masterInputLabel.setBounds (masterLabelRow);
     masterInputCombo.setBounds (area.removeFromTop (kRowHeight));
     area.removeFromTop (kRowGap);
     gridInputLabel.setBounds (area.removeFromTop (16));

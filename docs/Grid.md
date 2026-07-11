@@ -293,6 +293,24 @@
     /MIR /XD __pycache__ tests`) + Live-Neustart — sonst „passiert
     nichts in Ableton". Diagnose: set_focus loggt eine INFO-Zeile
     (`input focus rev5: …`) ins Live-Log.
+
+    **Block H3 (User-Feedback nach bestandenem rev5-Feldtest, 11.07.2026):**
+    `TrackTabsStrip` (Source/UI) ersetzt das Badge — ALLE MIDI-Tracks als
+    Tabs in der obersten Zeile (Name + dünne Umrandung in der
+    Live-Track-Farbe, Fokus gefüllt; Tap = Fokus-Wechsel über
+    `GridPage::sendFocusCommand`, den auch Selector und Master-Switch
+    nutzen). Die Pad-Fläche bekommt einen 2-px-Rahmen in der
+    Fokus-Track-Farbe (GridPage::paint). `MasterDeviceSwitch` (Source/UI)
+    oben links: Tap = nächster Favorit, vertikaler Drag (44 px/Schritt) =
+    durch die Favoriten scrollen, Loslassen committet →
+    `masterMidiInputName` + Fokus-Command-Re-Send; Favoriten
+    (`GridPanelSettings::masterMidiFavourites`, „;"-Liste) pflegt das „+"
+    neben dem MIDI-Master-Dropdown (PopupMenu async, Häkchen = Favorit).
+    Script: `_managed_inputs`-Session-Set — beim Master-Wechsel wandern
+    Tracks vom ALTEN Master zum neuen (fremde Inputs weiter tabu; bewusste
+    Grenze: ein selbst als Master benutzter Port gehört ab dann zum
+    verwalteten System). Layout: Arm unten LINKS (unter Pitch), Release
+    All unten RECHTS, beide in Pad-Höhe (User-Feedback).
     Grid-MPE-Port als EIGENES Setting (`gridMidiInputName`, Dropdown
     „Grid MPE Port (independent from selection)" neben „MIDI Master
     (follows selection)" in der Sektion „Ableton -

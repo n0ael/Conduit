@@ -250,12 +250,16 @@ TEST_CASE ("GridPanelSettings: Track-Fokus-Routing-Werte Default + Roundtrip", "
         conduit::GridPanelSettings settings (temp.options());
         REQUIRE (settings.getMasterMidiInputName().isEmpty());
         REQUIRE (settings.getGridMidiInputName().isEmpty());
+        REQUIRE (settings.getMasterMidiFavourites().isEmpty());
 
         settings.setMasterMidiInputName ("FromPush");
         settings.setGridMidiInputName ("Conduit Grid MPE");
+        settings.setMasterMidiFavourites ({ "FromPush", "K1 (Port 1)" });
     }
 
     conduit::GridPanelSettings reloaded (temp.options());
     REQUIRE (reloaded.getMasterMidiInputName() == "FromPush");
     REQUIRE (reloaded.getGridMidiInputName() == "Conduit Grid MPE");
+    REQUIRE (reloaded.getMasterMidiFavourites().size() == 2);
+    REQUIRE (reloaded.getMasterMidiFavourites()[1] == "K1 (Port 1)");
 }

@@ -282,9 +282,11 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/PushLookAndFeel.cpp
     Source/UI/PushTiles.cpp
     Source/UI/ScopeDisplay.cpp
+    Source/UI/MasterDeviceSwitch.cpp
     Source/UI/TapMenuPanel.cpp
     Source/UI/TrackFocusBadge.cpp
     Source/UI/TrackSelectorPanel.cpp
+    Source/UI/TrackTabsStrip.cpp
     Source/UI/TransportBar.cpp
     Source/UI/DevPanel.cpp
     Source/UI/SequencerControlPanel.cpp
@@ -852,9 +854,11 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/PushLookAndFeel.cpp
         Source/UI/PushTiles.cpp
         Source/UI/ScopeDisplay.cpp
+        Source/UI/MasterDeviceSwitch.cpp
         Source/UI/TapMenuPanel.cpp
         Source/UI/TrackFocusBadge.cpp
         Source/UI/TrackSelectorPanel.cpp
+        Source/UI/TrackTabsStrip.cpp
         Source/UI/TransportBar.cpp
         Source/UI/DevPanel.cpp
         Source/UI/SequencerControlPanel.cpp

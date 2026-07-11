@@ -140,13 +140,25 @@ private:
     LockToggle  modwheelToggle;
     juce::Label modwheelLabel { {}, "Modwheel-Fader" };
 
-    // Ableton (Block H v2): Don't-Follow-Routing — Master-MIDI-Input
-    // (folgt der Selektion) + Grid-MPE-Port (unabhängig davon).
+    // Ableton (Block H v2): Free-From-Selection-Routing — Master-MIDI-Input
+    // (folgt der Selektion) + Grid-MPE-Port (unabhängig davon). Das „+"
+    // pflegt die Master-Favoriten des Quick-Switch (Block H3, PopupMenu
+    // async aus den input_options, Häkchen = Favorit).
     juce::ComboBox masterInputCombo;
     juce::ComboBox gridInputCombo;
     juce::Label masterInputLabel { {}, "MIDI Master (follows selection)" };
     juce::Label gridInputLabel   { {}, "Grid MPE Port (independent from selection)" };
+    push::TextTile masterFavouritesTile { "+" };
     juce::StringArray masterInputOptions;
+
+    void showMasterFavouritesMenu();
+
+public:
+    /** Master-Favoriten geändert (Block H3) — GridPage aktualisiert den
+        Quick-Switch. */
+    std::function<void()> onMasterFavouritesChanged;
+
+private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GridSettingsView)
 };
