@@ -303,7 +303,7 @@ void GridSettingsView::paint (juce::Graphics& g)
         { expressionHeadingBounds, "Expression" },
         { layoutHeadingBounds,     "Layout" },
         { modwheelHeadingBounds,   "Modwheel" },
-        { abletonHeadingBounds,    "Ableton - Don't-Follow-Selection-Mode" },
+        { abletonHeadingBounds,    "Ableton - Free From Selection" },
     };
 
     for (const auto& [bounds, text] : headings)

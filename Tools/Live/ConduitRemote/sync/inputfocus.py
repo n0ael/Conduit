@@ -164,6 +164,13 @@ class InputFocusService(object):
         self._last_selected_key = self._selected_key()
         self._ensure_listener()
 
+        # Diagnose (Feldtest-Runde 4): einmal pro Fokus ins Live-Log --
+        # zeigt follow/grid/master und ob der Listener gebunden ist.
+        logger.info(
+            "input focus rev4: focus=%s grid=%r master=%r follow=%s listener=%s",
+            self.focus_stable_id(), self._grid_input, self._master_input,
+            self._follow, self._listener_bound)
+
         self._apply_routing()
         self._notify()
 
@@ -233,6 +240,10 @@ class InputFocusService(object):
         if selected_key == self._last_selected_key:
             return   # kein Wechsel (oder Listener war schneller als poll)
         self._last_selected_key = selected_key
+
+        # Diagnose (Feldtest-Runde 4): jeder erkannte Selektionswechsel.
+        logger.info("input focus rev4: selection change -> %s (follow=%s focus=%s)",
+                    selected_key, self._follow, self._focus_key is not None)
 
         # Zustandsbasierter Routing-Pass: raeumt den vorher selektierten
         # Track auf (master -> All Ins + Off, All Ins -> Off) und bewegt
