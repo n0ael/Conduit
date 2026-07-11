@@ -50,6 +50,13 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     addAndMakeVisible (chordStrip);  // eigene Spalte NEBEN Keyboard/ccLayer
     addChildComponent (dockPanel);   // sichtbar nur wenn offen (setPanelOpen)
 
+    // Block J (Physics): Keyboard (Grid-Gravity/Pitch-Schatten) und beide
+    // Control-Layer (Fader/XY-Physics) pollen die Settings live pro Frame
+    // (Toggles im Settings-Tab, Feder-Tuning im Dev-Panel).
+    keyboard.setPanelSettings (&panelSettings);
+    ccLayer.setPanelSettings (&panelSettings);
+    systemLayer.setPanelSettings (&panelSettings);
+
     // Track-Tabs (Block H3): Tap = Fokus-Wechsel, gleicher Command-Weg wie
     // der Long-Press-Selector (EngineEditor ruft ebenfalls sendFocusCommand).
     trackTabs.onTrackChosen = [this] (const juce::String& trackKey)

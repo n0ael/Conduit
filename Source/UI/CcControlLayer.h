@@ -7,6 +7,8 @@
 
 #include "Core/CcControlModel.h"
 #include "Core/FigmaSnap.h"
+#include "Core/GridPanelSettings.h"
+#include "Core/GridPhysics.h"
 
 namespace conduit
 {
@@ -57,6 +59,24 @@ public:
         nennenswerte Bewegung) — der Besitzer oeffnet damit die
         Macro-Ansicht des Controls. */
     std::function<void (int controlId)> onLongPressControl;
+
+    //==========================================================================
+    // Fader/XY-Physics (Block J3, Masterplan): Fader- und XY-Werte folgen
+    // dem Finger über die gemeinsame Feder (grid::SpringParams — Force/
+    // Mass/Inertia aus dem Dev-Panel, live gepollt); Loslassen federt mit
+    // Snap-to-Default optional auf den Default-Wert zurück. Zweifarbige
+    // Anzeige: das ZIEL (Finger bzw. Default) cyan, der IST-Wert (gesendet)
+    // weiß. Push/Toggle bleiben unangetastet (diskrete Controls).
+
+    /** nullptr (Default/Tests) = Physics aus, Original-Verhalten. */
+    void setPanelSettings (const GridPanelSettings* settingsToPoll) noexcept
+    {
+        panelSettings = settingsToPoll;
+    }
+
+    /** Snap-Ziel eines Control-Typs (Default-Werte der CcControl-Felder) —
+        pure, testbar. Liefert {value, x, y}. */
+    [[nodiscard]] static grid::CcControl physicsDefaultsFor (grid::CcTool type) noexcept;
 
     /** MPE-Modus: nur Control-Flächen sind Ziel — freie Flächen fallen zum
         Keyboard durch. CC-Modus: alles wird abgefangen. */
@@ -125,6 +145,34 @@ private:
     int longPressFinger    = -1;
     int longPressControlId = -1;
     juce::Point<float> longPressStart;
+
+    //==========================================================================
+    // Fader/XY-Physics (Block J3): pro Control ein Feder-Zustand je Achse.
+    // Der Timer der Basisklasse gehört dem Long-Press — die Physik tickt
+    // über einen eigenen VBlank-Puls (Rule ui-design: Animationen via
+    // VBlankAttachment).
+
+    struct PhysicsState
+    {
+        grid::SpringState value, x, y;
+        float targetValue = 0.0f, targetX = 0.0f, targetY = 0.0f;
+        bool  grabbed = false;
+    };
+
+    [[nodiscard]] bool physicsEnabled() const noexcept
+    {
+        return panelSettings != nullptr && panelSettings->isControlPhysicsEnabled();
+    }
+    /** Feder-Zustand des Controls holen/anlegen (mit Ist-Werten geseedet). */
+    PhysicsState& physicsFor (const grid::CcControl& control);
+    void physicsTick();
+
+    const GridPanelSettings* panelSettings = nullptr;
+    std::map<int, PhysicsState> physicsStates;   // Control-Id → Feder-Zustand
+    double lastPhysicsTickMs = 0.0;
+
+    // Letzter Member: tickt erst nach vollständiger Konstruktion.
+    juce::VBlankAttachment physicsVBlank { this, [this] { physicsTick(); } };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CcControlLayer)
 };

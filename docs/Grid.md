@@ -360,6 +360,44 @@
     `GridKeyboardComponent::setRootPadColour` + Settings-Toggle
     „Root-Pads in Track-Farbe" (`GridPanelSettings::rootPadTrackColour`,
     Default an; ohne Fokus-Track neutrales padRoot).
+  - **Physics (Block J, 07/2026):** gemeinsamer Feder-Kern
+    `Source/Core/GridPhysics.h` — `SpringParams` (force/mass/inertia01,
+    inertia → Dämpfungsgrad ζ 1.1..0.12, unter 1 = Überschwingen) +
+    `stepSpring` (semi-implizites Euler, interne ≤5-ms-Substeps, stabil
+    bei ausgelassenen Frames; forceScale skaliert NUR die Federkraft,
+    Dämpfung bleibt voll).
+    **J1 Grid-Gravity** (`grid::GridGravity`, Koordinaten in PAD-BREITEN):
+    pro Sonne zieht ein Pad-Magnet den EFFEKTIVEN Pitch-Rohwert (X VOR der
+    Treppen-Kennlinie) auf `anchor + round(touch − anchor)` — Feder mit
+    Überschwingen um den perfekten Pitch. Bewegung über
+    `movementThresholdPadsPerSec` lässt los (Kraft blendet in 80 ms aus),
+    Stillstand > `delayMs` blendet die Kraft über `fadeMs` ein
+    (fade-time-force als Ziel-Überblendung Touch→Magnet). Solange der
+    Magnet nie griff: exakter Bypass (effectiveX == Touch — identisches
+    Spielgefühl wie ohne Gravity). Tick: VBlank im GridKeyboardComponent
+    (Message Thread), Konfiguration pro Frame aus GridPanelSettings
+    gepollt (Muster TrackTabsStrip).
+    **J2 Pitch-Schatten:** Abdunkelung mit weicher Kante (radialer
+    Schwarz-Gradient, Muster fillSoftCircle) an der X-Position des
+    tatsächlich KLINGENDEN Pitch (Rückrechnung Bend →
+    `anchor + bend/semitonesPerPadWidth·padWidth`), unter den Sonnen —
+    wandert mit dem Magneten zum Pad-Zentrum, während die Sonne am Finger
+    bleibt. Nur bei aktivem Gravity gezeichnet.
+    **J3 Fader/XY-Physics** (CcControlLayer, beide Layer System+DIY):
+    Finger setzt nur das ZIEL, der gesendete Wert folgt über die Feder
+    (eigener VBlank-Puls — der Basisklassen-Timer gehört dem Long-Press);
+    Loslassen ohne Snap schwingt am letzten Ziel aus, mit
+    **Snap-to-Default** federt der Wert auf die CcControl-Defaults zurück
+    (Fader 0.75, XY 0.5/0.5, `physicsDefaultsFor`). **Zweifarbige
+    Anzeige:** Ziel cyan (Linie bzw. Geister-Ring), Ist-Wert weiß.
+    Push/Toggle bleiben diskret/unangetastet; CC-Modus friert laufende
+    Federn ein (physicsStates.clear).
+    Settings: Toggles `gridGravityEnabled`/`controlPhysicsEnabled`/
+    `controlSnapToDefault` (Settings-Tab-Sektion „Physics", eine
+    Kachel-Zeile); Feder-Tuning im Dev-Panel (Force/Mass/Inert +
+    Delay/Thresh[Pads/s]/FadeF), alles live gepollt, sofort persistent.
+    Tests: Tests/Core/GridPhysicsTests.cpp (Konvergenz, Überschwingen,
+    Substep-Stabilität, Magnet-Raster, Threshold-Release, Bypass).
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +

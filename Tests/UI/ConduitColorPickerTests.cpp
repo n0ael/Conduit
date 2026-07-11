@@ -273,3 +273,49 @@ TEST_CASE ("GridPanelSettings: Track-Fokus-Routing-Werte Default + Roundtrip", "
     REQUIRE (reloaded.getTrackTabsFontPx() == conduit::GridPanelSettings::maxTrackTabsFontPx);
     REQUIRE (reloaded.getTrackTabMinWidthPx() == 120);
 }
+
+//==============================================================================
+// Block J (Physics): Toggles + Feder-/Gravity-Tuning
+
+TEST_CASE ("GridPanelSettings: Physics-Werte Default + Clamp + Roundtrip", "[gridpanelsettings]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempGridPanelSettings temp;
+
+    {
+        conduit::GridPanelSettings settings (temp.options());
+        REQUIRE_FALSE (settings.isGridGravityEnabled());
+        REQUIRE_FALSE (settings.isControlPhysicsEnabled());
+        REQUIRE_FALSE (settings.isControlSnapToDefault());
+        REQUIRE (settings.getPhysicsForce()
+                 == Approx (conduit::GridPanelSettings::defaultPhysicsForce));
+        REQUIRE (settings.getPhysicsMass()
+                 == Approx (conduit::GridPanelSettings::defaultPhysicsMass));
+        REQUIRE (settings.getPhysicsInertia() == conduit::GridPanelSettings::defaultPhysicsInertia);
+        REQUIRE (settings.getGravityDelayMs() == conduit::GridPanelSettings::defaultGravityDelayMs);
+        REQUIRE (settings.getGravityThreshold()
+                 == Approx (conduit::GridPanelSettings::defaultGravityThreshold));
+        REQUIRE (settings.getGravityFadeMs() == conduit::GridPanelSettings::defaultGravityFadeMs);
+
+        settings.setGridGravityEnabled (true);
+        settings.setControlPhysicsEnabled (true);
+        settings.setControlSnapToDefault (true);
+        settings.setPhysicsForce (999999.0);   // geklemmt auf max
+        settings.setPhysicsMass (2.5);
+        settings.setPhysicsInertia (-5);       // geklemmt auf min
+        settings.setGravityDelayMs (300);
+        settings.setGravityThreshold (1.25);
+        settings.setGravityFadeMs (500);
+    }
+
+    conduit::GridPanelSettings reloaded (temp.options());
+    REQUIRE (reloaded.isGridGravityEnabled());
+    REQUIRE (reloaded.isControlPhysicsEnabled());
+    REQUIRE (reloaded.isControlSnapToDefault());
+    REQUIRE (reloaded.getPhysicsForce() == Approx (conduit::GridPanelSettings::maxPhysicsForce));
+    REQUIRE (reloaded.getPhysicsMass() == Approx (2.5));
+    REQUIRE (reloaded.getPhysicsInertia() == conduit::GridPanelSettings::minPhysicsInertia);
+    REQUIRE (reloaded.getGravityDelayMs() == 300);
+    REQUIRE (reloaded.getGravityThreshold() == Approx (1.25));
+    REQUIRE (reloaded.getGravityFadeMs() == 500);
+}

@@ -66,6 +66,9 @@ GridSettingsView::GridSettingsView (juce::ValueTree rootStateToUse, grid::MidiDe
     addAndMakeVisible (trackTabsFontField);
     addAndMakeVisible (rootColourToggle);
     addAndMakeVisible (rootColourLabel);
+    addAndMakeVisible (gravityTile);
+    addAndMakeVisible (controlPhysicsTile);
+    addAndMakeVisible (snapDefaultTile);
 
     rootColourLabel.setJustificationType (juce::Justification::centredLeft);
     rootColourLabel.setColour (juce::Label::textColourId, push::colours::textDim);
@@ -235,6 +238,30 @@ GridSettingsView::GridSettingsView (juce::ValueTree rootStateToUse, grid::MidiDe
 
         if (onRootColourToggled != nullptr)
             onRootColourToggled();
+    };
+
+    // Block J (Physics): unabhängige Toggle-Kacheln — nur persistieren,
+    // Keyboard/Control-Layer pollen die Settings live (keine Callbacks).
+    gravityTile.setActive (panelSettings.isGridGravityEnabled());
+    gravityTile.onClick = [this]
+    {
+        const auto enable = ! gravityTile.isActive();
+        gravityTile.setActive (enable);
+        panelSettings.setGridGravityEnabled (enable);
+    };
+    controlPhysicsTile.setActive (panelSettings.isControlPhysicsEnabled());
+    controlPhysicsTile.onClick = [this]
+    {
+        const auto enable = ! controlPhysicsTile.isActive();
+        controlPhysicsTile.setActive (enable);
+        panelSettings.setControlPhysicsEnabled (enable);
+    };
+    snapDefaultTile.setActive (panelSettings.isControlSnapToDefault());
+    snapDefaultTile.onClick = [this]
+    {
+        const auto enable = ! snapDefaultTile.isActive();
+        snapDefaultTile.setActive (enable);
+        panelSettings.setControlSnapToDefault (enable);
     };
 
     modwheelToggle.setActive (panelSettings.isModwheelEnabled());
@@ -445,6 +472,7 @@ void GridSettingsView::paint (juce::Graphics& g)
         { modwheelHeadingBounds,   "Modwheel" },
         { abletonHeadingBounds,    "Ableton - Free From Selection" },
         { trackTabsHeadingBounds,  "Track Select" },
+        { physicsHeadingBounds,    "Physics" },
     };
 
     for (const auto& [bounds, text] : headings)
@@ -533,6 +561,17 @@ void GridSettingsView::resized()
     auto rootColourRow = area.removeFromTop (juce::jmax (LockToggle::kComponentSize, kRowHeight));
     rootColourToggle.setBounds (rootColourRow.removeFromLeft (LockToggle::kComponentSize));
     rootColourLabel.setBounds (rootColourRow.reduced (8, 0));
+    area.removeFromTop (kSectionGap);
+
+    // Block J (Physics): Gravity / Fader-Physik / Snap in einer Zeile.
+    physicsHeadingBounds = area.removeFromTop (kHeadingHeight);
+    auto physicsRow = area.removeFromTop (kRowHeight);
+    const auto physicsTileWidth = (physicsRow.getWidth() - kTileGap * 2) / 3;
+    gravityTile.setBounds (physicsRow.removeFromLeft (physicsTileWidth));
+    physicsRow.removeFromLeft (kTileGap);
+    controlPhysicsTile.setBounds (physicsRow.removeFromLeft (physicsTileWidth));
+    physicsRow.removeFromLeft (kTileGap);
+    snapDefaultTile.setBounds (physicsRow);
 }
 
 } // namespace conduit

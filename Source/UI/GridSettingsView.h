@@ -118,7 +118,8 @@ private:
     // Layout- und Zeichen-Code (Muster MpeShapingView::AxisSection).
     juce::Rectangle<int> pitchHeadingBounds, expressionHeadingBounds,
                          layoutHeadingBounds, modwheelHeadingBounds,
-                         abletonHeadingBounds, trackTabsHeadingBounds;
+                         abletonHeadingBounds, trackTabsHeadingBounds,
+                         physicsHeadingBounds;
 
     juce::ValueTree rootState;
     grid::MidiDeviceTarget& midiTarget;
@@ -174,6 +175,15 @@ private:
     // Block I: Root-Pads in Track-Farbe (wie Push).
     LockToggle  rootColourToggle;
     juce::Label rootColourLabel { {}, "Root-Pads in Track-Farbe" };
+
+    // Block J (Physics): drei unabhängige Toggle-Kacheln in einer Zeile —
+    // Grid-Gravity (J1), Fader/XY-Physics (J3), Snap-to-Default (J3).
+    // Feder-Tuning (Force/Mass/…) lebt im Dev-Panel; die Konsumenten
+    // (Keyboard/Control-Layer) pollen die Settings live, daher hier keine
+    // Callbacks nötig.
+    push::TextTile gravityTile        { "Gravity" };
+    push::TextTile controlPhysicsTile { "Fader/XY" };   // schmale Kachel: kurz statt gestaucht (User-Regel)
+    push::TextTile snapDefaultTile    { "Snap" };
 
     void showMasterFavouritesMenu();
 

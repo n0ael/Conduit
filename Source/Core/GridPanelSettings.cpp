@@ -22,6 +22,15 @@ namespace
     constexpr const char* trackTabsFontPxKey      = "trackTabsFontPx";
     constexpr const char* trackTabMinWidthPxKey   = "trackTabMinWidthPx";
     constexpr const char* rootPadTrackColourKey   = "rootPadTrackColour";
+    constexpr const char* gridGravityEnabledKey   = "gridGravityEnabled";
+    constexpr const char* physicsForceKey         = "physicsForce";
+    constexpr const char* physicsMassKey          = "physicsMass";
+    constexpr const char* physicsInertiaKey       = "physicsInertia";
+    constexpr const char* gravityDelayMsKey       = "gravityDelayMs";
+    constexpr const char* gravityThresholdKey     = "gravityThresholdPadsPerSec";
+    constexpr const char* gravityFadeMsKey        = "gravityForceFadeMs";
+    constexpr const char* controlPhysicsEnabledKey = "controlPhysicsEnabled";
+    constexpr const char* controlSnapToDefaultKey  = "controlSnapToDefault";
 
     // Achsen-Farben (Grid-Page v2) — Index = GridPanelSettings::axisIndex
     // (Pressure 0, Slide 1, PitchBend 2).
@@ -96,6 +105,22 @@ void GridPanelSettings::loadFromFile()
         trackTabMinWidthPx = juce::jlimit (minTrackTabMinWidthPx, maxTrackTabMinWidthPx,
             file->getIntValue (trackTabMinWidthPxKey, defaultTrackTabMinWidthPx));
         rootPadTrackColour = file->getBoolValue (rootPadTrackColourKey, true);
+
+        gridGravityEnabled = file->getBoolValue (gridGravityEnabledKey, false);
+        physicsForce = juce::jlimit (minPhysicsForce, maxPhysicsForce,
+            file->getDoubleValue (physicsForceKey, defaultPhysicsForce));
+        physicsMass = juce::jlimit (minPhysicsMass, maxPhysicsMass,
+            file->getDoubleValue (physicsMassKey, defaultPhysicsMass));
+        physicsInertia = juce::jlimit (minPhysicsInertia, maxPhysicsInertia,
+            file->getIntValue (physicsInertiaKey, defaultPhysicsInertia));
+        gravityDelayMs = juce::jlimit (minGravityDelayMs, maxGravityDelayMs,
+            file->getIntValue (gravityDelayMsKey, defaultGravityDelayMs));
+        gravityThreshold = juce::jlimit (minGravityThreshold, maxGravityThreshold,
+            file->getDoubleValue (gravityThresholdKey, defaultGravityThreshold));
+        gravityFadeMs = juce::jlimit (minGravityFadeMs, maxGravityFadeMs,
+            file->getIntValue (gravityFadeMsKey, defaultGravityFadeMs));
+        controlPhysicsEnabled = file->getBoolValue (controlPhysicsEnabledKey, false);
+        controlSnapToDefault  = file->getBoolValue (controlSnapToDefaultKey, false);
 
         for (size_t i = 0; i < axisColours.size(); ++i)
         {
@@ -326,6 +351,147 @@ void GridPanelSettings::setRootPadTrackColour (bool shouldUseTrackColour)
     if (auto* file = applicationProperties.getUserSettings())
     {
         file->setValue (rootPadTrackColourKey, rootPadTrackColour);
+        file->saveIfNeeded();
+    }
+}
+
+//==============================================================================
+// Block J (Physics): Toggles + Feder-/Gravity-Tuning.
+
+void GridPanelSettings::setGridGravityEnabled (bool shouldBeEnabled)
+{
+    if (shouldBeEnabled == gridGravityEnabled)
+        return;
+
+    gridGravityEnabled = shouldBeEnabled;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (gridGravityEnabledKey, gridGravityEnabled);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setPhysicsForce (double newForce)
+{
+    const auto clamped = juce::jlimit (minPhysicsForce, maxPhysicsForce, newForce);
+
+    if (juce::exactlyEqual (clamped, physicsForce))
+        return;
+
+    physicsForce = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (physicsForceKey, physicsForce);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setPhysicsMass (double newMass)
+{
+    const auto clamped = juce::jlimit (minPhysicsMass, maxPhysicsMass, newMass);
+
+    if (juce::exactlyEqual (clamped, physicsMass))
+        return;
+
+    physicsMass = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (physicsMassKey, physicsMass);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setPhysicsInertia (int newInertia)
+{
+    const auto clamped = juce::jlimit (minPhysicsInertia, maxPhysicsInertia, newInertia);
+
+    if (clamped == physicsInertia)
+        return;
+
+    physicsInertia = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (physicsInertiaKey, physicsInertia);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setGravityDelayMs (int newDelayMs)
+{
+    const auto clamped = juce::jlimit (minGravityDelayMs, maxGravityDelayMs, newDelayMs);
+
+    if (clamped == gravityDelayMs)
+        return;
+
+    gravityDelayMs = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (gravityDelayMsKey, gravityDelayMs);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setGravityThreshold (double newThreshold)
+{
+    const auto clamped = juce::jlimit (minGravityThreshold, maxGravityThreshold, newThreshold);
+
+    if (juce::exactlyEqual (clamped, gravityThreshold))
+        return;
+
+    gravityThreshold = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (gravityThresholdKey, gravityThreshold);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setGravityFadeMs (int newFadeMs)
+{
+    const auto clamped = juce::jlimit (minGravityFadeMs, maxGravityFadeMs, newFadeMs);
+
+    if (clamped == gravityFadeMs)
+        return;
+
+    gravityFadeMs = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (gravityFadeMsKey, gravityFadeMs);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setControlPhysicsEnabled (bool shouldBeEnabled)
+{
+    if (shouldBeEnabled == controlPhysicsEnabled)
+        return;
+
+    controlPhysicsEnabled = shouldBeEnabled;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (controlPhysicsEnabledKey, controlPhysicsEnabled);
+        file->saveIfNeeded();
+    }
+}
+
+void GridPanelSettings::setControlSnapToDefault (bool shouldSnap)
+{
+    if (shouldSnap == controlSnapToDefault)
+        return;
+
+    controlSnapToDefault = shouldSnap;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (controlSnapToDefaultKey, controlSnapToDefault);
         file->saveIfNeeded();
     }
 }

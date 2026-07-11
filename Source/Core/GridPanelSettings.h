@@ -161,6 +161,76 @@ public:
     [[nodiscard]] bool isRootPadTrackColour() const noexcept { return rootPadTrackColour; }
     void setRootPadTrackColour (bool shouldUseTrackColour);
 
+    //==========================================================================
+    // Block J (Physics, Masterplan): Grid-Gravity (J1) + Fader/XY-Physics
+    // (J3). Force/Mass/Inertia sind der GEMEINSAME Feder-Parametersatz
+    // beider Features (grid::SpringParams); Delay/Threshold/Fade sind
+    // Gravity-spezifisch. Toggles im Settings-Tab, Tuning im Dev-Panel
+    // (live gepollt, Muster TrackTabsStrip).
+
+    static constexpr double defaultPhysicsForce = 400.0;
+    static constexpr double minPhysicsForce     = 10.0;
+    static constexpr double maxPhysicsForce     = 3000.0;
+
+    static constexpr double defaultPhysicsMass = 1.0;
+    static constexpr double minPhysicsMass     = 0.1;
+    static constexpr double maxPhysicsMass     = 10.0;
+
+    static constexpr int defaultPhysicsInertia = 40;   // 0..100 %
+    static constexpr int minPhysicsInertia     = 0;
+    static constexpr int maxPhysicsInertia     = 100;
+
+    static constexpr int defaultGravityDelayMs = 150;
+    static constexpr int minGravityDelayMs     = 0;
+    static constexpr int maxGravityDelayMs     = 1000;
+
+    static constexpr double defaultGravityThreshold = 0.5;   // Pad-Breiten/s
+    static constexpr double minGravityThreshold     = 0.05;
+    static constexpr double maxGravityThreshold     = 10.0;
+
+    static constexpr int defaultGravityFadeMs = 250;
+    static constexpr int minGravityFadeMs     = 0;
+    static constexpr int maxGravityFadeMs     = 2000;
+
+    /** Grid-Gravity global an/aus (J1) — der Pad-Magnet zieht liegende
+        Finger auf den perfekten Pitch (Feder mit Überschwingen). */
+    [[nodiscard]] bool isGridGravityEnabled() const noexcept { return gridGravityEnabled; }
+    void setGridGravityEnabled (bool shouldBeEnabled);
+
+    /** Federkonstante des Physics-Kerns (gemeinsam J1/J3). */
+    [[nodiscard]] double getPhysicsForce() const noexcept { return physicsForce; }
+    void setPhysicsForce (double newForce);
+
+    /** Träge Masse des Physics-Kerns (gemeinsam J1/J3). */
+    [[nodiscard]] double getPhysicsMass() const noexcept { return physicsMass; }
+    void setPhysicsMass (double newMass);
+
+    /** Nachschwing-Anteil 0..100 (0 = kriecht, 100 = federt lange). */
+    [[nodiscard]] int getPhysicsInertia() const noexcept { return physicsInertia; }
+    void setPhysicsInertia (int newInertia);
+
+    /** Stillstands-Verzögerung, bis der Pad-Magnet greift (J1). */
+    [[nodiscard]] int getGravityDelayMs() const noexcept { return gravityDelayMs; }
+    void setGravityDelayMs (int newDelayMs);
+
+    /** Bewegungsschwelle in Pad-Breiten/s — darüber lässt der Magnet los. */
+    [[nodiscard]] double getGravityThreshold() const noexcept { return gravityThreshold; }
+    void setGravityThreshold (double newThreshold);
+
+    /** Kraft-Einblendzeit des Magneten (fade-time-force, J1). */
+    [[nodiscard]] int getGravityFadeMs() const noexcept { return gravityFadeMs; }
+    void setGravityFadeMs (int newFadeMs);
+
+    /** Fader/XY-Physics an/aus (J3): Control-Werte folgen dem Finger über
+        die Feder (zweifarbige Anzeige: Ziel cyan, Ist weiß). */
+    [[nodiscard]] bool isControlPhysicsEnabled() const noexcept { return controlPhysicsEnabled; }
+    void setControlPhysicsEnabled (bool shouldBeEnabled);
+
+    /** Snap-to-Default (J3): Loslassen federt Fader/XY auf den Default-Wert
+        zurück (nur wirksam mit Fader/XY-Physics). */
+    [[nodiscard]] bool isControlSnapToDefault() const noexcept { return controlSnapToDefault; }
+    void setControlSnapToDefault (bool shouldSnap);
+
 private:
     void loadFromFile();
 
@@ -187,6 +257,16 @@ private:
     int  trackTabsFontPx = defaultTrackTabsFontPx;
     int  trackTabMinWidthPx = defaultTrackTabMinWidthPx;
     bool rootPadTrackColour = true;
+
+    bool   gridGravityEnabled    = false;
+    double physicsForce          = defaultPhysicsForce;
+    double physicsMass           = defaultPhysicsMass;
+    int    physicsInertia        = defaultPhysicsInertia;
+    int    gravityDelayMs        = defaultGravityDelayMs;
+    double gravityThreshold      = defaultGravityThreshold;
+    int    gravityFadeMs         = defaultGravityFadeMs;
+    bool   controlPhysicsEnabled = false;
+    bool   controlSnapToDefault  = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GridPanelSettings)
 };

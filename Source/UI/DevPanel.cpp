@@ -23,9 +23,19 @@ namespace
             addAndMakeVisible (thresholdField);
             addAndMakeVisible (fadeField);
             addAndMakeVisible (tabMinWidthField);
+            addAndMakeVisible (physicsHeading);
+            addAndMakeVisible (forceField);
+            addAndMakeVisible (massField);
+            addAndMakeVisible (inertiaField);
+            addAndMakeVisible (gravityDelayField);
+            addAndMakeVisible (gravityThresholdField);
+            addAndMakeVisible (gravityFadeField);
 
-            gridHeading.setColour (juce::Label::textColourId, push::colours::textDim);
-            gridHeading.setFont (push::scaledFont (12.0f, true));
+            for (auto* heading : { &gridHeading, &physicsHeading })
+            {
+                heading->setColour (juce::Label::textColourId, push::colours::textDim);
+                heading->setFont (push::scaledFont (12.0f, true));
+            }
 
             thresholdField.setValue (gridPanelSettings.getEditorThresholdWidth(), juce::dontSendNotification);
             thresholdField.onValueChanged = [this] (double v)
@@ -41,6 +51,32 @@ namespace
                                        juce::dontSendNotification);
             tabMinWidthField.onValueChanged = [this] (double v)
             { gridPanelSettings.setTrackTabMinWidthPx ((int) v); };
+
+            // Block J (Physics): Feder-Tuning — Keyboard/Control-Layer
+            // pollen die Settings live, jede Änderung wirkt sofort.
+            forceField.setValue (gridPanelSettings.getPhysicsForce(), juce::dontSendNotification);
+            forceField.onValueChanged = [this] (double v)
+            { gridPanelSettings.setPhysicsForce (v); };
+
+            massField.setValue (gridPanelSettings.getPhysicsMass(), juce::dontSendNotification);
+            massField.onValueChanged = [this] (double v)
+            { gridPanelSettings.setPhysicsMass (v); };
+
+            inertiaField.setValue (gridPanelSettings.getPhysicsInertia(), juce::dontSendNotification);
+            inertiaField.onValueChanged = [this] (double v)
+            { gridPanelSettings.setPhysicsInertia ((int) v); };
+
+            gravityDelayField.setValue (gridPanelSettings.getGravityDelayMs(), juce::dontSendNotification);
+            gravityDelayField.onValueChanged = [this] (double v)
+            { gridPanelSettings.setGravityDelayMs ((int) v); };
+
+            gravityThresholdField.setValue (gridPanelSettings.getGravityThreshold(), juce::dontSendNotification);
+            gravityThresholdField.onValueChanged = [this] (double v)
+            { gridPanelSettings.setGravityThreshold (v); };
+
+            gravityFadeField.setValue (gridPanelSettings.getGravityFadeMs(), juce::dontSendNotification);
+            gravityFadeField.onValueChanged = [this] (double v)
+            { gridPanelSettings.setGravityFadeMs ((int) v); };
         }
 
         void resized() override
@@ -52,11 +88,19 @@ namespace
             thresholdField.setBounds (area.removeFromTop (NumberFieldBracket::kRowHeight).reduced (8, 0));
             fadeField.setBounds (area.removeFromTop (NumberFieldBracket::kRowHeight).reduced (8, 0));
             tabMinWidthField.setBounds (area.removeFromTop (NumberFieldBracket::kRowHeight).reduced (8, 0));
+
+            physicsHeading.setBounds (area.removeFromTop (24).reduced (8, 0));
+            forceField.setBounds (area.removeFromTop (NumberFieldBracket::kRowHeight).reduced (8, 0));
+            massField.setBounds (area.removeFromTop (NumberFieldBracket::kRowHeight).reduced (8, 0));
+            inertiaField.setBounds (area.removeFromTop (NumberFieldBracket::kRowHeight).reduced (8, 0));
+            gravityDelayField.setBounds (area.removeFromTop (NumberFieldBracket::kRowHeight).reduced (8, 0));
+            gravityThresholdField.setBounds (area.removeFromTop (NumberFieldBracket::kRowHeight).reduced (8, 0));
+            gravityFadeField.setBounds (area.removeFromTop (NumberFieldBracket::kRowHeight).reduced (8, 0));
         }
 
         [[nodiscard]] static int preferredHeight() noexcept
         {
-            return UiSettingsComponent::preferredHeight() + 24 + NumberFieldBracket::kRowHeight * 3;
+            return UiSettingsComponent::preferredHeight() + 24 * 2 + NumberFieldBracket::kRowHeight * 9;
         }
 
     private:
@@ -72,6 +116,28 @@ namespace
         NumberFieldBracket tabMinWidthField { NumberFieldBracket::Config {
             (double) GridPanelSettings::minTrackTabMinWidthPx, (double) GridPanelSettings::maxTrackTabMinWidthPx,
             (double) GridPanelSettings::defaultTrackTabMinWidthPx, 1.0, 0, 1.0, "TabW" } };
+
+        // Block J (Physics): gemeinsamer Feder-Parametersatz (Force/Mass/
+        // Inert) + Gravity-Timing (Delay/Thresh in Pad-Breiten/s/FadeF).
+        juce::Label physicsHeading { {}, "Physics" };
+        NumberFieldBracket forceField { NumberFieldBracket::Config {
+            GridPanelSettings::minPhysicsForce, GridPanelSettings::maxPhysicsForce,
+            GridPanelSettings::defaultPhysicsForce, 1.0, 0, 5.0, "Force" } };
+        NumberFieldBracket massField { NumberFieldBracket::Config {
+            GridPanelSettings::minPhysicsMass, GridPanelSettings::maxPhysicsMass,
+            GridPanelSettings::defaultPhysicsMass, 0.1, 1, 0.02, "Mass" } };
+        NumberFieldBracket inertiaField { NumberFieldBracket::Config {
+            (double) GridPanelSettings::minPhysicsInertia, (double) GridPanelSettings::maxPhysicsInertia,
+            (double) GridPanelSettings::defaultPhysicsInertia, 1.0, 0, 0.5, "Inert" } };
+        NumberFieldBracket gravityDelayField { NumberFieldBracket::Config {
+            (double) GridPanelSettings::minGravityDelayMs, (double) GridPanelSettings::maxGravityDelayMs,
+            (double) GridPanelSettings::defaultGravityDelayMs, 1.0, 0, 2.0, "Delay" } };
+        NumberFieldBracket gravityThresholdField { NumberFieldBracket::Config {
+            GridPanelSettings::minGravityThreshold, GridPanelSettings::maxGravityThreshold,
+            GridPanelSettings::defaultGravityThreshold, 0.05, 2, 0.02, "Thresh" } };
+        NumberFieldBracket gravityFadeField { NumberFieldBracket::Config {
+            (double) GridPanelSettings::minGravityFadeMs, (double) GridPanelSettings::maxGravityFadeMs,
+            (double) GridPanelSettings::defaultGravityFadeMs, 1.0, 0, 3.0, "FadeF" } };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DevPanelContent)
     };

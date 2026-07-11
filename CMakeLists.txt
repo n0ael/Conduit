@@ -104,6 +104,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/GraphFader.cpp
     Source/Core/GraphManager.cpp
     Source/Core/GridPanelSettings.cpp
+    Source/Core/GridPhysics.cpp
     Source/Core/GridVoiceEngine.cpp
     Source/Core/InputLinkSend.cpp
     Source/Core/LinkClock.cpp
@@ -593,6 +594,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/GraphFaderTests.cpp
         Tests/Core/NamedIdTests.cpp
         Tests/Core/GraphManagerTests.cpp
+        Tests/Core/GridPhysicsTests.cpp
         Tests/Core/GridVoiceEngineTests.cpp
         Tests/Core/PadGridLayoutTests.cpp
         Tests/Core/RingTouchModelTests.cpp
@@ -677,6 +679,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/GraphFader.cpp
         Source/Core/GraphManager.cpp
         Source/Core/GridPanelSettings.cpp
+        Source/Core/GridPhysics.cpp
         Source/Core/GridVoiceEngine.cpp
         Source/Core/InputLinkSend.cpp
         Source/Core/LinkClock.cpp

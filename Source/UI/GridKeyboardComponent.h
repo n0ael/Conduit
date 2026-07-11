@@ -7,6 +7,8 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Core/ChordMemory.h"
+#include "Core/GridPanelSettings.h"
+#include "Core/GridPhysics.h"
 #include "Core/GridVoiceEngine.h"
 #include "Core/PadGridLayout.h"
 #include "Core/RingTouchModel.h"
@@ -139,6 +141,21 @@ public:
         „Root in Track-Farbe" an ist (wie Push). */
     void setRootPadColour (juce::Colour newColour) noexcept;
 
+    //==========================================================================
+    // Grid-Gravity (Block J1) + Pitch-Schatten (J2): Pad-Magnet zieht den
+    // Pitch-Rohwert liegender Finger VOR der Treppen-Kennlinie auf den
+    // nächstgelegenen perfekten Pitch (grid::GridGravity, Feder mit
+    // Überschwingen); der Schatten (Abdunkelung + weiche Kante) markiert
+    // die X-Position des tatsächlich KLINGENDEN Pitch. Konfiguration wird
+    // pro VBlank-Frame live aus den GridPanelSettings gepollt (Muster
+    // TrackTabsStrip — Toggle im Settings-Tab, Tuning im Dev-Panel).
+
+    /** nullptr (Default/Tests) = Gravity aus, keine Schatten. */
+    void setPanelSettings (const GridPanelSettings* settingsToPoll) noexcept
+    {
+        panelSettings = settingsToPoll;
+    }
+
 private:
     struct FingerState
     {
@@ -146,6 +163,8 @@ private:
         float startNormY  = 0.0f;
         float anchorNormX = 0.0f;   // In-Tune-Anker (Block B1): Pad-Zentrum
                                     // (pad-Modus) oder Aufsetzpunkt (finger)
+        float currentNormX = 0.0f;  // letzte Touch-Position (Block J: Gravity-
+        float currentNormY = 0.0f;  // Tick + Pitch-Schatten)
     };
 
     /** Latched Sonne (Akkord-Abruf): Pixel-Positionen wie die Live-Kreise,
@@ -197,6 +216,24 @@ private:
     // Block I: Root-Pad-Farbe (padRoot oder Fokus-Track-Farbe) — gesetzt im
     // Ctor (padBaseColour bleibt die pure Referenz für die Grau-Stufen).
     juce::Colour rootPadColour;
+
+    // Block J1/J2: Gravity-Simulation + Settings-Poll (Message-Thread-Puls
+    // via VBlank, Masterplan "Message-Thread-Timer").
+    void gravityTick();
+    [[nodiscard]] bool gravityEnabled() const noexcept
+    {
+        return panelSettings != nullptr && panelSettings->isGridGravityEnabled();
+    }
+    /** Effektiver Pitch-Rohwert (normX) eines Fingers — Touch-X, solange
+        der Magnet nicht greift oder Gravity aus ist. */
+    [[nodiscard]] float effectiveNormX (int fingerId, float touchNormX) const noexcept;
+
+    grid::GridGravity gravity;
+    const GridPanelSettings* panelSettings = nullptr;
+    double lastGravityTickMs = 0.0;
+
+    // Letzter Member: tickt erst nach vollständiger Konstruktion.
+    juce::VBlankAttachment gravityVBlank { this, [this] { gravityTick(); } };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GridKeyboardComponent)
 };

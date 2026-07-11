@@ -130,7 +130,12 @@ void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
                              ? layout.padCentreNormX (pad)
                              : pos.x;
 
-    fingers[fingerId] = { pos.x, pos.y, anchorX };
+    fingers[fingerId] = { pos.x, pos.y, anchorX, pos.x, pos.y };
+
+    // Block J1: Finger beim Magneten registrieren (Pad-Einheiten) — auch
+    // bei ausgeschaltetem Gravity (billige Map-Pflege; getickt wird nur,
+    // wenn das Settings-Toggle an ist).
+    gravity.onDown (fingerId, pos.x * (float) layout.cols(), anchorX * (float) layout.cols());
 
     // MPE-Member-Kanäle sind gepoolt (VoiceAllocator) und behalten Bend/
     // Pressure vom LETZTEN Voice-Nutzer, bis die neue Note etwas Eigenes
@@ -163,9 +168,17 @@ void GridKeyboardComponent::mouseDrag (const juce::MouseEvent& event)
         return;
 
     const auto pos = normalisedPosition (event);
+    it->second.currentNormX = pos.x;
+    it->second.currentNormY = pos.y;
+
+    // Block J1: Bewegung an den Magneten melden (Threshold-Messung); der
+    // gesendete Bend nutzt den EFFEKTIVEN Rohwert — exakt der Touch-Wert,
+    // solange der Magnet nicht greift (verlustfreier Bypass).
+    gravity.onMove (fingerId, pos.x * (float) layout.cols());
 
     engine.setPitchBend (static_cast<uint32_t> (fingerId),
-                          layout.pitchBendFromAnchor (it->second.anchorNormX, pos.x));
+                          layout.pitchBendFromAnchor (it->second.anchorNormX,
+                                                      effectiveNormX (fingerId, pos.x)));
     engine.setPressure (static_cast<uint32_t> (fingerId),
                          layout.expressionFromDrag (it->second.startNormY, pos.y));
     repaint();
@@ -189,6 +202,7 @@ void GridKeyboardComponent::mouseUp (const juce::MouseEvent& event)
     if (upResult.wasPrimary)
     {
         fingers.erase (fingerId);
+        gravity.onUp (fingerId);
         engine.noteOff (static_cast<uint32_t> (upResult.primaryFinger), 0);
         repaint();
     }
@@ -397,6 +411,36 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
         }
     }
 
+    // Pitch-Schatten (Block J2): Abdunkelung mit weicher Kante (radialer
+    // Alpha-Gradient statt Live-Blur, Muster fillSoftCircle) an der
+    // X-Position des tatsächlich KLINGENDEN Pitch — wandert mit dem
+    // Pad-Magneten (J1) zum Pad-Zentrum, während die Sonne am Finger
+    // bleibt. UNTER den Sonnen gezeichnet.
+    if (gravityEnabled())
+    {
+        const auto padWidthNorm = 1.0f / (float) cols;
+
+        for (const auto& [fingerId, state] : fingers)
+        {
+            const auto bend = layout.pitchBendFromAnchor (state.anchorNormX,
+                                                          effectiveNormX (fingerId, state.currentNormX));
+            const auto shadowNormX = state.anchorNormX
+                                     + bend / layout.semitonesPerPadWidth() * padWidthNorm;
+
+            const juce::Point<float> shadowCentre { shadowNormX * bounds.getWidth(),
+                                                    state.currentNormY * bounds.getHeight() };
+            const auto shadowRadius = padWidth * 0.55f;
+
+            juce::ColourGradient shadow (juce::Colours::black.withAlpha (0.45f),
+                                         shadowCentre.x, shadowCentre.y,
+                                         juce::Colours::black.withAlpha (0.0f),
+                                         shadowCentre.x + shadowRadius, shadowCentre.y, true);
+            g.setGradientFill (shadow);
+            g.fillEllipse (juce::Rectangle<float> (shadowRadius * 2.0f, shadowRadius * 2.0f)
+                               .withCentre (shadowCentre));
+        }
+    }
+
     const auto sunDiameter  = ring.restRadiusPx() * 2.0f;
     const auto moonDiameter = sunDiameter * 0.6f; // 60% der Sonnengröße (User 06.07.2026)
 
@@ -448,6 +492,59 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
             fillSoftCircle (sun.centre + sun.orbitOffset, moonDiameter, 2.0f);
         }
     }
+}
+
+//==============================================================================
+// Grid-Gravity (Block J1) + Pitch-Schatten (J2)
+
+float GridKeyboardComponent::effectiveNormX (int fingerId, float touchNormX) const noexcept
+{
+    if (! gravityEnabled())
+        return touchNormX;
+
+    const auto cols = (float) layout.cols();
+    return gravity.effectiveX (fingerId, touchNormX * cols) / cols;
+}
+
+void GridKeyboardComponent::gravityTick()
+{
+    if (! gravityEnabled())
+    {
+        lastGravityTickMs = 0.0;
+        return;
+    }
+
+    // Konfiguration live aus den Settings (Dev-Panel-Tuning wirkt sofort,
+    // Muster TrackTabsStrip-Poll).
+    grid::GridGravity::Config config;
+    config.spring.force     = (float) panelSettings->getPhysicsForce();
+    config.spring.mass      = (float) panelSettings->getPhysicsMass();
+    config.spring.inertia01 = (float) panelSettings->getPhysicsInertia() / 100.0f;
+    config.delayMs          = panelSettings->getGravityDelayMs();
+    config.movementThresholdPadsPerSec = (float) panelSettings->getGravityThreshold();
+    config.fadeMs           = panelSettings->getGravityFadeMs();
+    gravity.setConfig (config);
+
+    const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+    const auto dtSeconds = lastGravityTickMs > 0.0
+                               ? (float) ((nowMs - lastGravityTickMs) / 1000.0)
+                               : 0.0f;
+    lastGravityTickMs = nowMs;
+
+    if (dtSeconds <= 0.0f || ! gravity.hasFingers())
+        return;
+
+    if (! gravity.tick (juce::jmin (dtSeconds, 0.1f)))
+        return;
+
+    // Effektive Rohwerte in Bends übersetzen — derselbe Pfad wie mouseDrag,
+    // nur mit dem Magnet-Anteil (VOR der Treppen-Kennlinie, Masterplan J1).
+    for (const auto& [fingerId, state] : fingers)
+        engine.setPitchBend (static_cast<uint32_t> (fingerId),
+                              layout.pitchBendFromAnchor (state.anchorNormX,
+                                                          effectiveNormX (fingerId, state.currentNormX)));
+
+    repaint();
 }
 
 //==============================================================================

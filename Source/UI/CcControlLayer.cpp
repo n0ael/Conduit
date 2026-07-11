@@ -58,6 +58,10 @@ void CcControlLayer::setCcMode (bool shouldEdit)
     movingId   = -1;
     editFinger = -1;
 
+    // Fader/XY-Physics (Block J3): laufende Federn einfrieren — die Werte
+    // bleiben stehen, wo die Animation gerade war.
+    physicsStates.clear();
+
     ccMode = shouldEdit;
     repaint();
 }
@@ -358,6 +362,28 @@ void CcControlLayer::handlePlayUp (const juce::MouseEvent& event)
         notifyValueChanged (*control);
     }
 
+    // Fader/XY-Physics (Block J3): Loslassen gibt die Feder frei — mit
+    // Snap-to-Default federt der Wert auf den Default zurück, sonst
+    // schwingt er am letzten Ziel aus.
+    if (auto* control = model.find (it->second);
+        control != nullptr && physicsEnabled()
+        && (control->type == grid::CcTool::fader || control->type == grid::CcTool::xy))
+    {
+        const auto physicsIt = physicsStates.find (control->id);
+        if (physicsIt != physicsStates.end())
+        {
+            physicsIt->second.grabbed = false;
+
+            if (panelSettings->isControlSnapToDefault())
+            {
+                const auto defaults = physicsDefaultsFor (control->type);
+                physicsIt->second.targetValue = defaults.value;
+                physicsIt->second.targetX = defaults.x;
+                physicsIt->second.targetY = defaults.y;
+            }
+        }
+    }
+
     grabbedControls.erase (it);
     repaint();
 }
@@ -388,8 +414,21 @@ void CcControlLayer::applyPlayGesture (grid::CcControl& control,
         case grid::CcTool::fader:
             if (rect.getHeight() > 0.0f)
             {
-                control.value = juce::jlimit (0.0f, 1.0f,
-                                              (rect.getBottom() - position.y) / rect.getHeight());
+                const auto raw = juce::jlimit (0.0f, 1.0f,
+                                               (rect.getBottom() - position.y) / rect.getHeight());
+
+                // Fader/XY-Physics (Block J3): der Finger setzt nur das
+                // ZIEL — der gesendete Wert folgt über die Feder
+                // (physicsTick schreibt control.value).
+                if (physicsEnabled())
+                {
+                    auto& physics = physicsFor (control);
+                    physics.grabbed = true;
+                    physics.targetValue = raw;
+                    break;
+                }
+
+                control.value = raw;
                 notifyValueChanged (control);
             }
             break;
@@ -417,8 +456,20 @@ void CcControlLayer::applyPlayGesture (grid::CcControl& control,
             const auto inner = rect.reduced (kXyInset);
             if (inner.getWidth() > 0.0f && inner.getHeight() > 0.0f)
             {
-                control.x = juce::jlimit (0.0f, 1.0f, (position.x - inner.getX()) / inner.getWidth());
-                control.y = juce::jlimit (0.0f, 1.0f, (position.y - inner.getY()) / inner.getHeight());
+                const auto rawX = juce::jlimit (0.0f, 1.0f, (position.x - inner.getX()) / inner.getWidth());
+                const auto rawY = juce::jlimit (0.0f, 1.0f, (position.y - inner.getY()) / inner.getHeight());
+
+                if (physicsEnabled())   // Block J3, wie beim Fader
+                {
+                    auto& physics = physicsFor (control);
+                    physics.grabbed = true;
+                    physics.targetX = rawX;
+                    physics.targetY = rawY;
+                    break;
+                }
+
+                control.x = rawX;
+                control.y = rawY;
                 notifyValueChanged (control);
             }
             break;
@@ -427,6 +478,124 @@ void CcControlLayer::applyPlayGesture (grid::CcControl& control,
         case grid::CcTool::none:
             break;
     }
+}
+
+//==============================================================================
+// Fader/XY-Physics (Block J3)
+
+grid::CcControl CcControlLayer::physicsDefaultsFor (grid::CcTool type) noexcept
+{
+    // Snap-Ziel = die Default-Feldwerte eines frisch platzierten Controls
+    // (CcControl-Initialisierer: Fader 0.75, XY 0.5/0.5).
+    grid::CcControl defaults;
+    defaults.type = type;
+    return defaults;
+}
+
+CcControlLayer::PhysicsState& CcControlLayer::physicsFor (const grid::CcControl& control)
+{
+    const auto it = physicsStates.find (control.id);
+    if (it != physicsStates.end())
+        return it->second;
+
+    // Feder am Ist-Wert starten (kein Sprung beim Greifen).
+    PhysicsState state;
+    state.value.pos   = control.value;
+    state.targetValue = control.value;
+    state.x.pos = control.x;
+    state.y.pos = control.y;
+    state.targetX = control.x;
+    state.targetY = control.y;
+
+    return physicsStates.emplace (control.id, state).first->second;
+}
+
+void CcControlLayer::physicsTick()
+{
+    if (! physicsEnabled())
+    {
+        if (! physicsStates.empty())
+            physicsStates.clear();
+
+        lastPhysicsTickMs = 0.0;
+        return;
+    }
+
+    const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+    const auto dtSeconds = lastPhysicsTickMs > 0.0
+                               ? juce::jmin (0.1f, (float) ((nowMs - lastPhysicsTickMs) / 1000.0))
+                               : 0.0f;
+    lastPhysicsTickMs = nowMs;
+
+    if (physicsStates.empty() || dtSeconds <= 0.0f)
+        return;
+
+    grid::SpringParams params;
+    params.force     = (float) panelSettings->getPhysicsForce();
+    params.mass      = (float) panelSettings->getPhysicsMass();
+    params.inertia01 = (float) panelSettings->getPhysicsInertia() / 100.0f;
+
+    constexpr float kSettlePos = 1.0e-3f;
+    constexpr float kSettleVel = 1.0e-2f;
+    constexpr float kNotifyEps = 1.0e-4f;
+
+    auto anyStepped = false;
+
+    for (auto it = physicsStates.begin(); it != physicsStates.end();)
+    {
+        auto* control = model.find (it->first);
+        if (control == nullptr)
+        {
+            it = physicsStates.erase (it);   // Control wurde entfernt
+            continue;
+        }
+
+        auto& state = it->second;
+
+        grid::stepSpring (state.value, state.targetValue, params, dtSeconds);
+        grid::stepSpring (state.x, state.targetX, params, dtSeconds);
+        grid::stepSpring (state.y, state.targetY, params, dtSeconds);
+
+        const auto newValue = juce::jlimit (0.0f, 1.0f, state.value.pos);
+        const auto newX     = juce::jlimit (0.0f, 1.0f, state.x.pos);
+        const auto newY     = juce::jlimit (0.0f, 1.0f, state.y.pos);
+
+        if (std::abs (newValue - control->value) > kNotifyEps
+            || std::abs (newX - control->x) > kNotifyEps
+            || std::abs (newY - control->y) > kNotifyEps)
+        {
+            control->value = newValue;
+            control->x = newX;
+            control->y = newY;
+            notifyValueChanged (*control);
+            anyStepped = true;
+        }
+
+        const auto settled = ! state.grabbed
+                             && std::abs (state.value.pos - state.targetValue) < kSettlePos
+                             && std::abs (state.value.vel) < kSettleVel
+                             && std::abs (state.x.pos - state.targetX) < kSettlePos
+                             && std::abs (state.x.vel) < kSettleVel
+                             && std::abs (state.y.pos - state.targetY) < kSettlePos
+                             && std::abs (state.y.vel) < kSettleVel;
+
+        if (settled)
+        {
+            // Exakt aufs Ziel schreiben und den Zustand freigeben.
+            control->value = juce::jlimit (0.0f, 1.0f, state.targetValue);
+            control->x = juce::jlimit (0.0f, 1.0f, state.targetX);
+            control->y = juce::jlimit (0.0f, 1.0f, state.targetY);
+            notifyValueChanged (*control);
+            it = physicsStates.erase (it);
+            anyStepped = true;
+            continue;
+        }
+
+        ++it;
+    }
+
+    if (anyStepped)
+        repaint();
 }
 
 void CcControlLayer::notifyValueChanged (const grid::CcControl& control)
@@ -509,6 +678,19 @@ void CcControlLayer::drawControl (juce::Graphics& g, const grid::CcControl& cont
             g.setColour (push::colours::ledWhite);
             g.fillRect (juce::Rectangle<float> (rect.getX(), fillTop - 1.0f,
                                                 rect.getWidth(), 2.0f));
+
+            // Zweifarbige Anzeige (Block J3): das Feder-ZIEL als cyane
+            // Linie, der weiße Balken ist der gesendete Ist-Wert.
+            if (const auto physicsIt = physicsStates.find (control.id);
+                physicsIt != physicsStates.end()
+                && std::abs (physicsIt->second.targetValue - control.value) > 0.002f)
+            {
+                const auto targetTop = rect.getBottom()
+                                       - rect.getHeight() * physicsIt->second.targetValue;
+                g.setColour (push::colours::ledCyan.withAlpha (0.9f));
+                g.fillRect (juce::Rectangle<float> (rect.getX(), targetTop - 1.0f,
+                                                    rect.getWidth(), 2.0f));
+            }
             g.restoreState();
             break;
         }
@@ -547,6 +729,20 @@ void CcControlLayer::drawControl (juce::Graphics& g, const grid::CcControl& cont
             const auto handle = juce::Rectangle<float> (kXyHandleSize, kXyHandleSize)
                                     .withCentre ({ inner.getX() + inner.getWidth() * control.x,
                                                    inner.getY() + inner.getHeight() * control.y });
+
+            // Zweifarbige Anzeige (Block J3): Geister-Ring am Feder-ZIEL in
+            // cyan — der weiße Handle ist der gesendete Ist-Wert.
+            if (const auto physicsIt = physicsStates.find (control.id);
+                physicsIt != physicsStates.end()
+                && (std::abs (physicsIt->second.targetX - control.x) > 0.002f
+                    || std::abs (physicsIt->second.targetY - control.y) > 0.002f))
+            {
+                const auto ghost = juce::Rectangle<float> (kXyHandleSize, kXyHandleSize)
+                                       .withCentre ({ inner.getX() + inner.getWidth() * physicsIt->second.targetX,
+                                                      inner.getY() + inner.getHeight() * physicsIt->second.targetY });
+                g.setColour (push::colours::ledCyan.withAlpha (0.7f));
+                g.drawEllipse (ghost, 1.5f);
+            }
 
             // Handle: Füllung = Control-Fläche, 2-px-ledWhite-Kontur (Mock).
             g.setColour (push::colours::controlSurface);

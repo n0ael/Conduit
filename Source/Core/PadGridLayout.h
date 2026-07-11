@@ -78,6 +78,10 @@ public:
     int cols() const noexcept { return config.cols; }
     int rows() const noexcept { return config.rows; }
 
+    /** Aktuelle Bend-Kalibrierung (Block J2: Rückrechnung Bend → X-Position
+        des klingenden Pitch für den Pitch-Schatten). */
+    [[nodiscard]] float semitonesPerPadWidth() const noexcept { return config.semitonesPerPadWidth; }
+
     /** Laufzeit-Setter fuer die Sensitivity-Regler (Block A2/A3). Wirkt
         SOFORT auf laufende Drags -- ein Wert, der waehrend eines gehaltenen
         Touches geaendert wird, re-mapt die naechste Bewegung relativ zum
