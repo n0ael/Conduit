@@ -293,13 +293,15 @@ void GridPage::resized()
 
     const auto ribbonWidth = panelSettings.getRibbonWidthPx();   // Block D1, live
 
-    // Block D2: Pitch-Fader-Stapel — Oktav-Buttons darüber, Release All
-    // darunter (ersetzt die frühere Top-Row-Platzierung beider Elemente).
+    // Block D2 (User-Feedback 11.07.): Pitch-Fader-Stapel — Oktav-Buttons
+    // darüber, je EIN Pad hoch und volle Ribbon-Breite (statt nebeneinander
+    // in einer schmalen Zeile) — Up oben (höherer Pitch = oben am Bildschirm),
+    // Down darunter; Release All darunter (ersetzt die frühere Top-Row).
     auto pitchColumn = bounds.removeFromLeft (ribbonWidth);
-    auto octaveRow = pitchColumn.removeFromTop (28);
-    const auto octaveTileWidth = octaveRow.getWidth() / 2;
-    octaveDownTile.setBounds (octaveRow.removeFromLeft (octaveTileWidth));
-    octaveUpTile.setBounds (octaveRow);
+    const auto padHeight = juce::roundToInt ((float) pitchColumn.getHeight()
+                                                 / (float) padLayoutConfig().rows);
+    octaveUpTile.setBounds (pitchColumn.removeFromTop (padHeight));
+    octaveDownTile.setBounds (pitchColumn.removeFromTop (padHeight));
     auto releaseRow = pitchColumn.removeFromBottom (36);
     releaseAllButton.setBounds (releaseRow.reduced (2));
     pitchOffsetRibbon.setBounds (pitchColumn);
