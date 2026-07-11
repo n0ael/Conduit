@@ -102,15 +102,35 @@ float CurveEditInteraction::rotationDegrees (juce::Point<float> aStart, juce::Po
     return juce::radiansToDegrees (delta);
 }
 
-void CurveEditInteraction::applyRotationShape (ResponseCurve& curve, bool clockwise) noexcept
+float CurveEditInteraction::degreesToShapeAmount (float degrees) noexcept
 {
-    curve.setPoints ({ { 0.0f, 0.0f }, { 0.5f, 0.5f }, { 1.0f, 1.0f } });
+    return juce::jlimit (-1.0f, 1.0f, -degrees / kFullShapeDegrees);
+}
 
-    // Grundform per Drehrichtung: im Uhrzeigersinn = S-Kurve (erst konvex,
-    // dann konkav), gegen den Uhrzeigersinn = gespiegelte "?"-Kurve.
-    const auto c = clockwise ? kShapeCurvature : -kShapeCurvature;
-    curve.setSegmentCurvature (0, c);
-    curve.setSegmentCurvature (1, -c);
+void CurveEditInteraction::applyShapeAmount (ResponseCurve& curve, float amount,
+                                             float restoreCurvature) noexcept
+{
+    const auto first = curve.points().front();
+    const auto last  = curve.points().back();
+
+    if (std::abs (amount) < kShapeDeadZone)
+    {
+        // Zurueck in der Null-Lage: Mittelpunkt verschwindet, die Kurve
+        // wird wieder 2-Punkt mit der Kruemmung von vor der Geste.
+        if (curve.numPoints() != 2)
+            curve.setPoints ({ first, last });
+
+        curve.setSegmentCurvature (0, restoreCurvature);
+        return;
+    }
+
+    // Mittelpunkt sicherstellen -- eine bereits (per Drag) verschobene
+    // Mitte bleibt stehen, nur die Bauchigkeit aendert sich.
+    if (curve.numPoints() != 3)
+        curve.setPoints ({ first, { 0.5f, 0.5f }, last });
+
+    curve.setSegmentCurvature (0, amount);
+    curve.setSegmentCurvature (1, -amount);
 }
 
 void CurveEditInteraction::applyMidPointDrag (ResponseCurve& curve, juce::Point<float> normPos,

@@ -412,10 +412,18 @@ void MpeShapingView::paint (juce::Graphics& g)
             activeTargets[(size_t) gesture.sectionIndex] = gesture.target;
     }
 
-    // Zwei-Finger-Mittelpunkt-Drag (Block C) hebt den Griff ebenfalls hervor.
+    // Zwei-Finger-Gesten (Block C): Mittelpunkt-Drag hebt den Griff hervor,
+    // die stufenlose Drehung betont die Kurvenlinie (wie Kruemmungs-Wisch).
     for (const auto& entry : twoFingerBySection)
-        if (entry.second.dragging && entry.first >= 0 && entry.first < (int) activeTargets.size())
+    {
+        if (entry.first < 0 || entry.first >= (int) activeTargets.size())
+            continue;
+
+        if (entry.second.dragging)
             activeTargets[(size_t) entry.first] = grid::CurveEditInteraction::Target::MidPoint;
+        else if (entry.second.rotating)
+            activeTargets[(size_t) entry.first] = grid::CurveEditInteraction::Target::Curvature;
+    }
 
     for (size_t i = 0; i < sections.size(); ++i)
         paintAxis (g, sections[i], activeTargets[i]);
@@ -764,6 +772,16 @@ void MpeShapingView::mouseDown (const juce::MouseEvent& event)
                 twoFinger.fingerB  = sourceIndex;
                 twoFinger.startB   = normPos;
                 twoFinger.currentB = normPos;
+
+                // Stufenlose Drehung setzt am Ist-Zustand an: bei einer
+                // 3-Punkt-Kurve ist Segment 0 = +Bauchigkeit (Schatten);
+                // bei einer 2-Punkt-Kurve merken wir uns deren Kruemmung
+                // fuer die Rueckkehr in die Null-Lage.
+                if (curve.numPoints() == 3)
+                    twoFinger.shapeAtStart = section.segmentCurvature[0];
+                else
+                    twoFinger.restoreCurvature = section.segmentCurvature[0];
+
                 twoFingerBySection[sectionIndex] = twoFinger;
 
                 entry.second.target = grid::CurveEditInteraction::Target::None;
@@ -788,26 +806,18 @@ void MpeShapingView::processTwoFingerGesture (int sectionIndex, TwoFingerGesture
     auto& section = sections[(size_t) sectionIndex];
     auto& curve = engine.responseCurve (section.axis);
 
-    if (! twoFinger.rotationApplied && ! twoFinger.dragging)
-    {
-        // Klassifikation: was zuerst die Schwelle reisst, gewinnt.
-        const auto degrees = grid::CurveEditInteraction::rotationDegrees (
-            twoFinger.startA, twoFinger.startB, twoFinger.currentA, twoFinger.currentB);
+    const auto degrees = grid::CurveEditInteraction::rotationDegrees (
+        twoFinger.startA, twoFinger.startB, twoFinger.currentA, twoFinger.currentB);
 
-        // Dreh-Toggle nur bei weit aufgeklapptem Panel (Masterplan Block C).
+    if (! twoFinger.rotating && ! twoFinger.dragging)
+    {
+        // Klassifikation: was zuerst die Schwelle reisst, gewinnt fuer die
+        // ganze Geste. Drehen nur bei weit aufgeklapptem Panel (Block C).
         const auto wideOpen = getWidth() >= panelSettings.getEditorThresholdWidth();
 
-        if (std::abs (degrees) >= kRotateToggleDegrees && wideOpen)
+        if (std::abs (degrees) >= kRotateStartDegrees && wideOpen)
         {
-            // Feld-y zeigt nach OBEN -- negative Winkelaenderung = im
-            // Uhrzeigersinn (S-Kurve), positive = "?"-Kurve.
-            const auto clockwise = degrees < 0.0f;
-            grid::CurveEditInteraction::applyRotationShape (curve, clockwise);
-
-            const auto c = clockwise ? grid::CurveEditInteraction::kShapeCurvature
-                                     : -grid::CurveEditInteraction::kShapeCurvature;
-            section.segmentCurvature = { c, -c };
-            twoFinger.rotationApplied = true;   // one-shot pro Geste
+            twoFinger.rotating = true;
         }
         else
         {
@@ -820,7 +830,22 @@ void MpeShapingView::processTwoFingerGesture (int sectionIndex, TwoFingerGesture
         }
     }
 
-    if (twoFinger.dragging)
+    if (twoFinger.rotating)
+    {
+        // Stufenlos (User-Feedback 11.07.): der Drehwinkel steuert live die
+        // gegensinnige Bauchigkeit, ausgehend vom Wert bei Gesten-Beginn --
+        // zurueck zur Null-Lage laesst den Mittelpunkt wieder verschwinden.
+        const auto amount = juce::jlimit (-1.0f, 1.0f,
+            twoFinger.shapeAtStart + grid::CurveEditInteraction::degreesToShapeAmount (degrees));
+
+        grid::CurveEditInteraction::applyShapeAmount (curve, amount, twoFinger.restoreCurvature);
+
+        if (curve.numPoints() == 3)
+            section.segmentCurvature = { amount, -amount };
+        else
+            section.segmentCurvature = { twoFinger.restoreCurvature, 0.0f };
+    }
+    else if (twoFinger.dragging)
     {
         const auto centroid = (twoFinger.currentA + twoFinger.currentB) / 2.0f;
         grid::CurveEditInteraction::applyMidPointDrag (curve, centroid,

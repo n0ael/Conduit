@@ -55,11 +55,20 @@ struct CurveEditInteraction
     [[nodiscard]] static float rotationDegrees (juce::Point<float> aStart, juce::Point<float> bStart,
                                                 juce::Point<float> aNow, juce::Point<float> bNow) noexcept;
 
-    /** Zwei-Finger-Drehung anwenden (Block C, Toggle 2→3 Punkte + Grundform):
-        setzt {0,0},{0.5,0.5},{1,1} mit S-Kurve (clockwise) bzw. gespiegelter
-        „?"-Kurve (counter-clockwise) als Segment-Krümmungen. Erneute Drehung
-        wechselt nur die Grundform. Output-Range bleibt unangetastet. */
-    static void applyRotationShape (ResponseCurve& curve, bool clockwise) noexcept;
+    /** Drehwinkel → Bauchigkeits-Betrag (stufenlos, User-Feedback 11.07.):
+        amount = -degrees / kFullShapeDegrees, geklemmt auf [-1,1] --
+        Drehung im Uhrzeigersinn (negative Grad in Feld-Koordinaten,
+        y nach oben) ergibt positive Bauchigkeit. */
+    [[nodiscard]] static float degreesToShapeAmount (float degrees) noexcept;
+
+    /** Zwei-Finger-Drehung anwenden (Block C, stufenlos): |amount| über der
+        Totzone → 3-Punkt-Kurve mit gegensinniger Bauchigkeit (Segment 0 =
+        +amount, Segment 1 = -amount; eine bereits verschobene Mitte bleibt
+        stehen, sonst entsteht sie bei (0.5, 0.5)). Zurückdrehen in die
+        Totzone → der Mittelpunkt verschwindet wieder (2-Punkt-Kurve,
+        Segment-Krümmung = restoreCurvature). Output-Range unangetastet. */
+    static void applyShapeAmount (ResponseCurve& curve, float amount,
+                                  float restoreCurvature) noexcept;
 
     /** Mittelpunkt verschieben (Ein-Finger auf dem Griff ODER Zwei-Finger-
         Drag): normPos in Feld-Koordinaten, y wird über [outMin,outMax] in
@@ -72,10 +81,13 @@ struct CurveEditInteraction
         Punkte {0,0},{1,1}, Krümmung 0, Output-Range [0,1]. */
     static void resetToDefault (ResponseCurve& curve) noexcept;
 
-    // Grundform-Krümmung des Dreh-Toggles. TODO(design): Feinabstimmung.
-    static constexpr float kShapeCurvature = 0.6f;
-    static constexpr float kMidPointMinX   = 0.05f;
-    static constexpr float kMidPointMaxX   = 0.95f;
+    // Stufenlose Dreh-Geste: volle Bauchigkeit bei 90 Grad, Totzone um die
+    // Null-Lage (Mittelpunkt erscheint/verschwindet). TODO(design):
+    // Feinabstimmung mit dem User.
+    static constexpr float kFullShapeDegrees = 90.0f;
+    static constexpr float kShapeDeadZone    = 0.08f;   // |amount| darunter = 2-Punkt
+    static constexpr float kMidPointMinX     = 0.05f;
+    static constexpr float kMidPointMaxX     = 0.95f;
 };
 
 } // namespace conduit::grid

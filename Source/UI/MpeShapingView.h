@@ -195,15 +195,20 @@ private:
         juce::Point<float> lastFieldPos {};   // letzte Feld-Position (Zwei-Finger-Eskalation)
     };
 
-    /** Zwei-Finger-Geste auf EINER Sektion (Block C): Drehung = Toggle
-        2→3 Punkte + Grundform (einmalig pro Geste), Drag = Mittelpunkt
-        verschieben. Key der Map = sectionIndex (höchstens eine pro Sektion). */
+    /** Zwei-Finger-Geste auf EINER Sektion (Block C, stufenlos --
+        User-Feedback 11.07.): Drehung steuert LIVE die gegensinnige
+        Bauchigkeit (zurück zur Null-Lage = Mittelpunkt verschwindet),
+        Zentroid-Drag verschiebt den Mittelpunkt. Klassifikation: was
+        zuerst die Schwelle reisst, gewinnt für die ganze Geste. Key der
+        Map = sectionIndex (höchstens eine pro Sektion). */
     struct TwoFingerGesture
     {
         int fingerA = -1, fingerB = -1;   // Touch-Source-Indizes
         juce::Point<float> startA, startB, currentA, currentB;
-        bool rotationApplied = false;     // Dreh-Toggle ist one-shot
-        bool dragging        = false;     // Mittelpunkt-Drag klassifiziert
+        bool  rotating         = false;   // Dreh-Geste klassifiziert (live)
+        bool  dragging         = false;   // Mittelpunkt-Drag klassifiziert
+        float shapeAtStart     = 0.0f;    // Bauchigkeit bei Gesten-Beginn (weiterdrehen ohne Sprung)
+        float restoreCurvature = 0.0f;    // 2-Punkt-Krümmung für die Rückkehr in die Null-Lage
     };
 
     void tick();
@@ -282,9 +287,9 @@ private:
     static constexpr float kEndpointRadiusActive = 6.0f;   // ... während des Ziehens
 
     // Mehrpunkt-Gesten (Block C)
-    static constexpr float kRotateToggleDegrees = 30.0f;   // Zwei-Finger-Drehung → Toggle
-    static constexpr float kMidDragStartNorm    = 0.04f;   // Zentroid-Weg bis Drag klassifiziert
-    static constexpr int   kResetHoldMs         = 2000;    // 3 Finger halten → Reset
+    static constexpr float kRotateStartDegrees = 10.0f;    // Drehwinkel bis Dreh-Geste klassifiziert
+    static constexpr float kMidDragStartNorm   = 0.04f;    // Zentroid-Weg bis Drag klassifiziert
+    static constexpr int   kResetHoldMs        = 2000;     // 3 Finger halten → Reset
 
     grid::GridVoiceEngine& engine;
     GridPanelSettings& panelSettings;

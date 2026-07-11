@@ -75,7 +75,7 @@ TEST_CASE ("CurveEditInteraction: curvatureDelta -- Richtung und ProportionalitÃ
 TEST_CASE ("CurveEditInteraction: hitTest trifft den Mittelpunkt der 3-Punkt-Kurve", "[grid]")
 {
     grid::ResponseCurve curve;
-    grid::CurveEditInteraction::applyRotationShape (curve, true);   // -> 3 Punkte, Mitte (0.5, 0.5)
+    grid::CurveEditInteraction::applyShapeAmount (curve, 0.6f, 0.0f);   // -> 3 Punkte, Mitte (0.5, 0.5)
 
     // Direkt auf dem Griff -> MidPoint
     REQUIRE (grid::CurveEditInteraction::hitTest ({ 0.5f, 0.5f }, 0.0f, 1.0f, 0.1f, curve)
@@ -104,7 +104,7 @@ TEST_CASE ("CurveEditInteraction: curvatureSegmentAt teilt links/rechts am Mitte
     REQUIRE (grid::CurveEditInteraction::curvatureSegmentAt (twoPoint, 0.9f) == 0);
 
     grid::ResponseCurve threePoint;
-    grid::CurveEditInteraction::applyRotationShape (threePoint, true);
+    grid::CurveEditInteraction::applyShapeAmount (threePoint, 0.6f, 0.0f);
     grid::CurveEditInteraction::applyMidPointDrag (threePoint, { 0.3f, 0.5f }, 0.0f, 1.0f);
 
     REQUIRE (grid::CurveEditInteraction::curvatureSegmentAt (threePoint, 0.1f) == 0);
@@ -129,10 +129,10 @@ TEST_CASE ("CurveEditInteraction: rotationDegrees -- Vorzeichen und Betrag", "[g
     REQUIRE (none == Approx (0.0f).margin (0.1));
 }
 
-TEST_CASE ("CurveEditInteraction: applyRotationShape setzt 3 Punkte + gegensinnige Kruemmungen", "[grid]")
+TEST_CASE ("CurveEditInteraction: applyShapeAmount setzt 3 Punkte + gegensinnige Kruemmungen", "[grid]")
 {
     grid::ResponseCurve curve;
-    grid::CurveEditInteraction::applyRotationShape (curve, true);   // S-Kurve
+    grid::CurveEditInteraction::applyShapeAmount (curve, 0.6f, 0.0f);   // steile Mitte
 
     REQUIRE (curve.numPoints() == 3);
     REQUIRE (curve.points()[1].x == Approx (0.5f));
@@ -146,15 +146,60 @@ TEST_CASE ("CurveEditInteraction: applyRotationShape setzt 3 Punkte + gegensinni
 
     // Gegenrichtung = gespiegelte Form (flache Mitte, "?")
     grid::ResponseCurve mirrored;
-    grid::CurveEditInteraction::applyRotationShape (mirrored, false);
+    grid::CurveEditInteraction::applyShapeAmount (mirrored, -0.6f, 0.0f);
     REQUIRE (mirrored.apply (0.25f) > 0.25f);
     REQUIRE (mirrored.apply (0.75f) < 0.75f);
+}
+
+TEST_CASE ("CurveEditInteraction: applyShapeAmount ist stufenlos und kehrt in der Totzone zur 2-Punkt-Kurve zurueck", "[grid]")
+{
+    grid::ResponseCurve curve;
+    curve.setSegmentCurvature (0, 0.4f);   // bestehende 2-Punkt-Kruemmung
+
+    // Aufdrehen: Mittelpunkt erscheint, Bauchigkeit folgt dem Betrag
+    grid::CurveEditInteraction::applyShapeAmount (curve, 0.3f, 0.4f);
+    REQUIRE (curve.numPoints() == 3);
+    const auto gentle = curve.apply (0.25f);
+
+    grid::CurveEditInteraction::applyShapeAmount (curve, 0.9f, 0.4f);
+    REQUIRE (curve.numPoints() == 3);
+    REQUIRE (curve.apply (0.25f) < gentle);   // staerker gebaucht
+
+    // Zurueck in die Totzone: Mittelpunkt verschwindet, die alte
+    // 2-Punkt-Kruemmung ist wiederhergestellt (User-Feedback 11.07.).
+    grid::CurveEditInteraction::applyShapeAmount (curve, 0.02f, 0.4f);
+    REQUIRE (curve.numPoints() == 2);
+
+    grid::ResponseCurve reference;
+    reference.setSegmentCurvature (0, 0.4f);
+    REQUIRE (curve.apply (0.3f) == Approx (reference.apply (0.3f)).margin (1.0e-5));
+}
+
+TEST_CASE ("CurveEditInteraction: applyShapeAmount laesst eine verschobene Mitte stehen", "[grid]")
+{
+    grid::ResponseCurve curve;
+    grid::CurveEditInteraction::applyShapeAmount (curve, 0.5f, 0.0f);
+    grid::CurveEditInteraction::applyMidPointDrag (curve, { 0.3f, 0.7f }, 0.0f, 1.0f);
+
+    grid::CurveEditInteraction::applyShapeAmount (curve, 0.8f, 0.0f);
+
+    REQUIRE (curve.points()[1].x == Approx (0.3f));
+    REQUIRE (curve.points()[1].y == Approx (0.7f));
+}
+
+TEST_CASE ("CurveEditInteraction: degreesToShapeAmount -- Vorzeichen, Skala, Klemme", "[grid]")
+{
+    // Uhrzeigersinn (negative Grad) -> positive Bauchigkeit; 90 Grad = voll.
+    REQUIRE (grid::CurveEditInteraction::degreesToShapeAmount (-90.0f) == Approx (1.0f));
+    REQUIRE (grid::CurveEditInteraction::degreesToShapeAmount (45.0f) == Approx (-0.5f));
+    REQUIRE (grid::CurveEditInteraction::degreesToShapeAmount (-180.0f) == Approx (1.0f));   // geklemmt
+    REQUIRE (grid::CurveEditInteraction::degreesToShapeAmount (0.0f) == Approx (0.0f));
 }
 
 TEST_CASE ("CurveEditInteraction: applyMidPointDrag verschiebt die Mitte, klemmt X und mappt Y ueber die Range", "[grid]")
 {
     grid::ResponseCurve curve;
-    grid::CurveEditInteraction::applyRotationShape (curve, true);
+    grid::CurveEditInteraction::applyShapeAmount (curve, 0.6f, 0.0f);
 
     grid::CurveEditInteraction::applyMidPointDrag (curve, { 0.3f, 0.8f }, 0.0f, 1.0f);
     REQUIRE (curve.points()[1].x == Approx (0.3f));
@@ -169,7 +214,7 @@ TEST_CASE ("CurveEditInteraction: applyMidPointDrag verschiebt die Mitte, klemmt
     // Y wird ueber [outMin,outMax] zurueckgerechnet: Feld-y 0.5 bei Range
     // [0, 0.5] entspricht Punkt-y 1.0.
     grid::ResponseCurve ranged;
-    grid::CurveEditInteraction::applyRotationShape (ranged, true);
+    grid::CurveEditInteraction::applyShapeAmount (ranged, 0.6f, 0.0f);
     ranged.setOutputRange (0.0f, 0.5f);
     grid::CurveEditInteraction::applyMidPointDrag (ranged, { 0.5f, 0.5f }, 0.0f, 0.5f);
     REQUIRE (ranged.points()[1].y == Approx (1.0f));
@@ -186,7 +231,7 @@ TEST_CASE ("CurveEditInteraction: applyMidPointDrag ist bei der 2-Punkt-Kurve ei
 TEST_CASE ("CurveEditInteraction: resetToDefault stellt die 2-Punkt-Identitaet wieder her", "[grid]")
 {
     grid::ResponseCurve curve;
-    grid::CurveEditInteraction::applyRotationShape (curve, true);
+    grid::CurveEditInteraction::applyShapeAmount (curve, 0.6f, 0.0f);
     curve.setOutputRange (0.2f, 0.9f);
 
     grid::CurveEditInteraction::resetToDefault (curve);

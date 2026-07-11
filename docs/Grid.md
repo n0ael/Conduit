@@ -126,21 +126,27 @@
     `MpeMidiSink::setExpressionMode` beendet zuerst hängende Noten (alte
     Kanalzuteilung). UI-Exposition von B1/B2/B4 folgt im Settings-Tab
     (Block D), Persistenz in Block K.
-  - **Mehrpunkt-Kurve (Block C, 07/2026):** der MPE-Kurveneditor kann jetzt
-    2↔3 Punkte. Gesten (final, User-Spez): Zwei-Finger-DREHUNG = Toggle
-    2→3 Punkte + Grundform (Uhrzeigersinn = steile Mitte/S, gegen = flache
-    Mitte/„?"; nur bei weit aufgeklapptem Panel ≥ editorThresholdWidth,
-    one-shot pro Geste, Schwelle 30°); Zwei-Finger-DRAG (Zentroid ≥ 0.04
-    norm) ODER Ein-Finger auf dem Griff = Mittelpunkt verschieben;
-    Ein-Finger-Krümmungs-Wisch wirkt links/rechts vom Mittelpunkt auf
-    Segment 0/1; 3 Finger 2 s halten = Reset auf 2-Punkt-Identität (inkl.
-    Range). Headless-Helfer in `CurveEditInteraction` (Target::MidPoint,
-    curvatureSegmentAt, rotationDegrees, applyRotationShape ±0.6
-    (TODO(design) Feinabstimmung), applyMidPointDrag, resetToDefault) —
-    diese Helfer sind der Wiederverwendungs-Seam fürs Macro-System
-    (Block E); die Component-Extraktion (CurveEditorTile) folgt dort,
-    wenn die Mini-Editor-Anforderungen konkret sind. Endpunkt schlägt
-    Mittelpunkt schlägt Krümmung; Mittelpunkt-Griff = hohler Ring.
+  - **Mehrpunkt-Kurve (Block C, 07/2026 + Feedback-Runde 11.07.):** der
+    MPE-Kurveneditor kann jetzt 2↔3 Punkte. Gesten: Zwei-Finger-DREHUNG =
+    STUFENLOS (User-Feedback: kein An/Aus-Toggle) — der Drehwinkel steuert
+    live die gegensinnige Bauchigkeit (Segment 0 = +v, Segment 1 = −v;
+    volle Bauchigkeit bei 90°, Uhrzeigersinn = steile Mitte); beim
+    Überschreiten der Totzone (|v| ≥ 0.08) erscheint der Mittelpunkt,
+    zurück in die Totzone gedreht verschwindet er wieder (die vorherige
+    2-Punkt-Krümmung wird restauriert); eine neue Geste setzt am Ist-Wert
+    an (kein Sprung), eine verschobene Mitte bleibt stehen. Drehen nur bei
+    weit aufgeklapptem Panel (≥ editorThresholdWidth), Klassifikation
+    Drehung (≥ 10°) vs. Zentroid-Drag (≥ 0.04 norm) — was zuerst die
+    Schwelle reißt, gewinnt die Geste. Zwei-Finger-Drag ODER Ein-Finger
+    auf dem Griff = Mittelpunkt verschieben; Ein-Finger-Krümmungs-Wisch
+    wirkt links/rechts vom Mittelpunkt auf Segment 0/1; 3 Finger 2 s
+    halten = Reset auf 2-Punkt-Identität (inkl. Range). Headless-Helfer in
+    `CurveEditInteraction` (Target::MidPoint, curvatureSegmentAt,
+    rotationDegrees, degreesToShapeAmount, applyShapeAmount,
+    applyMidPointDrag, resetToDefault) — Wiederverwendungs-Seam fürs
+    Macro-System (Block E); die Component-Extraktion (CurveEditorTile)
+    folgt dort. Endpunkt schlägt Mittelpunkt schlägt Krümmung;
+    Mittelpunkt-Griff = hohler Ring.
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +
