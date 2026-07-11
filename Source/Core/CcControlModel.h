@@ -24,7 +24,13 @@ struct CcControl
     float value = 0.75f;    // Fader: 0 = unten, 1 = oben
     bool  on    = false;    // Push (solange gehalten) / Toggle
     float x = 0.5f, y = 0.5f;   // XY-Pad, je [0,1] (y: 0 = oben)
-    // TODO(design): CC-Nummern-Zuweisung pro Control (spaeter konfigurierbar)
+
+    // Freie Anordnung (Block F, DIY-Tab): normalisierter Rect [0,1] ueber
+    // der Layer-Flaeche. rw <= 0 = noch nicht frei bewegt, Position/Groesse
+    // kommen aus den Zellen oben (Aufziehen bleibt Raster-basiert, nur das
+    // VERSCHIEBEN ist frei -- FigmaSnap). Der Layer initialisiert den Rect
+    // beim ersten Verschieben aus der aktuellen Zell-Geometrie.
+    float rx = 0.0f, ry = 0.0f, rw = 0.0f, rh = 0.0f;
 };
 
 //==============================================================================

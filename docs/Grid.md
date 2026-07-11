@@ -211,6 +211,20 @@
     verdrahtet (GridPage::feedMacros). Offen: CC-Funktionsnamen aus der
     Geräte-Datenbank (Block L), Bindings-Invalidierung bei Control-Löschung
     im Edit-Modus (Ids recyceln erst bei clear() — TODO(design)).
+  - **DIY-Tab (Block F, 07/2026):** der „CC"-Tab heißt jetzt sichtbar
+    „DIY" (Tab-ID bleibt "cc" — updateCcMode hängt daran). VERSCHIEBEN von
+    Controls im Edit-Modus ist frei statt zell-gesnappt: `CcControl` trägt
+    einen normalisierten freien Rect (rx/ry/rw/rh, rw<=0 = noch aus Zellen
+    abgeleitet — Aufziehen/GRÖSSE bleibt Raster-basiert), der Layer
+    initialisiert ihn beim ersten Griff. Snapping über die headless-Klasse
+    `Source/Core/FigmaSnap` (Catch2-getestet): Mittel-Achsen-Flucht zu
+    anderen Controls + Gleichabstand (Paar-Mittelpunkt und Verlängerungen
+    einer Zweierreihe), pro Achse unabhängig, Schwelle 8 px; cyan
+    Guide-Linien während des Drags; kein Rast-Zustand — kleines Weiterziehen
+    über die Schwelle löst die Flucht (Snap rechnet immer von der rohen
+    Zeigerposition). Hit-Tests (Play + Edit + hitTest-Durchfall) sind jetzt
+    rect-basiert (controlIdAt, oberstes zuerst) statt zell-basiert.
+    Zuweisung läuft über die Macro-Ansicht aus Block E (Long-Press).
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +

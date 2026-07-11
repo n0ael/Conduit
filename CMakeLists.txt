@@ -148,6 +148,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/Capture/CaptureWriter.cpp
     Source/Core/Capture/InputMeter.cpp
     Source/Core/Capture/LevelMeter.cpp
+    Source/Core/FigmaSnap.cpp
     Source/Core/MacroBindings.cpp
     Source/TouchLive/AbletonParamTarget.cpp
     Source/TouchLive/LiveSetModel.cpp
@@ -611,6 +612,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/MpeEncoderTests.cpp
         Tests/Core/MpeMidiSinkTests.cpp
         Tests/Core/MacroBindingsTests.cpp
+        Tests/Core/FigmaSnapTests.cpp
         Tests/Core/OscControllerTests.cpp
         Tests/Core/OscSendServiceTests.cpp
         Tests/Core/PatchingTests.cpp
@@ -710,7 +712,8 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/Capture/CaptureWriter.cpp
         Source/Core/Capture/InputMeter.cpp
         Source/Core/Capture/LevelMeter.cpp
-        Source/Core/MacroBindings.cpp
+        Source/Core/FigmaSnap.cpp
+    Source/Core/MacroBindings.cpp
         Source/TouchLive/AbletonParamTarget.cpp
         Source/TouchLive/LiveSetModel.cpp
         Source/TouchLive/LiveSpectrumTap.cpp

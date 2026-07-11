@@ -133,12 +133,13 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     };
     dockPanel.addTab ("mpe", "MPE", std::move (mpeView));
 
-    // Tab 2 „CC" (Grid-Page v2, CC-Baukasten): Werkzeugwahl geht ans
-    // Overlay; der CC-Modus (Bearbeiten) gilt bei offenem Panel + aktivem
-    // CC-Tab (updateCcMode).
+    // Tab 2 „DIY" (Block F, frueher „CC"): frei baubarer Zusatz-Controller.
+    // Die Tab-ID bleibt "cc" (updateCcMode + Persistenz haengen daran),
+    // nur der sichtbare Titel heisst DIY. Werkzeugwahl geht ans Overlay;
+    // der Edit-Modus gilt bei offenem Panel + aktivem DIY-Tab (updateCcMode).
     auto ccPanel = std::make_unique<CcPanel>();
     ccPanel->onToolChanged = [this] (grid::CcTool tool) { ccLayer.setActiveTool (tool); };
-    dockPanel.addTab ("cc", "CC", std::move (ccPanel));
+    dockPanel.addTab ("cc", "DIY", std::move (ccPanel));
 
     // Tab 4 „Macro" (Block E): Ziel-Listen der Controls. Der rohe Zeiger
     // bleibt gueltig, solange das dockPanel (GridPage-Member) lebt.

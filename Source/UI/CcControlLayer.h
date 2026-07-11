@@ -6,6 +6,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Core/CcControlModel.h"
+#include "Core/FigmaSnap.h"
 
 namespace conduit
 {
@@ -73,6 +74,7 @@ private:
     [[nodiscard]] Cell cellAt (juce::Point<float> position) const noexcept;   // geklemmt ins Raster
     [[nodiscard]] juce::Rectangle<float> rectForCells (int c0, int r0, int c1, int r1) const noexcept;
     [[nodiscard]] juce::Rectangle<float> rectFor (const grid::CcControl& control) const noexcept;
+    [[nodiscard]] int controlIdAt (juce::Point<float> position) const noexcept;   // oberstes zuerst
     [[nodiscard]] static juce::Rectangle<float> removeZoneFor (juce::Rectangle<float> controlRect) noexcept;
 
     void drawControl (juce::Graphics& g, const grid::CcControl& control) const;
@@ -99,11 +101,15 @@ private:
     // Bearbeiten (CC-Modus): EIN Edit-Vorgang zur Zeit — weitere Finger
     // werden während eines laufenden Platzier-/Verschiebe-Drags ignoriert
     // (konservativ; Multi-Touch-Edit ist nicht Teil des Mocks).
+    // Verschieben ist seit Block F FREI (FigmaSnap statt Zell-Raster).
     bool placing = false;
     Cell placeStart, placeCurrent;
     int  movingId   = -1;
-    Cell moveGrabOffset;
+    juce::Point<float> moveGrabPx;          // Greif-Offset Zeiger → Rect-Ursprung
+    grid::FigmaSnap::Result activeSnap;     // Guides waehrend des Verschiebens
     int  editFinger = -1;
+
+    static constexpr float kSnapThresholdPx = 8.0f;
 
     // Spielen (MPE-Modus), Multi-Touch: MouseInputSource-Index → Control-Id.
     std::map<int, int> grabbedControls;

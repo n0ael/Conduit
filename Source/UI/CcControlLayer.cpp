@@ -96,7 +96,26 @@ juce::Rectangle<float> CcControlLayer::rectForCells (int c0, int r0, int c1, int
 
 juce::Rectangle<float> CcControlLayer::rectFor (const grid::CcControl& control) const noexcept
 {
+    // Frei verschobene Controls (Block F, DIY-Tab) tragen ihren
+    // normalisierten Rect selbst; alles andere kommt aus den Zellen.
+    if (control.rw > 0.0f)
+        return { control.rx * (float) getWidth(), control.ry * (float) getHeight(),
+                 control.rw * (float) getWidth(), control.rh * (float) getHeight() };
+
     return rectForCells (control.c0, control.r0, control.c1, control.r1);
+}
+
+int CcControlLayer::controlIdAt (juce::Point<float> position) const noexcept
+{
+    // Oberstes Control zuerst (zuletzt platziert liegt oben) -- ersetzt den
+    // zell-basierten model.controlAt, seit Controls frei liegen koennen.
+    const auto& controls = model.controls();
+
+    for (auto it = controls.rbegin(); it != controls.rend(); ++it)
+        if (rectFor (*it).contains (position))
+            return it->id;
+
+    return -1;
 }
 
 juce::Rectangle<float> CcControlLayer::removeZoneFor (juce::Rectangle<float> controlRect) noexcept
@@ -111,9 +130,9 @@ bool CcControlLayer::hitTest (int x, int y)
         return true;   // Bearbeiten: ALLE Events über dem Raster abfangen
 
     // Spielen: nur Control-Flächen sind Ziel — freie Flächen fallen zum
-    // Keyboard durch, Pads UNTER Controls bleiben stumm.
-    const auto cell = cellAt ({ (float) x, (float) y });
-    return model.controlAt (cell.c, cell.r) >= 0;
+    // Keyboard durch, Pads UNTER Controls bleiben stumm. Rect-basiert,
+    // seit Controls frei liegen koennen (Block F).
+    return controlIdAt ({ (float) x, (float) y }) >= 0;
 }
 
 //==============================================================================
@@ -167,23 +186,33 @@ void CcControlLayer::handleEditDown (const juce::MouseEvent& event)
             break;
     }
 
-    const auto cell = cellAt (event.position);
-    const auto id = model.controlAt (cell.c, cell.r);
+    const auto id = controlIdAt (event.position);
 
     if (id >= 0)
     {
-        // Bestehendes Control verschieben: Offset Greifzelle → Ursprung merken.
-        if (const auto* control = model.find (id))
+        // Bestehendes Control FREI verschieben (Block F): freien Rect aus
+        // der aktuellen Geometrie initialisieren, Greif-Offset in Pixeln.
+        if (auto* control = model.find (id))
         {
-            movingId       = id;
-            moveGrabOffset = { cell.c - control->c0, cell.r - control->r0 };
-            editFinger     = finger;
+            const auto rect = rectFor (*control);
+            const auto width  = juce::jmax (1.0f, (float) getWidth());
+            const auto height = juce::jmax (1.0f, (float) getHeight());
+
+            control->rx = rect.getX() / width;
+            control->ry = rect.getY() / height;
+            control->rw = rect.getWidth() / width;
+            control->rh = rect.getHeight() / height;
+
+            movingId     = id;
+            moveGrabPx   = event.position - rect.getPosition();
+            editFinger   = finger;
         }
         return;
     }
 
     if (activeTool != grid::CcTool::none)
     {
+        const auto cell = cellAt (event.position);
         placing      = true;
         placeStart   = cell;
         placeCurrent = cell;
@@ -199,10 +228,9 @@ void CcControlLayer::handleEditDrag (const juce::MouseEvent& event)
     if (event.source.getIndex() != editFinger)
         return;
 
-    const auto cell = cellAt (event.position);   // beide Ecken geklemmt ins Raster
-
     if (placing)
     {
+        const auto cell = cellAt (event.position);   // beide Ecken geklemmt ins Raster
         if (cell.c != placeCurrent.c || cell.r != placeCurrent.r)
         {
             placeCurrent = cell;
@@ -211,10 +239,39 @@ void CcControlLayer::handleEditDrag (const juce::MouseEvent& event)
         return;
     }
 
-    if (movingId >= 0
-        && model.moveTo (movingId, cell.c - moveGrabOffset.c, cell.r - moveGrabOffset.r,
-                         cols, rows))
-        repaint();
+    if (movingId < 0)
+        return;
+
+    auto* control = model.find (movingId);
+    if (control == nullptr)
+        return;
+
+    const auto width  = juce::jmax (1.0f, (float) getWidth());
+    const auto height = juce::jmax (1.0f, (float) getHeight());
+
+    // Rohe Zielposition (normalisiert) aus dem Zeiger + Greif-Offset --
+    // Figma-Snapping rechnet IMMER von der rohen Position aus (kleines
+    // Ausweichen ueber die Schwelle loest die Flucht wieder).
+    const auto rawOrigin = (event.position - moveGrabPx);
+    const juce::Rectangle<float> moving { rawOrigin.x / width, rawOrigin.y / height,
+                                          control->rw, control->rh };
+
+    std::vector<juce::Rectangle<float>> others;
+    others.reserve (model.controls().size());
+    for (const auto& other : model.controls())
+        if (other.id != movingId)
+            others.push_back ({ rectFor (other).getX() / width, rectFor (other).getY() / height,
+                                rectFor (other).getWidth() / width, rectFor (other).getHeight() / height });
+
+    const auto snapped = grid::FigmaSnap::snap (moving, others,
+                                                kSnapThresholdPx / width,
+                                                kSnapThresholdPx / height);
+
+    control->rx = juce::jlimit (0.0f, juce::jmax (0.0f, 1.0f - control->rw), snapped.x);
+    control->ry = juce::jlimit (0.0f, juce::jmax (0.0f, 1.0f - control->rh), snapped.y);
+
+    activeSnap = snapped;
+    repaint();
 }
 
 void CcControlLayer::handleEditUp (const juce::MouseEvent& event)
@@ -233,13 +290,14 @@ void CcControlLayer::handleEditUp (const juce::MouseEvent& event)
 
     movingId   = -1;
     editFinger = -1;
+    activeSnap = {};
+    repaint();
 }
 
 //==============================================================================
 void CcControlLayer::handlePlayDown (const juce::MouseEvent& event)
 {
-    const auto cell = cellAt (event.position);
-    const auto id = model.controlAt (cell.c, cell.r);
+    const auto id = controlIdAt (event.position);
     if (id < 0)
         return;   // hitTest lässt freie Flächen gar nicht erst hierher
 
@@ -406,6 +464,24 @@ void CcControlLayer::paint (juce::Graphics& g)
                                                                  dashes, 2);
         g.setColour (push::colours::ledWhite);
         g.fillPath (dashed);
+    }
+
+    // Snap-Guides (Block F, Figma-Stil): waehrend eines freien Verschiebens
+    // zeigt eine duenne Linie die eingerastete Mittel-Achse.
+    if (ccMode && movingId >= 0)
+    {
+        g.setColour (push::colours::ledCyan.withAlpha (0.8f));
+
+        if (activeSnap.snappedX)
+        {
+            const auto x = activeSnap.guideX * (float) getWidth();
+            g.drawLine (x, 0.0f, x, (float) getHeight(), 1.0f);
+        }
+        if (activeSnap.snappedY)
+        {
+            const auto y = activeSnap.guideY * (float) getHeight();
+            g.drawLine (0.0f, y, (float) getWidth(), y, 1.0f);
+        }
     }
 }
 
