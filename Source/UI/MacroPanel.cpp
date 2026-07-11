@@ -374,15 +374,41 @@ void MacroPanel::TargetRow::mouseUp (const juce::MouseEvent& event)
 
 //==============================================================================
 MacroPanel::MacroPanel (grid::MacroBindings& bindingsToUse, grid::MidiDeviceTarget& midiTargetToUse,
-                        LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse)
+                        LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
+                        grid::MidiInBindings& midiInBindingsToUse)
     : macroBindings (bindingsToUse), midiTarget (midiTargetToUse),
-      liveSetModel (liveSetModelToUse), touchLiveClient (touchLiveClientToUse)
+      liveSetModel (liveSetModelToUse), touchLiveClient (touchLiveClientToUse),
+      midiInBindings (midiInBindingsToUse)
 {
     addAndMakeVisible (titleLabel);
     addChildComponent (axisXTile);
     addChildComponent (axisYTile);
+    addChildComponent (midiInTile);
+    addChildComponent (midiInChannelField);
+    addChildComponent (midiInCcField);
     addAndMakeVisible (viewport);
     addAndMakeVisible (addTile);
+
+    // MIDI-In (Block G): Toggle bindet/loest den externen CC dieses
+    // Control-Werts, die Felder committen die Bindung neu.
+    midiInTile.onClick = [this]
+    {
+        if (currentControlId < 0)
+            return;
+
+        if (midiInTile.isActive())
+        {
+            midiInBindings.unbind (currentKey());
+            midiInTile.setActive (false);
+        }
+        else
+        {
+            commitMidiInBinding();
+        }
+        refreshMidiInRow();
+    };
+    midiInChannelField.onValueCommitted = [this] (double) { if (midiInTile.isActive()) commitMidiInBinding(); };
+    midiInCcField.onValueCommitted      = [this] (double) { if (midiInTile.isActive()) commitMidiInBinding(); };
 
     titleLabel.setJustificationType (juce::Justification::centredLeft);
     titleLabel.setColour (juce::Label::textColourId, push::colours::text);
@@ -394,6 +420,7 @@ MacroPanel::MacroPanel (grid::MacroBindings& bindingsToUse, grid::MidiDeviceTarg
         currentAxis = 0;
         axisXTile.setActive (true);
         axisYTile.setActive (false);
+        refreshMidiInRow();
         rebuildRows();
     };
     axisYTile.onClick = [this]
@@ -401,6 +428,7 @@ MacroPanel::MacroPanel (grid::MacroBindings& bindingsToUse, grid::MidiDeviceTarg
         currentAxis = 1;
         axisXTile.setActive (false);
         axisYTile.setActive (true);
+        refreshMidiInRow();
         rebuildRows();
     };
 
@@ -436,8 +464,41 @@ void MacroPanel::showControl (int layer, int controlId, const juce::String& titl
         macroBindings.add (currentKey());
 
     selectedRow = 0;
+    refreshMidiInRow();
     rebuildRows();
     resized();
+}
+
+void MacroPanel::refreshMidiInRow()
+{
+    const auto showRow = currentControlId >= 0;
+    midiInTile.setVisible (showRow);
+    midiInChannelField.setVisible (showRow);
+    midiInCcField.setVisible (showRow);
+
+    if (! showRow)
+        return;
+
+    if (const auto* binding = midiInBindings.bindingFor (currentKey()))
+    {
+        midiInTile.setActive (true);
+        midiInChannelField.setValue (binding->channel, juce::dontSendNotification);
+        midiInCcField.setValue (binding->cc, juce::dontSendNotification);
+    }
+    else
+    {
+        midiInTile.setActive (false);
+    }
+}
+
+void MacroPanel::commitMidiInBinding()
+{
+    if (currentControlId < 0)
+        return;
+
+    midiInBindings.bind (currentKey(), (int) midiInChannelField.getValue(),
+                         (int) midiInCcField.getValue());
+    midiInTile.setActive (true);
 }
 
 void MacroPanel::rebuildRows()
@@ -542,10 +603,20 @@ void MacroPanel::resized()
         header.removeFromRight (4);
     }
     titleLabel.setBounds (header);
-
     area.removeFromTop (4);
-    if (currentHasYAxis)
-        area.removeFromTop (0);
+
+    // MIDI-In-Zeile (Block G): Toggle + Ch/CC-Felder unter dem Titel.
+    if (currentControlId >= 0)
+    {
+        auto midiInRow = area.removeFromTop (28);
+        midiInTile.setBounds (midiInRow.removeFromLeft (72));
+        midiInRow.removeFromLeft (6);
+        const auto fieldWidth = (midiInRow.getWidth() - 4) / 2;
+        midiInChannelField.setBounds (midiInRow.removeFromLeft (fieldWidth));
+        midiInRow.removeFromLeft (4);
+        midiInCcField.setBounds (midiInRow);
+        area.removeFromTop (4);
+    }
 
     addTile.setBounds (area.removeFromBottom (kAddTileHeight).reduced (0, 2));
     area.removeFromBottom (4);

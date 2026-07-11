@@ -11,7 +11,9 @@
 #include "Core/GridPanelSettings.h"
 #include "Core/GridVoiceEngine.h"
 #include "Core/MacroBindings.h"
+#include "Core/MidiControlInput.h"
 #include "Core/MidiDeviceTarget.h"
+#include "Core/MidiInBindings.h"
 #include "Core/MpeMidiSink.h"
 #include "EditorDockPanel.h"
 #include "ExpressionRibbon.h"
@@ -100,7 +102,8 @@ public:
     GridPage (juce::ValueTree rootStateToUse,
               grid::GridVoiceEngine& engineToUse, grid::MidiDeviceTarget& midiTargetToUse,
               GridPanelSettings& panelSettingsToUse, grid::MpeMidiSink& mpeMidiSinkToUse,
-              LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse);
+              LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
+              grid::MidiControlInput& midiControlInputToUse);
     ~GridPage() override;
 
     void resized() override;
@@ -178,10 +181,24 @@ private:
     grid::MacroBindings macroBindings;
     MacroPanel* macroPanel = nullptr;
 
+    // MIDI-Eingang (Block G): externe CCs bewegen Controls -- Soft-Takeover
+    // + Glaettung leben in midiInBindings, die Pumpe im EngineProcessor
+    // (midiControlInput, Referenz).
+    grid::MidiControlInput& midiControlInput;
+    grid::MidiInBindings midiInBindings;
+
     /** Wertfluss Control → Macro-Ziele (beide Layer, Block E). */
     void feedMacros (int layer, const grid::CcControl& control);
     /** Long-Press: Macro-Ansicht des Controls oeffnen. */
     void openMacroViewFor (int layer, int controlId, grid::CcControlModel& model);
+
+    /** Control-Modell eines Macro-Layers (system/diy, Block E/G). */
+    [[nodiscard]] grid::CcControlModel& modelForLayer (int layer) noexcept;
+    /** Ist-Wert eines Control-WERTS fuer den Soft-Takeover (Block G). */
+    [[nodiscard]] float controlValueFor (const grid::MacroControlKey& key) noexcept;
+    /** Externen (geglaetteten) Wert anwenden: Control-Feld setzen, Layer
+        repainten, Macro-Ziele fuettern (Block G). */
+    void applyExternalValue (const grid::MacroControlKey& key, float value01);
 
     // XY+Fader-Modus: Zeilenzahl des systemLayer -- CcControlLayer::rows ist
     // const (kein Laufzeit-Resize), daher bei GridPage-Konstruktion aus

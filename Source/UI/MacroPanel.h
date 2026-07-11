@@ -7,6 +7,7 @@
 
 #include "Core/MacroBindings.h"
 #include "Core/MidiDeviceTarget.h"
+#include "Core/MidiInBindings.h"
 #include "CurveEditorTile.h"
 #include "NumberFieldBracket.h"
 #include "PushTiles.h"
@@ -42,7 +43,8 @@ class MacroPanel final : public juce::Component
 {
 public:
     MacroPanel (grid::MacroBindings& bindingsToUse, grid::MidiDeviceTarget& midiTargetToUse,
-                LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse);
+                LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
+                grid::MidiInBindings& midiInBindingsToUse);
     ~MacroPanel() override;
 
     /** Long-Press-Ziel setzen: layer/controlId (Achse 0); hasYAxis = true
@@ -114,10 +116,16 @@ private:
     void removeTargetSlot (int index);
     void tick();
 
+    /** MIDI-In-Zeile (Block G) mit der Bindung des aktuellen Keys
+        synchronisieren bzw. Feld-Aenderungen committen. */
+    void refreshMidiInRow();
+    void commitMidiInBinding();
+
     grid::MacroBindings& macroBindings;
     grid::MidiDeviceTarget& midiTarget;
     LiveSetModel& liveSetModel;
     TouchLiveClient& touchLiveClient;
+    grid::MidiInBindings& midiInBindings;
 
     int  currentLayer = 0;
     int  currentControlId = -1;   // -1 = kein Control gewaehlt (Leerzustand)
@@ -130,6 +138,12 @@ private:
     push::TextTile axisXTile { "X" };
     push::TextTile axisYTile { "Y" };
     push::TextTile addTile   { "+ Ziel" };
+
+    // MIDI-In-Zeile (Block G): externer CC bewegt dieses Control (Soft-
+    // Takeover). Toggle an/aus + Kanal/CC-Felder.
+    push::TextTile midiInTile { "MIDI In" };
+    NumberFieldBracket midiInChannelField { NumberFieldBracket::Config { 1.0, 16.0, 1.0, 1.0, 0, 0.1, "Ch" } };
+    NumberFieldBracket midiInCcField      { NumberFieldBracket::Config { 0.0, 127.0, 20.0, 1.0, 0, 0.5, "CC" } };
 
     juce::Viewport viewport;
     juce::Component rowHost;

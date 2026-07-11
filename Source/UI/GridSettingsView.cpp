@@ -20,11 +20,13 @@ namespace
 }
 
 GridSettingsView::GridSettingsView (juce::ValueTree rootStateToUse, grid::MidiDeviceTarget& midiTargetToUse,
+                                    grid::MidiControlInput& midiControlInputToUse,
                                     GridPanelSettings& panelSettingsToUse,
                                     grid::InTuneLocation initialInTuneLocation,
                                     float initialInTuneWidthPercent,
                                     grid::ExpressionMode initialExpressionMode)
-    : rootState (std::move (rootStateToUse)), midiTarget (midiTargetToUse), panelSettings (panelSettingsToUse),
+    : rootState (std::move (rootStateToUse)), midiTarget (midiTargetToUse),
+      midiControlInput (midiControlInputToUse), panelSettings (panelSettingsToUse),
       inTuneWidthField { NumberFieldBracket::Config { 0.0, 100.0, (double) initialInTuneWidthPercent,
                                                       1.0, 0, 0.5, "Width" } },
       systemRowsField  { NumberFieldBracket::Config {
@@ -35,6 +37,7 @@ GridSettingsView::GridSettingsView (juce::ValueTree rootStateToUse, grid::MidiDe
           (double) panelSettingsToUse.getRibbonWidthPx(), 1.0, 0, 1.0, "Width" } }
 {
     addAndMakeVisible (outputCombo);
+    addAndMakeVisible (inputCombo);
     addAndMakeVisible (rootTile);
     addAndMakeVisible (scaleTile);
     addAndMakeVisible (inTuneLocationPadTile);
@@ -53,6 +56,9 @@ GridSettingsView::GridSettingsView (juce::ValueTree rootStateToUse, grid::MidiDe
 
     rebuildDeviceList();
     outputCombo.onChange = [this] { handleDeviceSelected(); };
+
+    rebuildInputDeviceList();
+    inputCombo.onChange = [this] { handleInputDeviceSelected(); };
 
     rootTile.onClick = [this]
     {
@@ -194,6 +200,34 @@ void GridSettingsView::handleDeviceSelected()
         midiTarget.openDevice (devices.getReference (index).identifier);
 }
 
+void GridSettingsView::rebuildInputDeviceList()
+{
+    inputDevices = grid::MidiControlInput::availableDevices();
+
+    inputCombo.clear (juce::dontSendNotification);
+    inputCombo.addItem ("Kein MIDI-Eingang", 1);
+
+    for (int i = 0; i < inputDevices.size(); ++i)
+        inputCombo.addItem (inputDevices.getReference (i).name, i + 2);
+
+    inputCombo.setSelectedId (1, juce::dontSendNotification);
+}
+
+void GridSettingsView::handleInputDeviceSelected()
+{
+    const auto selectedId = inputCombo.getSelectedId();
+
+    if (selectedId <= 1)
+    {
+        midiControlInput.closeDevice();
+        return;
+    }
+
+    const auto index = selectedId - 2;
+    if (index >= 0 && index < inputDevices.size())
+        midiControlInput.openDevice (inputDevices.getReference (index).identifier);
+}
+
 void GridSettingsView::paint (juce::Graphics& g)
 {
     g.fillAll (push::colours::panel);
@@ -217,13 +251,16 @@ void GridSettingsView::resized()
 {
     auto area = getLocalBounds().reduced (kPaddingX, 8);
 
-    // Performance-Slide-Out: MIDI-Port + Skala-Kacheln in einer Zeile.
+    // Performance-Slide-Out: MIDI-Port + Skala-Kacheln in einer Zeile,
+    // darunter der MIDI-EINGANG fuer die Control-Steuerung (Block G).
     auto slideOutRow = area.removeFromTop (kRowHeight);
     outputCombo.setBounds (slideOutRow.removeFromLeft (juce::jmax (80, slideOutRow.getWidth() - 152)));
     slideOutRow.removeFromLeft (6);
     rootTile.setBounds (slideOutRow.removeFromLeft (44));
     slideOutRow.removeFromLeft (4);
     scaleTile.setBounds (slideOutRow);
+    area.removeFromTop (kRowGap);
+    inputCombo.setBounds (area.removeFromTop (kRowHeight));
     area.removeFromTop (kSectionGap);
 
     // Pitch: In-Tune Location (zwei Tiles) + Width-Feld.

@@ -21,6 +21,7 @@
 #include "TouchLive/TouchLiveClient.h"
 #include "TouchLive/TouchLiveMeterBus.h"
 #include "TouchLive/TouchLiveSettings.h"
+#include "MidiControlInput.h"
 #include "MpeMidiSink.h"
 #include "GraphFader.h"
 #include "GraphManager.h"
@@ -262,6 +263,8 @@ public:
         IVoiceSink bewusst keine MPE-Spezifika kennt (setExpressionMode
         ist MpeMidiSink-spezifisch, kein Interface-Mitglied). */
     [[nodiscard]] grid::MpeMidiSink& getMpeMidiSink() noexcept { return mpeMidiSink; }
+    /** Block G: MIDI-Eingang fuer die Control-Steuerung (Soft-Takeover). */
+    [[nodiscard]] grid::MidiControlInput& getGridMidiControlInput() noexcept { return gridMidiControlInput; }
 
     /** Chrome-Zustand des rechten Editor-Dock-Panels der Grid-Page (S2,
         App-Zustand) — der Processor lauscht nicht darauf, GridPage lädt/
@@ -482,6 +485,7 @@ private:
     grid::MidiDeviceTarget midiDeviceTarget;
     grid::MpeMidiSink      mpeMidiSink      { midiDeviceTarget };
     grid::GridVoiceEngine  gridVoiceEngine  { mpeMidiSink };
+    grid::MidiControlInput gridMidiControlInput;   // Block G: MIDI-EINGANG fuer Controls
 
     // TouchLive-Remote (docs/TouchLive.md): Message-Thread-only, vom
     // Audio-Graph unabhängig. Settings + Modell + MeterBus VOR dem Client

@@ -12,11 +12,13 @@ namespace conduit
 GridPage::GridPage (juce::ValueTree rootStateToUse,
                      grid::GridVoiceEngine& engineToUse, grid::MidiDeviceTarget& midiTargetToUse,
                      GridPanelSettings& panelSettingsToUse, grid::MpeMidiSink& mpeMidiSinkToUse,
-                     LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse)
+                     LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
+                     grid::MidiControlInput& midiControlInputToUse)
     : rootState (std::move (rootStateToUse)),
       engine (engineToUse), midiTarget (midiTargetToUse), panelSettings (panelSettingsToUse),
       mpeMidiSink (mpeMidiSinkToUse),
       liveSetModel (liveSetModelToUse), touchLiveClient (touchLiveClientToUse),
+      midiControlInput (midiControlInputToUse),
       systemControlRowsAtStartup (panelSettingsToUse.getSystemControlRows()),
       // 8×8-Raster der Grid-Page (padLayoutConfig, User 10.07.2026) — Keyboard
       // und ccLayer teilen sich dieselbe Zellgeometrie.
@@ -144,16 +146,38 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     // Tab 4 „Macro" (Block E): Ziel-Listen der Controls. Der rohe Zeiger
     // bleibt gueltig, solange das dockPanel (GridPage-Member) lebt.
     auto macroView = std::make_unique<MacroPanel> (macroBindings, midiTarget,
-                                                   liveSetModel, touchLiveClient);
+                                                   liveSetModel, touchLiveClient, midiInBindings);
     macroPanel = macroView.get();
     dockPanel.addTab ("macro", "Macro", std::move (macroView));
 
     // Macro-Wertfluss + Long-Press (Block E), beide Layer: System-Controls
-    // des XY+Fader-Modus (layer 0) und DIY-CC-Baukasten (layer 1).
+    // des XY+Fader-Modus (layer 0) und DIY-CC-Baukasten (layer 1). Die
+    // Layer-Callbacks feuern NUR bei lokalem Touch -- der loest zusaetzlich
+    // den Soft-Takeover der MIDI-Eingangs-Bindung (Block G, der externe
+    // Fader muss danach neu aufnehmen).
     systemLayer.onControlValueChanged = [this] (const grid::CcControl& control)
-    { feedMacros (grid::MacroControlKey::system, control); };
+    {
+        midiInBindings.notifyLocalTouch ({ grid::MacroControlKey::system, control.id, 0 });
+        midiInBindings.notifyLocalTouch ({ grid::MacroControlKey::system, control.id, 1 });
+        feedMacros (grid::MacroControlKey::system, control);
+    };
     ccLayer.onControlValueChanged = [this] (const grid::CcControl& control)
-    { feedMacros (grid::MacroControlKey::diy, control); };
+    {
+        midiInBindings.notifyLocalTouch ({ grid::MacroControlKey::diy, control.id, 0 });
+        midiInBindings.notifyLocalTouch ({ grid::MacroControlKey::diy, control.id, 1 });
+        feedMacros (grid::MacroControlKey::diy, control);
+    };
+
+    // MIDI-Eingang (Block G): Pumpe fuettert die Bindings, der Tick treibt
+    // Glaettung + Soft-Takeover und wendet Werte auf die Controls an.
+    midiControlInput.onCcReceived = [this] (int channel, int cc, int value7bit)
+    { midiInBindings.handleIncomingCc (channel, cc, value7bit); };
+    midiControlInput.onTick = [this]
+    {
+        midiInBindings.tick ([this] (const grid::MacroControlKey& key) { return controlValueFor (key); },
+                             [this] (const grid::MacroControlKey& key, float value01)
+                             { applyExternalValue (key, value01); });
+    };
 
     systemLayer.onLongPressControl = [this] (int controlId)
     { openMacroViewFor (grid::MacroControlKey::system, controlId, systemCcModel); };
@@ -164,7 +188,7 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     // (Block B1/B2/B4), Layout-Feinabstimmung (Edit-Grid-Ersatz), Modwheel-
     // Toggle, Performance-Slide-Out (MIDI-Port + Skala, ehemals Top-Row).
     auto settingsView = std::make_unique<GridSettingsView> (
-        rootState, midiTarget, panelSettings,
+        rootState, midiTarget, midiControlInput, panelSettings,
         keyboard.getInTuneLocation(), padLayoutConfig().inTuneWidthPercent,
         mpeMidiSink.expressionMode());
     settingsView->onInTuneLocationChanged = [this] (grid::InTuneLocation location)
@@ -323,6 +347,62 @@ void GridPage::feedMacros (int layer, const grid::CcControl& control)
         default:
             break;
     }
+}
+
+grid::CcControlModel& GridPage::modelForLayer (int layer) noexcept
+{
+    return layer == grid::MacroControlKey::system ? systemCcModel : ccModel;
+}
+
+float GridPage::controlValueFor (const grid::MacroControlKey& key) noexcept
+{
+    const auto* control = modelForLayer (key.layer).find (key.controlId);
+    if (control == nullptr)
+        return 0.0f;
+
+    switch (control->type)
+    {
+        case grid::CcTool::fader:  return control->value;
+        case grid::CcTool::push:
+        case grid::CcTool::toggle: return control->on ? 1.0f : 0.0f;
+        case grid::CcTool::xy:     return key.axis == 0 ? control->x : 1.0f - control->y;
+        case grid::CcTool::none:
+        default:                   return 0.0f;
+    }
+}
+
+void GridPage::applyExternalValue (const grid::MacroControlKey& key, float value01)
+{
+    auto* control = modelForLayer (key.layer).find (key.controlId);
+    if (control == nullptr)
+        return;
+
+    switch (control->type)
+    {
+        case grid::CcTool::fader:
+            control->value = juce::jlimit (0.0f, 1.0f, value01);
+            break;
+
+        case grid::CcTool::push:
+        case grid::CcTool::toggle:
+            control->on = value01 >= 0.5f;
+            break;
+
+        case grid::CcTool::xy:
+            if (key.axis == 0)
+                control->x = juce::jlimit (0.0f, 1.0f, value01);
+            else
+                control->y = juce::jlimit (0.0f, 1.0f, 1.0f - value01);   // y: 0 = oben
+            break;
+
+        case grid::CcTool::none:
+        default:
+            return;
+    }
+
+    // Anzeige folgt (Block G) + Macro-Ziele bekommen dieselben weichen Werte.
+    (key.layer == grid::MacroControlKey::system ? systemLayer : ccLayer).repaint();
+    feedMacros (key.layer, *control);
 }
 
 void GridPage::openMacroViewFor (int layer, int controlId, grid::CcControlModel& model)

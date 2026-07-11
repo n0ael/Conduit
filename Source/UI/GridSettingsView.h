@@ -6,6 +6,7 @@
 
 #include "Core/GridPanelSettings.h"
 #include "Core/GridVoiceEngine.h"
+#include "Core/MidiControlInput.h"
 #include "Core/MidiDeviceTarget.h"
 #include "Core/MpeEncoder.h"
 #include "Core/PadGridLayout.h"
@@ -52,6 +53,7 @@ class GridSettingsView final : public juce::Component,
 {
 public:
     GridSettingsView (juce::ValueTree rootStateToUse, grid::MidiDeviceTarget& midiTargetToUse,
+                      grid::MidiControlInput& midiControlInputToUse,
                       GridPanelSettings& panelSettingsToUse,
                       grid::InTuneLocation initialInTuneLocation,
                       float initialInTuneWidthPercent,
@@ -83,6 +85,8 @@ private:
     void refreshScaleLabels();
     void rebuildDeviceList();
     void handleDeviceSelected();
+    void rebuildInputDeviceList();
+    void handleInputDeviceSelected();
 
     // Section-Ueberschriften: Bounds werden in resized() EINMAL berechnet
     // und in paint() gelesen -- verhindert Auseinanderlaufen zwischen
@@ -92,11 +96,15 @@ private:
 
     juce::ValueTree rootState;
     grid::MidiDeviceTarget& midiTarget;
+    grid::MidiControlInput& midiControlInput;
     GridPanelSettings& panelSettings;
     juce::Array<juce::MidiDeviceInfo> devices;
+    juce::Array<juce::MidiDeviceInfo> inputDevices;
 
-    // Performance-Slide-Out (umgezogen aus der ehemaligen GridPage-Top-Row).
+    // Performance-Slide-Out (umgezogen aus der ehemaligen GridPage-Top-Row);
+    // inputCombo = MIDI-EINGANG fuer die Control-Steuerung (Block G).
     juce::ComboBox outputCombo;
+    juce::ComboBox inputCombo;
     push::TextTile rootTile  { "C" };
     push::TextTile scaleTile { "Chromatic" };
 

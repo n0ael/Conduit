@@ -111,7 +111,9 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/LinkSendTaps.cpp
     Source/Core/MeterSettings.cpp
     Source/Core/Metronome.cpp
+    Source/Core/MidiControlInput.cpp
     Source/Core/MidiDeviceTarget.cpp
+    Source/Core/MidiInBindings.cpp
     Source/Core/ModuleUiDefaults.cpp
     Source/Core/MpeEncoder.cpp
     Source/Core/MpeMidiSink.cpp
@@ -613,6 +615,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/MpeMidiSinkTests.cpp
         Tests/Core/MacroBindingsTests.cpp
         Tests/Core/FigmaSnapTests.cpp
+        Tests/Core/MidiInBindingsTests.cpp
         Tests/Core/OscControllerTests.cpp
         Tests/Core/OscSendServiceTests.cpp
         Tests/Core/PatchingTests.cpp
@@ -675,7 +678,9 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/LinkSendTaps.cpp
         Source/Core/MeterSettings.cpp
         Source/Core/Metronome.cpp
+        Source/Core/MidiControlInput.cpp
         Source/Core/MidiDeviceTarget.cpp
+        Source/Core/MidiInBindings.cpp
         Source/Core/ModuleUiDefaults.cpp
         Source/Core/MpeEncoder.cpp
         Source/Core/MpeMidiSink.cpp

@@ -225,6 +225,23 @@
     Zeigerposition). Hit-Tests (Play + Edit + hitTest-Durchfall) sind jetzt
     rect-basiert (controlIdAt, oberstes zuerst) statt zell-basiert.
     Zuweisung läuft über die Macro-Ansicht aus Block E (Long-Press).
+  - **MIDI-Input für Controls (Block G, 07/2026):** externe CC-Eingänge
+    bewegen Conduit-Fader/XY (Anzeige folgt) OHNE Parametersprung.
+    `MidiControlInput` (Core): öffnet existierende MIDI-In-Ports; der
+    JUCE-MIDI-Callback (System-Thread!) pusht CC-Events wait-free in eine
+    `SpscQueue`, ein 60-Hz-Timer pumpt auf den Message Thread.
+    `MidiInBindings` (Core, headless, Catch2): pro Control-Wert
+    (MacroControlKey) EIN Eingangs-CC (bind ersetzt Key- UND CC-Kollision);
+    `SoftTakeover` = Pickup bei Kreuzung des Ist-Werts oder Nähe (ε 0.03),
+    lokaler Touch löst (notifyLocalTouch in den Layer-Callbacks — der
+    externe Fader muss neu aufnehmen); One-Pole-Eingangs-Glättung
+    (0.35/Tick, Snap 0.004) macht aus 127-Stufen-CCs weiche Fahrten, die
+    über GridPage::applyExternalValue auch die Macro-Ziele (→ OSC/Live)
+    weich erreichen. UI: MIDI-Eingang-Combo im Settings-Slide-Out,
+    MIDI-In-Zeile (Toggle + Ch/CC) im Macro-Panel pro Control/Achse.
+    LED-Feedback/Motorfader: NUR Schnittstelle
+    (`MidiInBindings::onFeedbackEcho(channel, cc, value01)`, feuert beim
+    Anwenden — Hardware-Implementierung später). Laufzeit-only (Block K).
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +
