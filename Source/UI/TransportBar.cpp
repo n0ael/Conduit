@@ -146,8 +146,10 @@ TransportBar::TransportBar (juce::ValueTree rootTree, LinkClock& linkClockToUse,
 
     for (int page = 0; page < 4; ++page)
     {
-        auto tile = std::make_unique<push::IconTile> (pageIcons[page], pageNames[page],
-                                                      push::colours::ledWhite);
+        // HoldIconTile (Block H): onClick bleibt der Tap-Hook; der Grid-Tile
+        // bekommt zusätzlich den Long-Press (Track-Selector, EngineEditor).
+        auto tile = std::make_unique<push::HoldIconTile> (pageIcons[page], pageNames[page],
+                                                          push::colours::ledWhite);
         tile->setTooltip (juce::String (pageNames[page]) + "-Page");
         tile->onClick = [this, page]
         {
@@ -156,6 +158,13 @@ TransportBar::TransportBar (juce::ValueTree rootTree, LinkClock& linkClockToUse,
             if (onPageSelected != nullptr)
                 onPageSelected (page);
         };
+
+        if (page == pageGrid)
+            tile->onLongPress = [this]
+            {
+                if (onGridPageHold != nullptr)
+                    onGridPageHold();
+            };
 
         addAndMakeVisible (*tile);
         pageTiles.push_back (std::move (tile));

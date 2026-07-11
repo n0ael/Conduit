@@ -1,0 +1,125 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include "UI/GridPage.h"
+#include "UI/TrackSelectorPanel.h"
+
+namespace
+{
+
+[[nodiscard]] juce::var parse (const char* json)
+{
+    auto result = juce::JSON::parse (juce::String::fromUTF8 (json));
+    REQUIRE (result.getDynamicObject() != nullptr);
+    return result;
+}
+
+} // namespace
+
+//==============================================================================
+TEST_CASE ("TrackSelectorPanel: midiTrackRowsFrom filtert und sortiert MIDI-Tracks", "[grid][trackselect]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    conduit::LiveSetModel model;
+
+    // Live-Reihenfolge absichtlich verdreht (index), Audio/Return/Master
+    // muessen komplett rausfallen
+    model.applySnapshot ("tracks",
+        parse (R"({"tr:1":{"name":"Bass","color":255,"kind":"midi","index":2},)"
+               R"("tr:2":{"name":"Drums","color":16711680,"kind":"audio","index":0},)"
+               R"("tr:3":{"name":"Keys","color":65280,"kind":"midi","index":1},)"
+               R"("rt:1":{"name":"Reverb","color":0,"kind":"return","index":0},)"
+               R"("ma:1":{"name":"Master","color":0,"kind":"master","index":0}})"));
+
+    const auto rows = conduit::TrackSelectorPanel::midiTrackRowsFrom (model);
+
+    REQUIRE (rows.size() == 2);
+    REQUIRE (rows[0].name == "Keys");
+    REQUIRE (rows[0].key == "tr:3");
+    REQUIRE (rows[0].colour == juce::Colour (0xff00ff00));
+    REQUIRE (rows[1].name == "Bass");
+    REQUIRE (rows[1].key == "tr:1");
+    REQUIRE (rows[1].colour == juce::Colour (0xff0000ff));
+}
+
+TEST_CASE ("TrackSelectorPanel: leeres Modell ergibt leere Liste (kein Crash)", "[grid][trackselect]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    conduit::LiveSetModel model;
+
+    REQUIRE (conduit::TrackSelectorPanel::midiTrackRowsFrom (model).empty());
+
+    conduit::TrackSelectorPanel panel (model);
+    REQUIRE (panel.getHeight() == conduit::TrackSelectorPanel::kTitleHeight
+                                      + conduit::TrackSelectorPanel::kRowHeight);
+}
+
+TEST_CASE ("TrackSelectorPanel: makeMidiInputFocusCommand baut das Wire-Format", "[grid][trackselect]")
+{
+    const auto message = conduit::TrackSelectorPanel::makeMidiInputFocusCommand (
+        "tr:7", "Conduit A", "K1 (Port 1)");
+
+    REQUIRE (message.getAddressPattern().toString() == "/live/song/set/midi_input_focus");
+    REQUIRE (message.size() == 3);
+    REQUIRE (message[0].getString() == "tr:7");
+    REQUIRE (message[1].getString() == "Conduit A");
+    REQUIRE (message[2].getString() == "K1 (Port 1)");
+}
+
+//==============================================================================
+TEST_CASE ("GridPage: nextLayoutMode toggelt 64-Pad <-> XY+Fader", "[grid][trackselect]")
+{
+    using Mode = conduit::GridPanelSettings::GridLayoutMode;
+
+    REQUIRE (conduit::GridPage::nextLayoutMode (Mode::fullPads) == Mode::xyFaders);
+    REQUIRE (conduit::GridPage::nextLayoutMode (Mode::xyFaders) == Mode::fullPads);
+}
+
+//==============================================================================
+TEST_CASE ("HoldIconTile: Tap feuert onClick, Long-Press unterdrueckt ihn", "[push][holdicon]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    conduit::push::HoldIconTile tile (conduit::push::Icon::gridMpe, "grid");
+    int taps = 0, longPresses = 0;
+    tile.onClick = [&] { ++taps; };
+    tile.onLongPress = [&] { ++longPresses; };
+
+    // Kurzer Tap innerhalb der Kachel
+    tile.beginPress();
+    tile.endPress (true);
+    REQUIRE (taps == 1);
+    REQUIRE (longPresses == 0);
+
+    // Long-Press: Timeout feuert, das Loslassen ist danach KEIN Tap mehr
+    tile.beginPress();
+    tile.firePressTimeout();
+    REQUIRE (longPresses == 1);
+    tile.endPress (true);
+    REQUIRE (taps == 1);
+
+    // Timeout ohne aktiven Druck ist wirkungslos
+    tile.firePressTimeout();
+    REQUIRE (longPresses == 1);
+}
+
+TEST_CASE ("HoldIconTile: Loslassen ausserhalb ist kein Tap, Bewegung erlaubt Tap weiter", "[push][holdicon]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    conduit::push::HoldIconTile tile (conduit::push::Icon::gridMpe, "grid");
+    int taps = 0, longPresses = 0;
+    tile.onClick = [&] { ++taps; };
+    tile.onLongPress = [&] { ++longPresses; };
+
+    tile.beginPress();
+    tile.endPress (false);   // Finger von der Kachel gezogen
+    REQUIRE (taps == 0);
+
+    // Bewegung ueber der Toleranz bricht nur den Long-Press ab -- der Tap
+    // beim Loslassen innerhalb bleibt gueltig (Button-Semantik)
+    tile.beginPress();
+    tile.movePress ({ conduit::push::HoldIconTile::kMoveTolerancePx + 4, 0 });
+    tile.endPress (true);
+    REQUIRE (taps == 1);
+    REQUIRE (longPresses == 0);
+}

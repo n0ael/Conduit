@@ -152,6 +152,13 @@ class Scene(_Listenable):
         self._set(key, value)
 
 
+class RoutingType(object):
+    """Live.Track.RoutingTypeMap-Eintrag: nur display_name interessiert."""
+
+    def __init__(self, display_name):
+        self.display_name = display_name
+
+
 class Track(_Listenable):
     """Live-Realismus (Befund Feldtest 09.07.2026): der Zugriff auf `arm`
     (und die arm-Listener) wirft im echten Live eine RuntimeError, wenn der
@@ -173,6 +180,15 @@ class Track(_Listenable):
             self.__dict__["arm"] = False
         self.__dict__["has_midi_input"] = has_midi_input
         self.__dict__["has_audio_output"] = True
+        if can_be_armed:
+            # Input-Routing + Monitoring existieren nur auf regulaeren
+            # Tracks (Returns/Master werfen im echten LOM, s. _forbidden)
+            self.__dict__["current_monitoring_state"] = 1   # Auto
+            self.__dict__["available_input_routing_types"] = [
+                RoutingType("All Ins"), RoutingType("Conduit A"),
+                RoutingType("K1 (Port 1)")]
+            self.__dict__["input_routing_type"] = \
+                self.__dict__["available_input_routing_types"][0]
         self.__dict__["is_foldable"] = False
         self.__dict__["output_meter_left"] = 0.0
         self.__dict__["output_meter_right"] = 0.0
@@ -181,7 +197,9 @@ class Track(_Listenable):
         self.devices = []
 
     def _forbidden(self, name):
-        if name in ("arm", "add_arm_listener", "remove_arm_listener"):
+        if name in ("arm", "add_arm_listener", "remove_arm_listener",
+                    "current_monitoring_state", "input_routing_type",
+                    "available_input_routing_types"):
             return not self.__dict__["can_be_armed"]
         if name in ("mute", "solo", "add_mute_listener", "remove_mute_listener",
                     "add_solo_listener", "remove_solo_listener"):

@@ -242,6 +242,35 @@
     LED-Feedback/Motorfader: NUR Schnittstelle
     (`MidiInBindings::onFeedbackEcho(channel, cc, value01)`, feuert beim
     Anwenden — Hardware-Implementierung später). Laufzeit-only (Block K).
+  - **Grid-Page-Button: Mode-Toggle + Track-Select (Block H, 07/2026):**
+    die Page-Tiles der TransportBar sind jetzt `push::HoldIconTile`
+    (wiederverwendbar: onClick bleibt der Tap-Hook — bestehende Tests/
+    Verdrahtung unverändert —, onLongPress feuert nach 450 ms ruhigem
+    Halten, Bewegung > 8 px bricht ab; Kernpfade beginPress/movePress/
+    endPress/firePressTimeout, KEINE Button-Klick-Maschinerie in den
+    Maus-Handlern — setState für die Down-Optik). Tap auf den Grid-Tile
+    bei SCHON aktiver Grid-Page toggelt `gridLayoutMode` (64 Pads ↔
+    XY+Fader, `GridPage::toggleLayoutMode`/`nextLayoutMode` — der
+    persistierte Schalter aus „Pad-Layout-Modi" oben IST dieser Toggle);
+    die Entscheidung trifft der EngineEditor in onPageSelected (Vorher-
+    Zustand nötig). Long-Press öffnet den `TrackSelectorPanel`
+    (Source/UI, CallOutBox am Tile): MIDI-Tracks des Live-Sets mit
+    Name + Live-Farbe (tracks-Domain des LiveSetModel, kind == "midi",
+    nach Live-Index sortiert; Snapshot beim Öffnen, Stable-IDs NIE
+    serialisieren). Auswahl sendet `/live/song/set/midi_input_focus
+    [trackKey, inputName, defaultInputName]`: der Ziel-Track bekommt
+    Monitor „In" + Conduits Grid-MIDI-OUT-Portnamen als Input (beim
+    User „Conduit A", `MidiDeviceTarget::currentDeviceName` — Name,
+    nicht Identifier!), alle anderen MIDI-Tracks Monitor „Auto" + das
+    in den Grid-Settings gewählte MIDI-In-Gerät
+    (`MidiControlInput::currentDeviceName`; leer = Routing unangetastet).
+    Script-Seite (handlers/song.py): Routing-Match exakter display_name,
+    sonst case-insensitive Präfix (Live hängt „ (Port 1)"-Suffixe an);
+    Ziel-Vergleich über die `_live_ptr`-Identität (LOM-Wrapper nicht
+    identitätsstabil!), jede Teiloperation LOM-defensiv; Audio-Tracks/
+    Returns/Master unberührt. Zweck: unabhängig von Push/Keyboard jeden
+    Kanal direkt aus Conduit spielen. TODO(design): Anzeige des aktuell
+    fokussierten Tracks im Selector (Laufzeit-Zustand, Block-K-Umfeld).
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +

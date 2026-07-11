@@ -288,6 +288,19 @@ void GridPage::updateCcMode()
     ccLayer.setCcMode (dockPanel.isPanelOpen() && dockPanel.getActiveTabId() == "cc");
 }
 
+GridPanelSettings::GridLayoutMode
+GridPage::nextLayoutMode (GridPanelSettings::GridLayoutMode mode) noexcept
+{
+    return mode == GridPanelSettings::GridLayoutMode::fullPads
+               ? GridPanelSettings::GridLayoutMode::xyFaders
+               : GridPanelSettings::GridLayoutMode::fullPads;
+}
+
+void GridPage::toggleLayoutMode()
+{
+    setLayoutMode (nextLayoutMode (panelSettings.getGridLayoutMode()));
+}
+
 void GridPage::setLayoutMode (GridPanelSettings::GridLayoutMode newMode)
 {
     panelSettings.setGridLayoutMode (newMode);

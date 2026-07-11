@@ -107,6 +107,64 @@ void TextTile::setText (const juce::String& newText)
 }
 
 //==============================================================================
+void HoldIconTile::beginPress()
+{
+    pressActive = true;
+    longPressFired = false;
+    startTimer (kLongPressMs);
+}
+
+void HoldIconTile::movePress (juce::Point<int> offsetFromPress)
+{
+    // Bewegung über der Toleranz = kein Long-Press mehr (Drag-Absicht);
+    // der Tap beim Loslassen innerhalb der Kachel bleibt gültig.
+    if (offsetFromPress.getDistanceFromOrigin() > kMoveTolerancePx)
+        stopTimer();
+}
+
+void HoldIconTile::endPress (bool pointerStillInside)
+{
+    stopTimer();
+
+    const auto wasTap = pressActive && ! longPressFired && pointerStillInside;
+    pressActive = false;
+
+    if (wasTap && onClick != nullptr)
+        onClick();
+}
+
+void HoldIconTile::firePressTimeout()
+{
+    stopTimer();
+
+    if (! pressActive)
+        return;
+
+    longPressFired = true;
+
+    if (onLongPress != nullptr)
+        onLongPress();
+}
+
+void HoldIconTile::mouseDown (const juce::MouseEvent& event)
+{
+    juce::ignoreUnused (event);
+    setState (buttonDown);   // Down-Optik ohne Button-Klick-Maschinerie
+    beginPress();
+}
+
+void HoldIconTile::mouseDrag (const juce::MouseEvent& event)
+{
+    movePress (event.getOffsetFromDragStart());
+}
+
+void HoldIconTile::mouseUp (const juce::MouseEvent& event)
+{
+    setState (buttonNormal);
+    endPress (getLocalBounds().contains (event.getPosition()));
+}
+
+//==============================================================================
 constexpr juce::uint32 holdTileThresholdMs = 350;
 
 void HoldTile::beginHold()

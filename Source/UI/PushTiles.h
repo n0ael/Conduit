@@ -76,6 +76,52 @@ private:
 
 //==============================================================================
 /**
+    Icon-Kachel mit Long-Press-Erkennung (Block H, Masterplan): onClick
+    bleibt der Tap-Hook (Button-kompatibel), zusätzlich feuert onLongPress
+    nach ~450 ms ruhigem Halten (Bewegung > 8 px bricht ab — Muster
+    CcControlLayer-Long-Press). Nach einem Long-Press feuert der folgende
+    mouseUp KEINEN Tap mehr. beginPress()/movePress()/endPress()/
+    firePressTimeout() sind die testbaren Kernpfade der Maus-Handler.
+*/
+class HoldIconTile final : public IconTile,
+                           private juce::Timer
+{
+public:
+    using IconTile::IconTile;
+
+    std::function<void()> onLongPress;
+
+    /** [Tests/Maus] Druck-Beginn: startet die Long-Press-Uhr. */
+    void beginPress();
+
+    /** [Tests/Maus] Bewegung seit Druck-Beginn — über der Toleranz ist der
+        Long-Press abgebrochen (ein Tap beim Loslassen bleibt möglich). */
+    void movePress (juce::Point<int> offsetFromPress);
+
+    /** [Tests/Maus] Loslassen; pointerStillInside = Tap-Bedingung. */
+    void endPress (bool pointerStillInside);
+
+    /** [Tests] Long-Press-Uhr abgelaufen (= timerCallback-Kern). */
+    void firePressTimeout();
+
+    void mouseDown (const juce::MouseEvent& event) override;
+    void mouseDrag (const juce::MouseEvent& event) override;
+    void mouseUp (const juce::MouseEvent& event) override;
+
+    static constexpr int kLongPressMs         = 450;
+    static constexpr int kMoveTolerancePx     = 8;
+
+private:
+    void timerCallback() override { firePressTimeout(); }
+
+    bool pressActive = false;
+    bool longPressFired = false;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (HoldIconTile)
+};
+
+//==============================================================================
+/**
     Text-Kachel mit Halte-Erkennung (Push-Hardware-Muster, M6/M7):
     Kurzklick (< 350 ms) feuert onShortClick, Drücken/Loslassen meldet
     onHoldChanged — Basis der TARGET-, DELETE- und SAVE-Gesten

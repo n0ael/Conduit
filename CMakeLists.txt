@@ -283,6 +283,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/PushTiles.cpp
     Source/UI/ScopeDisplay.cpp
     Source/UI/TapMenuPanel.cpp
+    Source/UI/TrackSelectorPanel.cpp
     Source/UI/TransportBar.cpp
     Source/UI/DevPanel.cpp
     Source/UI/SequencerControlPanel.cpp
@@ -653,6 +654,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/UI/PageHostTests.cpp
         Tests/UI/PushDesignTests.cpp
         Tests/UI/SequencerControlPanelTests.cpp
+        Tests/UI/TrackSelectorPanelTests.cpp
         Tests/UI/TransportBarTests.cpp
         Tests/Util/ScaleQuantizerTests.cpp
         Tests/Util/SpscQueueTests.cpp
@@ -850,6 +852,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/PushTiles.cpp
         Source/UI/ScopeDisplay.cpp
         Source/UI/TapMenuPanel.cpp
+        Source/UI/TrackSelectorPanel.cpp
         Source/UI/TransportBar.cpp
         Source/UI/DevPanel.cpp
         Source/UI/SequencerControlPanel.cpp

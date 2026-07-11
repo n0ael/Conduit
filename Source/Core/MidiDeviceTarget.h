@@ -29,6 +29,10 @@ public:
     bool         isOpen() const noexcept;
     juce::String currentDeviceIdentifier() const;
 
+    /** Port-NAME (nicht Identifier) — unter diesem Namen listet Ableton
+        den Port als MIDI-Eingang (Track-Selector, Block H). */
+    juce::String currentDeviceName() const;
+
     void send (const juce::MidiMessage& message) override;
 
 private:

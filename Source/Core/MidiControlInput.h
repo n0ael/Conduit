@@ -35,6 +35,10 @@ public:
     [[nodiscard]] bool isOpen() const noexcept { return input != nullptr; }
     [[nodiscard]] juce::String currentDeviceIdentifier() const;
 
+    /** Port-NAME (nicht Identifier) — unter diesem Namen kennt Ableton das
+        Gerät als Track-MIDI-Eingang (Track-Selector, Block H). */
+    [[nodiscard]] juce::String currentDeviceName() const;
+
     /** CC eingetroffen [Message Thread, ~60 Hz gepumpt]. */
     std::function<void (int channel, int cc, int value7bit)> onCcReceived;
 

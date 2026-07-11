@@ -61,6 +61,12 @@ public:
     std::function<void()> onToggleEditorPanel;            // Grid-Editor-Dock-Panel-Toggle (S2)
     std::function<void (int pageIndex)> onPageSelected;   // Reihenfolge: pages[]
 
+    /** Long-Press auf dem Grid-Page-Tile (Block H): der Editor öffnet den
+        Ableton-Track-Selector (TrackSelectorPanel als CallOutBox). Der Tap
+        läuft weiter über onPageSelected — die „Grid schon aktiv → Layout-
+        Modus togglen"-Entscheidung trifft der Editor dort. */
+    std::function<void()> onGridPageHold;
+
     /** Beschriftungen der Metronom-Ziel-Paare (Kanäle 2n/2n+1) fürs
         Link-Menü — der Editor liefert sie aus den ChannelNames. */
     std::function<juce::StringArray()> metronomeTargetNames;

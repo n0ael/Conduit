@@ -113,6 +113,14 @@ public:
     void setDockPanelOpen (bool shouldBeOpen) noexcept;
     [[nodiscard]] bool isDockPanelOpen() const noexcept { return dockPanel.isPanelOpen(); }
 
+    /** Block H: Tap auf den Grid-Page-Button bei schon aktiver Grid-Page
+        (EngineEditor) — schaltet 64-Pad ↔ XY+Fader um (persistiert). */
+    void toggleLayoutMode();
+
+    /** Toggle-Zyklus des Layout-Modus — pure, testbar ohne Instanz. */
+    [[nodiscard]] static GridPanelSettings::GridLayoutMode
+        nextLayoutMode (GridPanelSettings::GridLayoutMode mode) noexcept;
+
     //==========================================================================
     // Kachel-Zyklen der Skala-Anzeige (Session-Skala, Design-Mock Grid-Page
     // v2) — pure functions, testbar ohne GridPage-Instanz.

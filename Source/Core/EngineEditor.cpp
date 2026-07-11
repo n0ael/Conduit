@@ -10,6 +10,7 @@
 #include "Core/Looper/LooperClipExporter.h"
 #include "UI/LooperSettingsMenu.h"
 #include "UI/SettingsWindow.h"
+#include "UI/TrackSelectorPanel.h"
 #include "Util/ScaleQuantizer.h"
 
 namespace conduit
@@ -122,7 +123,40 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
     };
 
     transportBar.onPageSelected = [this] (int pageIndex)
-    { selectPage (pageIndex); };
+    {
+        // Block H: Tap auf den Grid-Page-Button bei SCHON aktiver Grid-Page
+        // toggelt das Pad-Layout (64 Pads ↔ XY+Fader) statt Page-Wechsel.
+        if (pageIndex == TransportBar::pageGrid
+            && pageHost.getPage() == TransportBar::pageGrid)
+        {
+            gridPage.toggleLayoutMode();
+            return;
+        }
+
+        selectPage (pageIndex);
+    };
+
+    // Block H: Long-Press auf dem Grid-Page-Button → Ableton-Track-Selector.
+    // Auswahl: Ziel-Track Monitor „In" + Conduits Grid-MIDI-Out als Input,
+    // alle anderen MIDI-Tracks „Auto" + Conduits MIDI-In-Gerät (leer =
+    // Routing unangetastet, nur Monitor) — /live/song/set/midi_input_focus.
+    transportBar.onGridPageHold = [this]
+    {
+        auto panel = std::make_unique<TrackSelectorPanel> (engine.getLiveSetModel());
+        panel->onTrackChosen = [this] (const juce::String& trackKey)
+        {
+            engine.getTouchLiveClient().sendCommand (
+                TrackSelectorPanel::makeMidiInputFocusCommand (
+                    trackKey,
+                    engine.getGridMidiDeviceTarget().currentDeviceName(),
+                    engine.getGridMidiControlInput().currentDeviceName()));
+        };
+
+        juce::CallOutBox::launchAsynchronously (
+            std::move (panel),
+            transportBar.getPageTile (TransportBar::pageGrid).getScreenBounds(),
+            nullptr);
+    };
 
     // Tape (oo) → Retro-Looper-Page (B3): Toggle Looper ↔ Device; die
     // Tape-LED folgt dem Page-Zustand über den Editor-Timer

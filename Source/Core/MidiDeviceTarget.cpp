@@ -29,6 +29,11 @@ juce::String MidiDeviceTarget::currentDeviceIdentifier() const
     return output != nullptr ? output->getIdentifier() : juce::String();
 }
 
+juce::String MidiDeviceTarget::currentDeviceName() const
+{
+    return output != nullptr ? output->getName() : juce::String();
+}
+
 void MidiDeviceTarget::send (const juce::MidiMessage& message)
 {
     if (output != nullptr)

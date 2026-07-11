@@ -45,6 +45,11 @@ juce::String MidiControlInput::currentDeviceIdentifier() const
     return input != nullptr ? input->getIdentifier() : juce::String();
 }
 
+juce::String MidiControlInput::currentDeviceName() const
+{
+    return input != nullptr ? input->getName() : juce::String();
+}
+
 void MidiControlInput::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
 {
     // MIDI-SYSTEM-Thread: nur CCs interessieren, wait-free in die Queue --
