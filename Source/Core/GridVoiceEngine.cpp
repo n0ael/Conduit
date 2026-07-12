@@ -72,6 +72,13 @@ void GridVoiceEngine::noteOff (uint32_t fingerId, int releaseVelocity) noexcept
     pitchBendAxis.deactivate (voiceIndex);
 }
 
+bool GridVoiceEngine::rekeyVoice (uint32_t oldFingerId, uint32_t newFingerId) noexcept
+{
+    // Kein Sink-Event: Slot, Note und Achsen-Zustände bleiben unangetastet,
+    // nur der Finger-Schlüssel im Allocator wechselt (Block M, Drone-Start).
+    return allocator.rekey (oldFingerId, newFingerId);
+}
+
 void GridVoiceEngine::setPitchBend (uint32_t fingerId, float semitones) noexcept
 {
     const int voiceIndex = allocator.voiceForFinger (fingerId);

@@ -57,6 +57,19 @@ int VoiceAllocator::release (uint32_t fingerId) noexcept
     return -1;
 }
 
+bool VoiceAllocator::rekey (uint32_t oldFinger, uint32_t newFinger) noexcept
+{
+    if (oldFinger == 0 || newFinger == 0 || voiceForFinger (newFinger) >= 0)
+        return false;
+
+    const auto slot = voiceForFinger (oldFinger);
+    if (slot < 0)
+        return false;
+
+    slotFinger[(size_t) slot] = newFinger;   // Alter + Slot bleiben — nur der Schlüssel wechselt
+    return true;
+}
+
 int VoiceAllocator::voiceForFinger (uint32_t fingerId) const noexcept
 {
     if (fingerId == 0)

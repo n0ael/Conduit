@@ -30,6 +30,13 @@ public:
         fingerId (0 wenn keiner), damit der Aufrufer dessen voiceStop sendet. */
     int  allocate        (uint32_t fingerId, uint32_t& stolenFingerOut) noexcept;
     int  release         (uint32_t fingerId) noexcept;   // → voiceIndex, sonst -1
+
+    /** Block M (Hold/Drone): Slot von oldFinger auf newFinger umschlüsseln —
+        die Stimme läuft weiter (KEINE Sink-Events), nur der Schlüssel
+        wechselt (Drone-Start: Touch-Ids werden vom OS wiederverwendet, die
+        Drone-Stimme braucht eine kollisionsfreie synthetische Id).
+        false, wenn oldFinger nicht aktiv, newFinger schon aktiv oder 0. */
+    bool rekey           (uint32_t oldFinger, uint32_t newFinger) noexcept;
     int  voiceForFinger  (uint32_t fingerId) const noexcept; // → voiceIndex, sonst -1
     void reset           () noexcept;
     int  activeVoices    () const noexcept;

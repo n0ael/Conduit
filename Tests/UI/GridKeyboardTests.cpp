@@ -508,3 +508,195 @@ TEST_CASE ("GridKeyboard: Noten-Echo setzt und loescht Pegel (geclampt)", "[grid
     REQUIRE (juce::exactlyEqual (keyboard.echoLevel (-1), 0.0f));
     REQUIRE (juce::exactlyEqual (keyboard.echoLevel (128), 0.0f));
 }
+
+//==============================================================================
+// Hold/Drone (Block M) — Kernpfade touchDown/touchMove/touchUp mit
+// expliziten fingerIds (Multi-Finger headless, Muster HoldIconTile).
+
+namespace
+{
+    /// Anzahl VoiceStop-Events im Fake-Sink.
+    int voiceStops (const grid::FakeVoiceSink& fake)
+    {
+        int count = 0;
+        for (const auto& call : fake.calls)
+            if (call.kind == grid::FakeVoiceSink::Kind::VoiceStop)
+                ++count;
+        return count;
+    }
+} // namespace
+
+TEST_CASE ("Drone: Sonne zuerst loslassen (Mond liegt) -> Note dront, Orbit friert", "[grid][ui][drone]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    keyboard.touchDown (1, { 100.0f, 140.0f });   // Sonne (noteOn)
+    keyboard.touchDown (2, { 150.0f, 140.0f });   // Mond (50 px < grabRadius)
+    REQUIRE (voiceStops (fake) == 0);
+
+    keyboard.touchUp (1, { 100.0f, 140.0f });     // Sonne ZUERST hoch
+
+    REQUIRE (voiceStops (fake) == 0);             // KEIN noteOff -- Drone
+    REQUIRE (keyboard.droneCount() == 1);
+
+    // Der liegende Mond-Finger ist tot: Move/Up sind No-ops.
+    keyboard.touchMove (2, { 160.0f, 140.0f });
+    keyboard.touchUp (2, { 160.0f, 140.0f });
+    REQUIRE (voiceStops (fake) == 0);
+    REQUIRE (keyboard.droneCount() == 1);
+}
+
+TEST_CASE ("Drone: Sonne ohne liegenden Mond bleibt normales Release", "[grid][ui][drone]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    keyboard.touchDown (1, { 100.0f, 140.0f });
+    keyboard.touchDown (2, { 150.0f, 140.0f });
+    keyboard.touchUp (2, { 150.0f, 140.0f });     // Mond ZUERST hoch (friert)
+    keyboard.touchUp (1, { 100.0f, 140.0f });     // Sonne danach -> normal
+
+    REQUIRE (voiceStops (fake) == 1);
+    REQUIRE (keyboard.droneCount() == 0);
+}
+
+TEST_CASE ("Drone: Tap auf die Drone-Sonne beendet sie", "[grid][ui][drone]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    keyboard.touchDown (1, { 100.0f, 140.0f });
+    keyboard.touchDown (2, { 150.0f, 140.0f });
+    keyboard.touchUp (1, { 100.0f, 140.0f });     // -> Drone bei (100,140)
+    keyboard.touchUp (2, { 150.0f, 140.0f });
+    REQUIRE (keyboard.droneCount() == 1);
+
+    // Kurzer, unbewegter Tap auf die Drone-Sonne (down+up direkt
+    // nacheinander liegt sicher unter der 250-ms-Schwelle).
+    keyboard.touchDown (1, { 102.0f, 142.0f });
+    REQUIRE (voiceStops (fake) == 0);             // Grab startet KEINE neue Note
+    keyboard.touchUp (1, { 102.0f, 142.0f });
+
+    REQUIRE (voiceStops (fake) == 1);             // Drone beendet
+    REQUIRE (keyboard.droneCount() == 0);
+}
+
+TEST_CASE ("Drone: Grab + Bewegung biegt die Stimme relativ weiter (kein Neuanschlag)", "[grid][ui][drone]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);   // 40 px = 1 Pad-Breite
+
+    keyboard.touchDown (1, { 100.0f, 140.0f });
+    keyboard.touchDown (2, { 150.0f, 140.0f });
+    keyboard.touchUp (1, { 100.0f, 140.0f });
+    keyboard.touchUp (2, { 150.0f, 140.0f });
+    REQUIRE (keyboard.droneCount() == 1);
+
+    const auto voiceStartsBefore = fake.calls.size();
+    const auto bendBefore = [&fake]
+    {
+        for (auto it = fake.calls.rbegin(); it != fake.calls.rend(); ++it)
+            if (it->kind == grid::FakeVoiceSink::Kind::PitchBend)
+                return it->floatValue;
+        return 0.0f;
+    }();
+
+    // Grab auf der Sonne + ein voller Pad-Schritt nach rechts.
+    keyboard.touchDown (1, { 100.0f, 140.0f });
+    keyboard.touchMove (1, { 140.0f, 140.0f });
+
+    // Kein neuer VoiceStart durch den Grab.
+    auto newStarts = 0;
+    for (auto i = voiceStartsBefore; i < fake.calls.size(); ++i)
+        if (fake.calls[i].kind == grid::FakeVoiceSink::Kind::VoiceStart)
+            ++newStarts;
+    REQUIRE (newStarts == 0);
+
+    // Der Bend ist RELATIV um +1 HT weitergewandert (Treppen-Kennlinie:
+    // 1 Pad-Breite == 1 Halbton, unabhaengig vom Startpunkt der Zone).
+    const auto bendAfter = [&fake]
+    {
+        for (auto it = fake.calls.rbegin(); it != fake.calls.rend(); ++it)
+            if (it->kind == grid::FakeVoiceSink::Kind::PitchBend)
+                return it->floatValue;
+        return 0.0f;
+    }();
+    REQUIRE (bendAfter - bendBefore == Catch::Approx (1.0f).margin (1.0e-3));
+
+    // Loslassen nach Bewegung: KEIN Tap -> Drone bleibt (an neuer Position).
+    keyboard.touchUp (1, { 140.0f, 140.0f });
+    REQUIRE (voiceStops (fake) == 0);
+    REQUIRE (keyboard.droneCount() == 1);
+
+    // Tap an der NEUEN Position beendet ihn.
+    keyboard.touchDown (1, { 140.0f, 140.0f });
+    keyboard.touchUp (1, { 140.0f, 140.0f });
+    REQUIRE (voiceStops (fake) == 1);
+    REQUIRE (keyboard.droneCount() == 0);
+}
+
+TEST_CASE ("Drone: clearDrones beendet alle (Release-All-Pfad)", "[grid][ui][drone]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    keyboard.touchDown (1, { 100.0f, 140.0f });
+    keyboard.touchDown (2, { 150.0f, 140.0f });
+    keyboard.touchUp (1, { 100.0f, 140.0f });
+    keyboard.touchUp (2, { 150.0f, 140.0f });
+
+    keyboard.touchDown (3, { 220.0f, 60.0f });    // zweite Sonne + Mond
+    keyboard.touchDown (4, { 260.0f, 60.0f });
+    keyboard.touchUp (3, { 220.0f, 60.0f });
+    keyboard.touchUp (4, { 260.0f, 60.0f });
+
+    REQUIRE (keyboard.droneCount() == 2);
+
+    keyboard.clearDrones();
+    REQUIRE (voiceStops (fake) == 2);
+    REQUIRE (keyboard.droneCount() == 0);
+}
+
+TEST_CASE ("Drone: neuer Finger mit recycelter Touch-Id kollidiert nicht mit der Drone-Stimme", "[grid][ui][drone]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    keyboard.touchDown (1, { 100.0f, 140.0f });
+    keyboard.touchDown (2, { 150.0f, 140.0f });
+    keyboard.touchUp (1, { 100.0f, 140.0f });     // Drone (Voice umgeschluesselt)
+    keyboard.touchUp (2, { 150.0f, 140.0f });
+
+    // Dieselbe Touch-Id 1 spielt eine NEUE Note weit weg -- eigener Slot.
+    keyboard.touchDown (1, { 260.0f, 260.0f });
+    keyboard.touchUp (1, { 260.0f, 260.0f });
+
+    // Nur die neue Note stoppte; der Drone klingt weiter.
+    REQUIRE (voiceStops (fake) == 1);
+    REQUIRE (keyboard.droneCount() == 1);
+}

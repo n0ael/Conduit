@@ -131,6 +131,7 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
         engine.allNotesOff();
         keyboard.clearLatched();   // latched Akkord mit beenden (dessen
                                    // noteOffs verpuffen nach allNotesOff)
+        keyboard.clearDrones();    // Block M: Drones ebenfalls (idempotent)
     };
 
     // Oktav-Shift (Block D2): über dem Pitch-Ribbon, geklemmt in

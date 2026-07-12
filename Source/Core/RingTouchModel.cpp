@@ -110,8 +110,16 @@ RingTouchModel::UpResult RingTouchModel::onUp (uint32_t fingerId) noexcept
     {
         if (primaries[i].id == fingerId)
         {
+            // Block M (Hold/Drone): letzte Geometrie + Mond-Status
+            // mitliefern — der Besitzer entscheidet daraus über den
+            // Drone-Start (Sonne zuerst losgelassen, Mond liegt noch).
+            UpResult result { true, false, fingerId, 0,
+                              primaries[i].ringFinger != 0,
+                              primaries[i].center, primaries[i].ringOffset,
+                              primaries[i].hasOrbit };
+
             primaries.erase (primaries.begin() + (std::ptrdiff_t) i);
-            return { true, false, fingerId, 0 };
+            return result;
         }
     }
 

@@ -27,9 +27,18 @@ public:
     /** owner: die Sonne, deren Mond sich gerade bewegt hat. */
     struct MoveResult { bool hasSlide = false; uint32_t owner = 0; float slide01 = 0.0f; };
     /** primaryFinger: die abgehobene Sonne (wasPrimary). ringOwner: die
-        Sonne, deren Mond gerade losgelassen wurde (wasRing). */
+        Sonne, deren Mond gerade losgelassen wurde (wasRing).
+        Block M (Hold/Drone): hadActiveMoon = die abgehobene Sonne hatte in
+        diesem Moment einen noch LIEGENDEN Mond (Abhebe-Reihenfolge „Sonne
+        zuerst" — Drone-Auslöser); center/ringOffset/hasOrbit sind die
+        letzte Geometrie der Sonne (der Besitzer friert daraus den
+        Drone-Orbit ein — nach onUp ist die Sonne aus dem Model entfernt,
+        der liegende Mond-Finger wird ignoriert, bis er abhebt). */
     struct UpResult   { bool wasPrimary = false; bool wasRing = false;
-                        uint32_t primaryFinger = 0; uint32_t ringOwner = 0; };
+                        uint32_t primaryFinger = 0; uint32_t ringOwner = 0;
+                        bool hadActiveMoon = false;
+                        juce::Point<float> center; juce::Point<float> ringOffset;
+                        bool hasOrbit = false; };
     /** hasOrbit/orbitPos: Position des Mondes (Ring-Finger) relativ zur
         Sonne (center) — live oder eingefroren, nur gültig, wenn ein Mond
         je aktiv war (Orbit bestand). */

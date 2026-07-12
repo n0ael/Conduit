@@ -1,5 +1,7 @@
 #include "GridKeyboardComponent.h"
 
+#include <algorithm>
+
 #include "Core/GridSensitivity.h"
 #include "PushLookAndFeel.h"
 
@@ -64,13 +66,13 @@ void GridKeyboardComponent::octaveDown() noexcept
     layout.setLowestNote (baseLowestNote + octaveShiftValue * 12);
 }
 
-juce::Point<float> GridKeyboardComponent::normalisedPosition (const juce::MouseEvent& event) const noexcept
+juce::Point<float> GridKeyboardComponent::normalisedPosition (juce::Point<float> positionPx) const noexcept
 {
     const auto bounds = getLocalBounds().toFloat();
     if (bounds.getWidth() <= 0.0f || bounds.getHeight() <= 0.0f)
         return {};
 
-    return { event.position.x / bounds.getWidth(), event.position.y / bounds.getHeight() };
+    return { positionPx.x / bounds.getWidth(), positionPx.y / bounds.getHeight() };
 }
 
 int GridKeyboardComponent::fingerIdFor (const juce::MouseEvent& event) noexcept
@@ -104,12 +106,52 @@ juce::Colour GridKeyboardComponent::padBaseColour (int midiNote, int rootNote,
 
 void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
 {
-    const auto fingerId = fingerIdFor (event);
-    const auto downResult = ring.onDown (static_cast<uint32_t> (fingerId), event.position);
+    touchDown (fingerIdFor (event), event.position);
+}
+
+void GridKeyboardComponent::mouseDrag (const juce::MouseEvent& event)
+{
+    touchMove (fingerIdFor (event), event.position);
+}
+
+void GridKeyboardComponent::mouseUp (const juce::MouseEvent& event)
+{
+    touchUp (fingerIdFor (event), event.position);
+}
+
+void GridKeyboardComponent::touchDown (int fingerId, juce::Point<float> position)
+{
+    // Drone-Grab (Block M): Aufsetzen auf eine Drone-Sonne übernimmt die
+    // Stimme nahtlos — VOR der Ring-Zuordnung (der Finger darf weder Sonne
+    // noch Mond werden) und ohne Neuanschlag; Bend/Pressure wirken RELATIV
+    // ab dem Aufsetzpunkt. Ein kurzer Tap (touchUp) beendet den Drone.
+    if (const auto droneIndex = droneIndexAt (position); droneIndex >= 0)
+    {
+        auto& drone = drones[(size_t) droneIndex];
+        const auto pos = normalisedPosition (position);
+
+        FingerState state;
+        state.currentNormX = pos.x;
+        state.currentNormY = pos.y;
+        state.anchorNormX  = drone.anchorNormX;
+        state.grabbedDroneId    = drone.voiceFingerId;
+        state.grabNormX         = pos.x;
+        state.grabNormY         = pos.y;
+        state.grabBendSemitones = drone.lastBendSemitones;
+        state.grabPressure01    = drone.lastPressure01;
+        state.downPx     = position;
+        state.downTimeMs = juce::Time::getMillisecondCounterHiRes();
+        fingers[fingerId] = state;
+
+        repaint();
+        return;
+    }
+
+    const auto downResult = ring.onDown (static_cast<uint32_t> (fingerId), position);
 
     if (downResult.kind == grid::RingTouchModel::TouchKind::Ring)
     {
-        const auto moveResult = ring.onMove (static_cast<uint32_t> (fingerId), event.position);
+        const auto moveResult = ring.onMove (static_cast<uint32_t> (fingerId), position);
         if (moveResult.hasSlide)
             engine.setSlide (moveResult.owner, moveResult.slide01);
 
@@ -117,7 +159,7 @@ void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
         return;
     }
 
-    const auto pos = normalisedPosition (event);
+    const auto pos = normalisedPosition (position);
     const auto pad = layout.padIndexAt (pos.x, pos.y);
 
     if (pad < 0)
@@ -130,7 +172,15 @@ void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
                              ? layout.padCentreNormX (pad)
                              : pos.x;
 
-    fingers[fingerId] = { pos.x, pos.y, anchorX, pos.x, pos.y };
+    FingerState state;
+    state.startNormX   = pos.x;
+    state.startNormY   = pos.y;
+    state.anchorNormX  = anchorX;
+    state.currentNormX = pos.x;
+    state.currentNormY = pos.y;
+    state.lastBendSemitones = layout.pitchBendFromAnchor (anchorX, pos.x);
+    state.lastPressure01    = layout.expressionFromDrag (pos.y, pos.y);
+    fingers[fingerId] = state;
 
     // Block J1: Finger beim Magneten registrieren (Pad-Einheiten) — auch
     // bei ausgeschaltetem Gravity (billige Map-Pflege; getickt wird nur,
@@ -145,16 +195,44 @@ void GridKeyboardComponent::mouseDown (const juce::MouseEvent& event)
     // Im pad-Modus ist der Startwert des Bends die absolute Distanz zum
     // Pad-Zentrum (innerhalb der In-Tune-Zone = 0).
     engine.noteOn (static_cast<uint32_t> (fingerId), layout.noteForPad (pad), 100);
-    engine.setPitchBend (static_cast<uint32_t> (fingerId),
-                          layout.pitchBendFromAnchor (anchorX, pos.x));
-    engine.setPressure (static_cast<uint32_t> (fingerId), layout.expressionFromDrag (pos.y, pos.y));
+    engine.setPitchBend (static_cast<uint32_t> (fingerId), state.lastBendSemitones);
+    engine.setPressure (static_cast<uint32_t> (fingerId), state.lastPressure01);
     repaint();
 }
 
-void GridKeyboardComponent::mouseDrag (const juce::MouseEvent& event)
+void GridKeyboardComponent::touchMove (int fingerId, juce::Point<float> position)
 {
-    const auto fingerId = fingerIdFor (event);
-    const auto moveResult = ring.onMove (static_cast<uint32_t> (fingerId), event.position);
+    // Drone-Grab (Block M): der Finger steuert die Drone-Stimme RELATIV —
+    // Bend/Pressure setzen an den eingefrorenen Werten an (nie zur
+    // Fingerposition springen), die Sonne folgt dem Finger.
+    if (const auto grabIt = fingers.find (fingerId);
+        grabIt != fingers.end() && grabIt->second.grabbedDroneId != 0)
+    {
+        auto& state = grabIt->second;
+        state.maxMovePx = juce::jmax (state.maxMovePx, position.getDistanceFrom (state.downPx));
+
+        auto* drone = droneById (state.grabbedDroneId);
+        if (drone == nullptr)
+            return;
+
+        const auto pos = normalisedPosition (position);
+        state.currentNormX = pos.x;
+        state.currentNormY = pos.y;
+
+        drone->centre = position;
+        drone->lastBendSemitones = state.grabBendSemitones
+            + layout.pitchBendFromAnchor (state.anchorNormX, pos.x)
+            - layout.pitchBendFromAnchor (state.anchorNormX, state.grabNormX);
+        drone->lastPressure01 = state.grabPressure01
+            + layout.expressionFromDrag (state.grabNormY, pos.y) - 0.5f;
+
+        engine.setPitchBend (drone->voiceFingerId, drone->lastBendSemitones);
+        engine.setPressure (drone->voiceFingerId, drone->lastPressure01);
+        repaint();
+        return;
+    }
+
+    const auto moveResult = ring.onMove (static_cast<uint32_t> (fingerId), position);
 
     if (moveResult.hasSlide)
     {
@@ -167,7 +245,7 @@ void GridKeyboardComponent::mouseDrag (const juce::MouseEvent& event)
     if (it == fingers.end())
         return;
 
-    const auto pos = normalisedPosition (event);
+    const auto pos = normalisedPosition (position);
     it->second.currentNormX = pos.x;
     it->second.currentNormY = pos.y;
 
@@ -176,17 +254,43 @@ void GridKeyboardComponent::mouseDrag (const juce::MouseEvent& event)
     // solange der Magnet nicht greift (verlustfreier Bypass).
     gravity.onMove (fingerId, pos.x * (float) layout.cols());
 
-    engine.setPitchBend (static_cast<uint32_t> (fingerId),
-                          layout.pitchBendFromAnchor (it->second.anchorNormX,
-                                                      effectiveNormX (fingerId, pos.x)));
-    engine.setPressure (static_cast<uint32_t> (fingerId),
-                         layout.expressionFromDrag (it->second.startNormY, pos.y));
+    it->second.lastBendSemitones = layout.pitchBendFromAnchor (it->second.anchorNormX,
+                                                               effectiveNormX (fingerId, pos.x));
+    it->second.lastPressure01 = layout.expressionFromDrag (it->second.startNormY, pos.y);
+
+    engine.setPitchBend (static_cast<uint32_t> (fingerId), it->second.lastBendSemitones);
+    engine.setPressure (static_cast<uint32_t> (fingerId), it->second.lastPressure01);
     repaint();
 }
 
-void GridKeyboardComponent::mouseUp (const juce::MouseEvent& event)
+void GridKeyboardComponent::touchUp (int fingerId, juce::Point<float> position)
 {
-    const auto fingerId = fingerIdFor (event);
+    // Drone-Grab-Ende (Block M): kurzer, unbewegter Tap beendet den Drone
+    // (noteOff); alles andere legt ihn an neuer Position/Werten wieder ab.
+    if (const auto grabIt = fingers.find (fingerId);
+        grabIt != fingers.end() && grabIt->second.grabbedDroneId != 0)
+    {
+        auto& state = grabIt->second;
+        state.maxMovePx = juce::jmax (state.maxMovePx, position.getDistanceFrom (state.downPx));
+
+        const auto elapsedMs = juce::Time::getMillisecondCounterHiRes() - state.downTimeMs;
+        const auto isTap = elapsedMs < (double) kDroneTapMaxMs
+                           && state.maxMovePx < kDroneTapTolerancePx;
+
+        if (isTap)
+        {
+            engine.noteOff (state.grabbedDroneId, 0);
+            drones.erase (std::remove_if (drones.begin(), drones.end(),
+                              [id = state.grabbedDroneId] (const DroneSun& d)
+                              { return d.voiceFingerId == id; }),
+                          drones.end());
+        }
+
+        fingers.erase (fingerId);
+        repaint();
+        return;
+    }
+
     const auto upResult = ring.onUp (static_cast<uint32_t> (fingerId));
 
     if (upResult.wasRing)
@@ -201,11 +305,75 @@ void GridKeyboardComponent::mouseUp (const juce::MouseEvent& event)
 
     if (upResult.wasPrimary)
     {
+        // Drone-Start (Block M, Abhebe-Reihenfolge „Sonne zuerst"): liegt
+        // der Mond noch, dront die Note weiter — Stimme auf eine
+        // synthetische Id umschlüsseln (Touch-Ids werden wiederverwendet),
+        // Sonne + eingefrorener Orbit bleiben fingerlos auf dem Grid. Der
+        // noch liegende Mond-Finger ist ab jetzt tot (RingTouchModel hat
+        // ihn mit der Sonne vergessen; sein touchUp ist ein No-op).
+        const auto it = fingers.find (fingerId);
+
+        if (upResult.hadActiveMoon && it != fingers.end()
+            && engine.rekeyVoice (static_cast<uint32_t> (fingerId), nextDroneFingerId))
+        {
+            DroneSun drone;
+            drone.centre        = upResult.center;
+            drone.orbitOffset   = upResult.ringOffset;
+            drone.hasOrbit      = upResult.hasOrbit;
+            drone.voiceFingerId = nextDroneFingerId++;
+            drone.anchorNormX   = it->second.anchorNormX;
+            drone.lastBendSemitones = it->second.lastBendSemitones;
+            drone.lastPressure01    = it->second.lastPressure01;
+            drones.push_back (drone);
+
+            fingers.erase (fingerId);
+            gravity.onUp (fingerId);
+            repaint();
+            return;
+        }
+
         fingers.erase (fingerId);
         gravity.onUp (fingerId);
         engine.noteOff (static_cast<uint32_t> (upResult.primaryFinger), 0);
         repaint();
     }
+}
+
+//==============================================================================
+// Hold/Drone (Block M)
+
+GridKeyboardComponent::DroneSun* GridKeyboardComponent::droneById (uint32_t voiceFingerId) noexcept
+{
+    for (auto& drone : drones)
+        if (drone.voiceFingerId == voiceFingerId)
+            return &drone;
+
+    return nullptr;
+}
+
+int GridKeyboardComponent::droneIndexAt (juce::Point<float> positionPx) const noexcept
+{
+    // Trefferzone = Sonnen-Zeichnradius (restRadiusPx ~ 40 px, über der
+    // 44-px-Faustregel zusammen mit dem Zentrum-Snapping akzeptiert).
+    const auto hitRadius = ring.restRadiusPx();
+
+    for (int i = 0; i < (int) drones.size(); ++i)
+        if (drones[(size_t) i].centre.getDistanceFrom (positionPx) <= hitRadius)
+            return i;
+
+    return -1;
+}
+
+void GridKeyboardComponent::clearDrones()
+{
+    if (drones.empty())
+        return;
+
+    for (const auto& drone : drones)
+        engine.noteOff (drone.voiceFingerId, 0);
+
+    drones.clear();
+    repaint();
 }
 
 //==============================================================================
@@ -322,7 +490,7 @@ std::vector<grid::StoredSun> GridKeyboardComponent::constellationNormalized() co
         return result;
 
     const auto circles = ring.activeCircles();
-    result.reserve (circles.size() + latched.size());
+    result.reserve (circles.size() + latched.size() + drones.size());
 
     for (const auto& circle : circles)
     {
@@ -334,6 +502,12 @@ std::vector<grid::StoredSun> GridKeyboardComponent::constellationNormalized() co
     for (const auto& sun : latched)
         result.push_back ({ sun.centre.x / w, sun.centre.y / h,
                             sun.orbitOffset.x / w, sun.orbitOffset.y / w, sun.hasOrbit });
+
+    // Drones (Block M) sind Teil der klingenden Konstellation — der
+    // Akkord-Speicher nimmt sie mit auf.
+    for (const auto& drone : drones)
+        result.push_back ({ drone.centre.x / w, drone.centre.y / h,
+                            drone.orbitOffset.x / w, drone.orbitOffset.y / w, drone.hasOrbit });
 
     return result;
 }
@@ -392,6 +566,13 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
                 glow = juce::jmax (glow, juce::jlimit (0.0f, 1.0f, 1.0f - distance / fadeDistance));
             }
 
+            // Drone-Sonnen (Block M) glimmen ebenfalls — sie klingen ja.
+            for (const auto& drone : drones)
+            {
+                const auto distance = drone.centre.getDistanceFrom (padCentre);
+                glow = juce::jmax (glow, juce::jlimit (0.0f, 1.0f, 1.0f - distance / fadeDistance));
+            }
+
             // Noten-Echo (Block H4): extern gespielte Noten färben das Pad
             // in der Fokus-Track-Farbe (Stärke nach Velocity) — auf ALLEN
             // isomorphen Positionen der Note, unabhängig vom Finger-Glow.
@@ -422,6 +603,9 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
 
         for (const auto& [fingerId, state] : fingers)
         {
+            if (state.grabbedDroneId != 0)
+                continue;   // Block M: Grab-Finger steuern Drones, kein eigener Schatten
+
             const auto bend = layout.pitchBendFromAnchor (state.anchorNormX,
                                                           effectiveNormX (fingerId, state.currentNormX));
             const auto shadowNormX = state.anchorNormX
@@ -492,6 +676,25 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
             fillSoftCircle (sun.centre + sun.orbitOffset, moonDiameter, 2.0f);
         }
     }
+
+    // Drone-Sonnen (Block M): Optik wie latched, PLUS ein feiner cyaner
+    // Halo-Ring — markiert „fingerlos gehalten, tappbar zum Beenden".
+    for (const auto& drone : drones)
+    {
+        fillSoftCircle (drone.centre, sunDiameter, 2.5f);
+
+        g.setColour (push::colours::ledCyan.withAlpha (0.85f));
+        const auto haloDiameter = sunDiameter + 8.0f;
+        g.drawEllipse (juce::Rectangle<float> (haloDiameter, haloDiameter).withCentre (drone.centre), 1.5f);
+
+        if (drone.hasOrbit)
+        {
+            const auto orbitDiameter = drone.orbitOffset.getDistanceFromOrigin() * 2.0f;
+            g.setColour (push::colours::ledWhite);
+            g.drawEllipse (juce::Rectangle<float> (orbitDiameter, orbitDiameter).withCentre (drone.centre), 1.5f);
+            fillSoftCircle (drone.centre + drone.orbitOffset, moonDiameter, 2.0f);
+        }
+    }
 }
 
 //==============================================================================
@@ -537,12 +740,19 @@ void GridKeyboardComponent::gravityTick()
     if (! gravity.tick (juce::jmin (dtSeconds, 0.1f)))
         return;
 
-    // Effektive Rohwerte in Bends übersetzen — derselbe Pfad wie mouseDrag,
+    // Effektive Rohwerte in Bends übersetzen — derselbe Pfad wie touchMove,
     // nur mit dem Magnet-Anteil (VOR der Treppen-Kennlinie, Masterplan J1).
-    for (const auto& [fingerId, state] : fingers)
-        engine.setPitchBend (static_cast<uint32_t> (fingerId),
-                              layout.pitchBendFromAnchor (state.anchorNormX,
-                                                          effectiveNormX (fingerId, state.currentNormX)));
+    // Drone-Grab-Finger (Block M) sind hier außen vor: ihre Bends laufen
+    // relativ über die Drone-Stimme, der Magnet greift nicht.
+    for (auto& [fingerId, state] : fingers)
+    {
+        if (state.grabbedDroneId != 0)
+            continue;
+
+        state.lastBendSemitones = layout.pitchBendFromAnchor (
+            state.anchorNormX, effectiveNormX (fingerId, state.currentNormX));
+        engine.setPitchBend (static_cast<uint32_t> (fingerId), state.lastBendSemitones);
+    }
 
     repaint();
 }

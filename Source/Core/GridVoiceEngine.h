@@ -30,6 +30,11 @@ public:
 
     void noteOn       (uint32_t fingerId, int note, int velocity) noexcept;
     void noteOff      (uint32_t fingerId, int releaseVelocity) noexcept;
+
+    /** Block M (Hold/Drone): laufende Stimme auf eine neue fingerId
+        umschlüsseln — KEIN Sink-Event, die Note klingt nahtlos weiter
+        (Drone-Start: Touch-Ids werden vom OS wiederverwendet). */
+    bool rekeyVoice   (uint32_t oldFingerId, uint32_t newFingerId) noexcept;
     void setPitchBend (uint32_t fingerId, float semitones) noexcept;
     void setPressure  (uint32_t fingerId, float value01) noexcept;
     void setSlide     (uint32_t fingerId, float value01) noexcept;

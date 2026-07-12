@@ -499,6 +499,48 @@
     (`pencilresearch/midi`) und midi.guide-Seiten lieferten sauber
     strukturierte Daten, PDF-Handbücher NICHT verlässlich per WebFetch
     auslesbar.
+    **User-Feldtest 12.07.2026 (MicroFreak) bestanden** — „Musiker werden
+    das lieben, spart Zeit und Nerven". **Vorgemerkt für den Ausbau
+    dieses Meilensteins:** (1) **NRPN-Unterstützung** — Analog Heat und
+    vermutlich weitere Elektron-/Sequential-Geräte brauchen 14-Bit-
+    MSB/LSB-Paare statt Plain-CC; eigenes Format/eigener MacroTarget-Typ
+    nötig (aktuelles Klartext-Format ist bewusst CC-only). (2) mehr
+    Geräte in `Assets/HardwareDevices.txt` (User befüllt parallel).
+  - **Hold/Drone (Block M, 07/2026 — User-Semantik per Rückfrage bestätigt,
+    Masterplan-Wortlaut war kompaktiert verloren):** Abhebe-Reihenfolge
+    „SONNE ZUERST": hebt der Sonnen-Finger ab, während sein Mond noch
+    LIEGT, dront die Note weiter — `RingTouchModel::UpResult` trägt dafür
+    `hadActiveMoon` + die letzte Geometrie (center/ringOffset/hasOrbit);
+    das Keyboard friert daraus eine fingerlose `DroneSun` ein (Optik wie
+    latched + cyaner Halo-Ring = „tappbar"). Die Stimme wird beim
+    Drone-Start auf eine synthetische fingerId umgeschlüsselt
+    (`VoiceAllocator::rekey`/`GridVoiceEngine::rekeyVoice`, KEIN
+    Sink-Event — Touch-Ids werden vom OS wiederverwendet,
+    kDroneFingerBase 0x20000). Der noch liegende Mond-Finger ist ab dem
+    Drone-Start tot (RingTouchModel vergisst ihn mit der Sonne; Move/Up
+    sind No-ops). Mond zuerst abheben bleibt das alte Verhalten
+    (Orbit friert, Sonne released normal).
+    **Drone-Bedienung:** kurzer Tap auf die Drone-Sonne (< 250 ms,
+    < 8 px) beendet sie (noteOff); Aufsetzen + Halten/Bewegen ÜBERNIMMT
+    die Stimme nahtlos — kein Neuanschlag, Bend/Pressure wirken RELATIV
+    ab dem Aufsetzpunkt (Grab-Referenzen: `newBend = grabBend +
+    Kennlinie(x) − Kennlinie(grabX)` — nie zur Fingerposition springen,
+    EQ8-Lektion), die Sonne folgt dem Finger, der Orbit bleibt starr.
+    Loslassen nach einem Grab legt den Drone wieder ab (einmal Drone,
+    immer Drone — bis Tap/Release-All). Grab-Finger sind für Gravity
+    (Block J) und Pitch-Schatten außen vor. Release-All ruft zusätzlich
+    `clearDrones()`; Drones reisen in `constellationNormalized()` mit
+    (Akkord-Speicher sieht die klingende Konstellation).
+    **Refactor dafür:** Maus-Handler delegieren an testbare Kernpfade
+    `touchDown/touchMove/touchUp (fingerId, position)` (Muster
+    HoldIconTile/TrackTabsStrip — Multi-Finger headless testbar);
+    FingerState trägt jetzt lastBend/lastPressure (Drone friert exakt
+    dort ein). TODO(design): vom Allocator GESTOHLENE Drone-Stimmen
+    (16. Finger) lassen die Sonne visuell stehen (Zombie bis zum Tap —
+    akzeptierter Randfall bei 15 Stimmen). Descoped mit User-Antwort:
+    Pinch-weg/Doppeltipp (Tap deckt das Beenden ab), Drift-über-Rand.
+    Tests: [drone]-Cases in GridKeyboardTests + rekey
+    (VoiceAllocatorTests) + hadActiveMoon (RingTouchModelTests).
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +

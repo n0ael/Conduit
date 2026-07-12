@@ -48,6 +48,15 @@ public:
     void mouseDrag (const juce::MouseEvent& event) override;
     void mouseUp   (const juce::MouseEvent& event) override;
 
+    //==========================================================================
+    // Testbare Kernpfade der Maus-/Touch-Handler (Block M — Muster
+    // HoldIconTile/TrackTabsStrip: die Maus-Handler delegieren NUR, damit
+    // Multi-Finger-Abläufe headless mit expliziten fingerIds prüfbar sind).
+
+    void touchDown (int fingerId, juce::Point<float> position);
+    void touchMove (int fingerId, juce::Point<float> position);
+    void touchUp   (int fingerId, juce::Point<float> position);
+
     /** Session-Skala (Root-Tree scaleRoot/scaleType, Schema 6.2) — färbt die
         Pad-Grundfarben (Grundton/Skalenton/skalenfremd). Message Thread. */
     void setScale (int newRootNote, ScaleType newScaleType);
@@ -156,6 +165,24 @@ public:
         panelSettings = settingsToPoll;
     }
 
+    //==========================================================================
+    // Hold/Drone (Block M, Masterplan — User-Semantik 12.07.2026):
+    // Abhebe-Reihenfolge „Sonne zuerst": hebt der Sonnen-Finger ab, während
+    // sein Mond noch LIEGT, dront die Note weiter — die Sonne bleibt
+    // fingerlos auf dem Grid stehen, der Orbit friert ein (der noch
+    // liegende Mond-Finger wird ignoriert, bis er abhebt). Kurzer Tap auf
+    // die Drone-Sonne beendet sie (noteOff); Aufsetzen + Halten/Bewegen
+    // ÜBERNIMMT die Stimme nahtlos (kein Neuanschlag, Bend/Pressure wirken
+    // RELATIV ab dem Aufsetzpunkt — nie zur Fingerposition springen);
+    // Loslassen nach einem Grab legt den Drone wieder ab. Release-All
+    // beendet auch alle Drones (clearDrones). Message Thread.
+
+    /** Beendet alle Drones (noteOff) — Release-All ruft dies zusätzlich zu
+        engine.allNotesOff (idempotent). */
+    void clearDrones();
+
+    [[nodiscard]] int droneCount() const noexcept { return (int) drones.size(); }
+
 private:
     struct FingerState
     {
@@ -165,7 +192,44 @@ private:
                                     // (pad-Modus) oder Aufsetzpunkt (finger)
         float currentNormX = 0.0f;  // letzte Touch-Position (Block J: Gravity-
         float currentNormY = 0.0f;  // Tick + Pitch-Schatten)
+
+        // Block M: zuletzt an die Engine gesendete Werte — beim Drone-Start
+        // friert die Stimme exakt hier ein.
+        float lastBendSemitones = 0.0f;
+        float lastPressure01    = 0.5f;
+
+        // Block M: Drone-Grab (Finger hat eine Drone-Sonne aufgenommen) —
+        // 0 = normaler Spiel-Finger. Bend/Pressure wirken RELATIV ab dem
+        // Aufsetzpunkt (grab*-Referenzen), Tap-Erkennung über Weg + Zeit.
+        uint32_t grabbedDroneId = 0;
+        float grabNormX = 0.0f, grabNormY = 0.0f;
+        float grabBendSemitones = 0.0f;
+        float grabPressure01    = 0.5f;
+        juce::Point<float> downPx;
+        float  maxMovePx  = 0.0f;
+        double downTimeMs = 0.0;
     };
+
+    /** Fingerlos liegende Drone-Sonne (Block M): die Stimme läuft unter
+        einer synthetischen fingerId weiter (kDroneFingerBase+n — Touch-Ids
+        werden vom OS wiederverwendet, rekeyVoice beim Drone-Start). */
+    struct DroneSun
+    {
+        juce::Point<float> centre;        // px, folgt einem Grab
+        juce::Point<float> orbitOffset;   // px, eingefroren (starr, wie Latch)
+        bool hasOrbit = false;
+        uint32_t voiceFingerId = 0;
+        float anchorNormX = 0.0f;         // In-Tune-Anker der Original-Note
+        float lastBendSemitones = 0.0f;
+        float lastPressure01    = 0.5f;
+    };
+
+    static constexpr uint32_t kDroneFingerBase = 0x20000u;
+    static constexpr int   kDroneTapMaxMs        = 250;
+    static constexpr float kDroneTapTolerancePx  = 8.0f;
+
+    [[nodiscard]] DroneSun* droneById (uint32_t voiceFingerId) noexcept;
+    [[nodiscard]] int droneIndexAt (juce::Point<float> positionPx) const noexcept;
 
     /** Latched Sonne (Akkord-Abruf): Pixel-Positionen wie die Live-Kreise,
         note = -1, wenn die Sonne außerhalb des Rasters lag (kein noteOn). */
@@ -184,7 +248,7 @@ private:
     // Touch-Ids (= sourceIndex + 1, kleine Werte).
     static constexpr uint32_t kLatchedFingerBase = 0x10000u;
 
-    [[nodiscard]] juce::Point<float> normalisedPosition (const juce::MouseEvent& event) const noexcept;
+    [[nodiscard]] juce::Point<float> normalisedPosition (juce::Point<float> positionPx) const noexcept;
     [[nodiscard]] static int fingerIdFor (const juce::MouseEvent& event) noexcept;
 
     grid::GridVoiceEngine& engine;
@@ -208,6 +272,10 @@ private:
 
     std::map<int, FingerState> fingers;
     std::vector<LatchedSun> latched;   // Akkord-Speicher-Abruf (leer = keiner)
+
+    // Block M: fingerlos klingende Drone-Sonnen + laufende Id-Vergabe.
+    std::vector<DroneSun> drones;
+    uint32_t nextDroneFingerId = kDroneFingerBase;
 
     // Noten-Echo (Block H4): Stärke pro MIDI-Note (0 = aus), Farbe = Fokus-Track.
     std::array<float, 128> echoVelocity {};

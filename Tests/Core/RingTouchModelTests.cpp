@@ -253,3 +253,39 @@ TEST_CASE ("RingTouchModel: reset() behaelt eine per setRadiusRange gesetzte Spa
     REQUIRE (model.restRadiusPx() == Approx (5.0f));
     REQUIRE (model.maxRadiusPx() == Approx (25.0f));
 }
+
+TEST_CASE ("RingTouchModel: onUp der Sonne meldet liegenden Mond + Geometrie (Block M)", "[grid]")
+{
+    grid::RingTouchModel model;
+
+    model.onDown (1, { 100.0f, 100.0f });   // Sonne
+    model.onDown (2, { 150.0f, 100.0f });   // Mond (50 px < grabRadius 90)
+
+    const auto up = model.onUp (1);         // Sonne ZUERST hoch, Mond liegt
+    REQUIRE (up.wasPrimary);
+    REQUIRE (up.hadActiveMoon);
+    REQUIRE (up.hasOrbit);
+    REQUIRE (up.center.x == Approx (100.0f));
+    REQUIRE (up.ringOffset.x == Approx (50.0f));
+    REQUIRE (up.ringOffset.y == Approx (0.0f));
+
+    // Der liegende Mond-Finger ist mit der Sonne vergessen -- No-ops.
+    REQUIRE_FALSE (model.onMove (2, { 160.0f, 100.0f }).hasSlide);
+    const auto moonUp = model.onUp (2);
+    REQUIRE_FALSE (moonUp.wasRing);
+    REQUIRE_FALSE (moonUp.wasPrimary);
+}
+
+TEST_CASE ("RingTouchModel: onUp ohne liegenden Mond meldet hadActiveMoon = false", "[grid]")
+{
+    grid::RingTouchModel model;
+
+    model.onDown (1, { 100.0f, 100.0f });
+    model.onDown (2, { 150.0f, 100.0f });
+    model.onUp (2);                          // Mond ZUERST hoch (Orbit friert)
+
+    const auto up = model.onUp (1);
+    REQUIRE (up.wasPrimary);
+    REQUIRE_FALSE (up.hadActiveMoon);        // kein LIEGENDER Mond mehr
+    REQUIRE (up.hasOrbit);                   // aber Orbit bestand (eingefroren)
+}
