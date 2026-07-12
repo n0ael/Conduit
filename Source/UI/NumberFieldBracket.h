@@ -19,7 +19,8 @@ namespace conduit
 
     Component ist eine feste kRowHeight-px hohe Touch-Zone (CLAUDE.md 10).
 */
-class NumberFieldBracket final : public juce::Component
+class NumberFieldBracket final : public juce::Component,
+                                 public juce::SettableTooltipClient
 {
 public:
     struct Config

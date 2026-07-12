@@ -142,6 +142,17 @@ TEST_CASE ("MidiCcTarget: klemmt Kanal und CC-Nummer", "[grid][macro]")
     REQUIRE (target.ccNumber() == 127);
 }
 
+TEST_CASE ("MidiCcTarget: describe() zeigt den Funktionsnamen (Block L)", "[grid][macro]")
+{
+    grid::FakeMidiTarget fake;
+
+    grid::MidiCcTarget known (fake, 1, 1);
+    REQUIRE (known.describe() == "Mod Wheel / Kanal 1");
+
+    grid::MidiCcTarget unknown (fake, 2, 3);
+    REQUIRE (unknown.describe() == "CC 3 / Kanal 2");
+}
+
 //==============================================================================
 TEST_CASE ("AbletonParamTarget: mapToNative skaliert auf den Live-Bereich", "[grid][macro]")
 {

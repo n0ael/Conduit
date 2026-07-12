@@ -450,6 +450,18 @@
     MIDI-Controller mit MEHREREN parallel aktivierbaren Geräten
     (MidiControlInput ist heute Single-Device) + Sichtbarkeits-Auswahl,
     welche Ports Conduit überhaupt anbietet.
+  - **CC-Datenbank (Block L, 07/2026, ultracode-Recherche + Fable):**
+    `Util/CcNames.h` — header-only Tabelle der ~25 gebräuchlichsten
+    GM-/MPE-CCs (Mod Wheel, Expression, Sustain, Brightness/Timbre …)
+    + `displayName(cc)`, unbekannte Nummern fallen auf das bisherige
+    Format „CC {n}" zurück (kein Sonderfall an den Aufrufstellen).
+    `MidiCcTarget::describe()` zeigt jetzt „Mod Wheel / Kanal 1" statt
+    „CC 1 / Kanal 1"; die CC-Zahlenfelder (Macro-Panel-MIDI-Ziel +
+    MIDI-In-Zeile) zeigen den Namen als Tooltip, live beim Swipe
+    aktualisiert (`NumberFieldBracket` bekam dafür
+    `juce::SettableTooltipClient` als zweite Basis — TooltipWindow
+    existiert app-weit in EngineEditor). Bewusst KEIN neues
+    Persistenz-Format, keine User-Overrides (Scope-Vorgabe „nur kurz").
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +

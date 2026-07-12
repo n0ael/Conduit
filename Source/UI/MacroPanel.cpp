@@ -1,6 +1,7 @@
 #include "MacroPanel.h"
 
 #include "TouchLive/AbletonParamTarget.h"
+#include "Util/CcNames.h"
 
 namespace conduit
 {
@@ -31,7 +32,10 @@ MacroPanel::TargetRow::TargetRow (MacroPanel& ownerToUse, int indexToUse)
     removeTile.onClick = [this] { owner.removeTargetSlot (index); };
 
     channelField.onValueCommitted = [this] (double) { rebuildMidiTarget(); };
-    ccField.onValueCommitted      = [this] (double) { rebuildMidiTarget(); };
+    // Block L: Tooltip zeigt den Funktionsnamen der Nummer live beim Swipe
+    // ("Mod Wheel" statt nur "1") -- kein Layout-Eingriff am NumberFieldBracket.
+    ccField.onValueChanged   = [this] (double v) { ccField.setTooltip (CcNames::displayName ((int) v)); };
+    ccField.onValueCommitted = [this] (double)   { rebuildMidiTarget(); };
 
     trackCombo.onChange     = [this] { populateDeviceCombo(); };
     deviceCombo.onChange    = [this] { populateParameterCombo(); };
@@ -66,6 +70,7 @@ void MacroPanel::TargetRow::rebuildFromBinding()
             targetType = TargetType::midi;
             channelField.setValue (midi->channel(), juce::dontSendNotification);
             ccField.setValue (midi->ccNumber(), juce::dontSendNotification);
+            ccField.setTooltip (CcNames::displayName (midi->ccNumber()));   // Block L
         }
         else if (auto* live = dynamic_cast<grid::AbletonParamTarget*> (b->target.get()))
         {
@@ -471,7 +476,9 @@ MacroPanel::MacroPanel (grid::MacroBindings& bindingsToUse, grid::MidiDeviceTarg
         refreshMidiInRow();
     };
     midiInChannelField.onValueCommitted = [this] (double) { if (midiInTile.isActive()) commitMidiInBinding(); };
-    midiInCcField.onValueCommitted      = [this] (double) { if (midiInTile.isActive()) commitMidiInBinding(); };
+    // Block L: Tooltip zeigt den Funktionsnamen live beim Swipe.
+    midiInCcField.onValueChanged   = [this] (double v) { midiInCcField.setTooltip (CcNames::displayName ((int) v)); };
+    midiInCcField.onValueCommitted = [this] (double)   { if (midiInTile.isActive()) commitMidiInBinding(); };
 
     // MIDI-Learn (User-Wunsch 11.07.): scharfschalten, der naechste
     // eingehende CC bindet -- onLearnCompleted aktualisiert die Felder.
@@ -496,6 +503,7 @@ MacroPanel::MacroPanel (grid::MacroBindings& bindingsToUse, grid::MidiDeviceTarg
         learnTile.setActive (false);
         midiInChannelField.setValue (channel, juce::dontSendNotification);
         midiInCcField.setValue (cc, juce::dontSendNotification);
+        midiInCcField.setTooltip (CcNames::displayName (cc));   // Block L
         midiInTile.setActive (true);
         refreshMidiInRow();
     };
@@ -575,6 +583,7 @@ void MacroPanel::refreshMidiInRow()
         midiInTile.setActive (true);
         midiInChannelField.setValue (binding->channel, juce::dontSendNotification);
         midiInCcField.setValue (binding->cc, juce::dontSendNotification);
+        midiInCcField.setTooltip (CcNames::displayName (binding->cc));   // Block L
     }
     else
     {

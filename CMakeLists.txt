@@ -493,6 +493,7 @@ target_sources(Conduit PRIVATE
     Source/UI/TransportBar.h
     Source/UI/SequencerControlPanel.h
     Source/UI/StepGridDisplay.h
+    Source/Util/CcNames.h
     Source/Util/RtAllocationGuard.h
     Source/Util/ScaleQuantizer.h
     Source/Util/SpscQueue.h
@@ -665,6 +666,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/UI/SequencerControlPanelTests.cpp
         Tests/UI/TrackSelectorPanelTests.cpp
         Tests/UI/TransportBarTests.cpp
+        Tests/Util/CcNamesTests.cpp
         Tests/Util/ScaleQuantizerTests.cpp
         Tests/Util/SpscQueueTests.cpp
     )

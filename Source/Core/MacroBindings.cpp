@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include "Util/CcNames.h"
+
 namespace conduit::grid
 {
 
@@ -26,7 +28,9 @@ void MidiCcTarget::sendValue (float value01)
 
 juce::String MidiCcTarget::describe() const
 {
-    return "CC " + juce::String (cc) + " / Kanal " + juce::String (midiChannel);
+    // Block L: Funktionsname statt Rohnummer, wo bekannt ("Mod Wheel"
+    // statt "CC 1"); unbekannte CCs fallen auf das bisherige Format zurück.
+    return CcNames::displayName (cc) + " / Kanal " + juce::String (midiChannel);
 }
 
 juce::ValueTree MidiCcTarget::toState() const
