@@ -1,0 +1,121 @@
+# Conduit Hardware-CC-Datenbank (Block L2, Masterplan)
+#
+# Format: [Geraetename] eroeffnet einen Geraete-Block, darin je Zeile
+# "CC-Nummer = Parametername". Zeilen mit # sind Kommentare, Leerzeilen
+# werden ignoriert. Diese Datei ist die FAKTOR-Bestueckung (im Programm
+# eingebaut); eigene/fehlende Geraete gehoeren in eine GLEICH strukturierte
+# Datei "HardwareDevices.txt" im Conduit-Einstellungsordner (neben
+# GridSession.xml) -- die App liest beide und ergaenzt/ueberschreibt die
+# Faktor-Daten pro Geraet (gleicher Geraetename = dasselbe Geraet, gleiche
+# CC-Nummer = ueberschreiben, neue Nummer = ergaenzen).
+#
+# Quelle der CC-Nummern: jeweiliges offizielles Handbuch / midi.guide.
+# Elektron Analog Heat nutzt AUSSCHLIESSLICH NRPN (14-Bit MSB/LSB-Paare),
+# keine einfachen 7-Bit-CCs -- daher hier stellvertretend der Digitakt
+# (dieselbe Elektron-CC-Philosophie, aber mit echten Plain-CCs).
+
+[Elektron Digitakt]
+7 = Amp Volume
+10 = Amp Pan
+24 = Reverb Predelay
+25 = Reverb Decay
+27 = Reverb Shelving Gain
+28 = Reverb Highpass
+29 = Reverb Lowpass
+31 = Reverb Mix
+70 = Filter Attack
+71 = Filter Decay
+72 = Filter Sustain
+73 = Filter Release
+74 = Filter Cutoff
+75 = Filter Resonance
+76 = Filter Type
+77 = Filter Env Depth
+78 = Amp Attack
+79 = Amp Hold
+80 = Amp Decay
+81 = Amp Overdrive
+82 = Delay Send
+83 = Reverb Send
+85 = Delay Time
+86 = Delay Pingpong
+87 = Delay Stereo Width
+88 = Delay Feedback
+
+[Moog Minitaur]
+1 = Mod Wheel
+3 = LFO Rate
+5 = Glide Rate
+7 = VCA Volume
+12 = LFO Filter Amount
+13 = LFO Osc Amount
+15 = Osc 1 Level
+16 = Osc 2 Level
+17 = Osc 2 Frequency
+18 = Osc 2 Beat
+19 = Filter Cutoff
+20 = Filter Key Tracking
+21 = Filter Resonance
+22 = Filter Env Amount
+23 = Filter Attack
+24 = Filter Decay/Release
+25 = Filter Sustain
+27 = Ext Input Level
+28 = Amp Attack
+29 = Amp Decay/Release
+
+[Arturia MicroFreak]
+5 = Glide
+9 = Oscillator Type
+10 = Wave
+12 = Timbre
+13 = Shape
+23 = Cutoff
+24 = Cycling Env Amount
+26 = Filter Amount
+28 = Cycling Env Hold
+29 = Envelope Sustain
+83 = Resonance
+91 = Arp/Seq Rate (Free)
+93 = LFO Rate (Free)
+102 = Cycling Env Rise
+103 = Cycling Env Fall
+105 = Envelope Attack
+106 = Envelope Decay
+
+[Sequential Prophet Rev2]
+75 = Amp Sustain
+76 = Amp Release
+89 = Env 3 Attack
+90 = Env 3 Decay
+102 = Filter Cutoff
+103 = Filter Resonance
+104 = Filter Key Amount
+106 = Filter Env Amount
+107 = Filter Env Velocity
+109 = Filter Attack
+110 = Filter Decay
+111 = Filter Sustain
+112 = Filter Release
+115 = Amp Env Amount
+118 = Amp Attack
+119 = Amp Decay
+
+[Waldorf Blofeld]
+1 = Mod Wheel
+5 = Glide Rate
+7 = Channel Volume
+16 = LFO 1 Speed
+24 = LFO 3 Speed
+31 = Osc 1 Shape
+34 = Osc 1 PWM
+39 = Osc 2 Shape
+46 = Osc 3 Shape
+68 = Filter 1 Type
+69 = Filter 1 Cutoff
+70 = Filter 1 Resonance
+73 = Filter 1 Env Amount
+79 = Filter 2 Type
+80 = Filter 2 Cutoff
+93 = FX 1 Mix
+101 = Amp Env Attack

@@ -20,26 +20,41 @@ MacroPanel::TargetRow::TargetRow (MacroPanel& ownerToUse, int indexToUse)
 {
     addChildComponent (midiTile);
     addChildComponent (liveTile);
+    addChildComponent (hardwareTile);
     addChildComponent (removeTile);
     addChildComponent (channelField);
     addChildComponent (ccField);
     addChildComponent (trackCombo);
     addChildComponent (deviceCombo);
     addChildComponent (parameterCombo);
+    addChildComponent (hwDeviceCombo);
+    addChildComponent (hwParamCombo);
 
-    midiTile.onClick = [this] { applyTargetType (TargetType::midi); };
-    liveTile.onClick = [this] { applyTargetType (TargetType::live); };
+    midiTile.onClick     = [this] { applyTargetType (TargetType::midi); };
+    liveTile.onClick     = [this] { applyTargetType (TargetType::live); };
+    hardwareTile.onClick = [this] { applyTargetType (TargetType::hardware); };
     removeTile.onClick = [this] { owner.removeTargetSlot (index); };
 
-    channelField.onValueCommitted = [this] (double) { rebuildMidiTarget(); };
     // Block L: Tooltip zeigt den Funktionsnamen der Nummer live beim Swipe
     // ("Mod Wheel" statt nur "1") -- kein Layout-Eingriff am NumberFieldBracket.
+    channelField.onValueCommitted = [this] (double)
+    {
+        if (targetType == TargetType::hardware)
+            createHardwareTarget();   // Kanalwechsel: Ziel mit neuem Kanal neu bauen
+        else
+            rebuildMidiTarget();
+    };
     ccField.onValueChanged   = [this] (double v) { ccField.setTooltip (CcNames::displayName ((int) v)); };
     ccField.onValueCommitted = [this] (double)   { rebuildMidiTarget(); };
 
     trackCombo.onChange     = [this] { populateDeviceCombo(); };
     deviceCombo.onChange    = [this] { populateParameterCombo(); };
     parameterCombo.onChange = [this] { createAbletonTarget(); };
+
+    // Block L2 (Hardware-CC-Datenbank): Device -> Parameter, analog zum
+    // Ableton-Picker oben, baut aber einen ganz normalen MidiCcTarget.
+    hwDeviceCombo.onChange = [this] { populateHardwareParamCombo(); };
+    hwParamCombo.onChange  = [this] { createHardwareTarget(); };
 
     rebuildFromBinding();
 }
@@ -87,6 +102,7 @@ void MacroPanel::TargetRow::rebuildFromBinding()
 
     midiTile.setActive (targetType == TargetType::midi);
     liveTile.setActive (targetType == TargetType::live);
+    hardwareTile.setActive (false);   // Hardware ist nur eine Eingabehilfe fuer MIDI (s. rebuildMidiTarget)
 
     if (targetType == TargetType::live && trackCombo.getNumItems() == 0)
         populateTrackCombo();
@@ -103,17 +119,20 @@ void MacroPanel::TargetRow::applyTargetType (TargetType newType)
     targetType = newType;
     midiTile.setActive (targetType == TargetType::midi);
     liveTile.setActive (targetType == TargetType::live);
+    hardwareTile.setActive (targetType == TargetType::hardware);
 
     if (auto* b = binding())
     {
         if (targetType == TargetType::midi)
             rebuildMidiTarget();
         else
-            b->target.reset();   // Live: erst nach Parameter-Wahl konfiguriert
+            b->target.reset();   // Live/Hardware: erst nach Auswahl konfiguriert
     }
 
     if (targetType == TargetType::live)
         populateTrackCombo();
+    else if (targetType == TargetType::hardware)
+        populateHardwareDeviceCombo();
 
     resized();
     repaint();
@@ -294,6 +313,57 @@ void MacroPanel::TargetRow::createAbletonTarget()
     repaint();
 }
 
+//==============================================================================
+// Block L2 (Hardware-CC-Datenbank)
+
+void MacroPanel::TargetRow::populateHardwareDeviceCombo()
+{
+    hwDeviceCombo.clear (juce::dontSendNotification);
+    hwParamCombo.clear (juce::dontSendNotification);
+
+    const auto& devices = owner.hardwareDb.devices();
+    for (int i = 0; i < (int) devices.size(); ++i)
+        hwDeviceCombo.addItem (devices[(size_t) i].name, i + 1);
+}
+
+void MacroPanel::TargetRow::populateHardwareParamCombo()
+{
+    hwParamCombo.clear (juce::dontSendNotification);
+
+    const auto deviceIndex = hwDeviceCombo.getSelectedId() - 1;
+    const auto& devices = owner.hardwareDb.devices();
+    if (deviceIndex < 0 || deviceIndex >= (int) devices.size())
+        return;
+
+    const auto& params = devices[(size_t) deviceIndex].params;
+    for (int i = 0; i < (int) params.size(); ++i)
+        hwParamCombo.addItem (params[(size_t) i].name + " (CC " + juce::String (params[(size_t) i].cc) + ")",
+                              i + 1);
+}
+
+void MacroPanel::TargetRow::createHardwareTarget()
+{
+    auto* b = binding();
+    if (b == nullptr || targetType != TargetType::hardware)
+        return;
+
+    const auto deviceIndex = hwDeviceCombo.getSelectedId() - 1;
+    const auto paramIndex  = hwParamCombo.getSelectedId() - 1;
+    const auto& devices = owner.hardwareDb.devices();
+    if (deviceIndex < 0 || deviceIndex >= (int) devices.size())
+        return;
+
+    const auto& params = devices[(size_t) deviceIndex].params;
+    if (paramIndex < 0 || paramIndex >= (int) params.size())
+        return;
+
+    // Technisch ein ganz normaler MidiCcTarget -- Hardware ist nur eine
+    // gefuehrte Eingabe fuer Kanal+CC (kein neues Ziel/Persistenz-Format).
+    b->target = std::make_unique<grid::MidiCcTarget> (
+        owner.midiTarget, (int) channelField.getValue(), params[(size_t) paramIndex].cc);
+    repaint();
+}
+
 void MacroPanel::TargetRow::setExpanded (bool shouldBeExpanded)
 {
     if (expanded == shouldBeExpanded)
@@ -326,12 +396,16 @@ void MacroPanel::TargetRow::resized()
 
     midiTile.setVisible (showDetail);
     liveTile.setVisible (showDetail);
+    hardwareTile.setVisible (showDetail);
     removeTile.setVisible (showDetail);
-    channelField.setVisible (showDetail && targetType == TargetType::midi);
+    channelField.setVisible (showDetail
+        && (targetType == TargetType::midi || targetType == TargetType::hardware));
     ccField.setVisible (showDetail && targetType == TargetType::midi);
     trackCombo.setVisible (showDetail && targetType == TargetType::live);
     deviceCombo.setVisible (showDetail && targetType == TargetType::live);
     parameterCombo.setVisible (showDetail && targetType == TargetType::live);
+    hwDeviceCombo.setVisible (showDetail && targetType == TargetType::hardware);
+    hwParamCombo.setVisible (showDetail && targetType == TargetType::hardware);
     if (curveTile != nullptr)
         curveTile->setVisible (showDetail);
 
@@ -344,10 +418,12 @@ void MacroPanel::TargetRow::resized()
     auto typeRow = area.removeFromTop (26);
     removeTile.setBounds (typeRow.removeFromRight (26));
     typeRow.removeFromRight (4);
-    const auto typeTileWidth = (typeRow.getWidth() - 4) / 2;
+    const auto typeTileWidth = (typeRow.getWidth() - 8) / 3;
     midiTile.setBounds (typeRow.removeFromLeft (typeTileWidth));
     typeRow.removeFromLeft (4);
-    liveTile.setBounds (typeRow);
+    liveTile.setBounds (typeRow.removeFromLeft (typeTileWidth));
+    typeRow.removeFromLeft (4);
+    hardwareTile.setBounds (typeRow);
 
     area.removeFromTop (4);
 
@@ -370,6 +446,20 @@ void MacroPanel::TargetRow::resized()
         parameterCombo.setBounds (area.removeFromTop (28));
         area.removeFromTop (4);
         area.removeFromTop (8);
+    }
+    else if (targetType == TargetType::hardware)
+    {
+        // Block L2: Kanal + Geraet nebeneinander, Parameter darunter --
+        // analog zum Ableton-Picker, nur Device/Parameter statt drei Ebenen.
+        auto configRow = area.removeFromTop (30);
+        const auto fieldWidth = (configRow.getWidth() - 4) / 2;
+        channelField.setBounds (configRow.removeFromLeft (fieldWidth));
+        configRow.removeFromLeft (4);
+        hwDeviceCombo.setBounds (configRow);
+        area.removeFromTop (4);
+        hwParamCombo.setBounds (area.removeFromTop (28));
+        area.removeFromTop (4);
+        area.removeFromTop (34);
     }
     else
     {
@@ -442,10 +532,11 @@ void MacroPanel::TargetRow::mouseUp (const juce::MouseEvent& event)
 //==============================================================================
 MacroPanel::MacroPanel (grid::MacroBindings& bindingsToUse, grid::MidiDeviceTarget& midiTargetToUse,
                         LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
-                        grid::MidiInBindings& midiInBindingsToUse)
+                        grid::MidiInBindings& midiInBindingsToUse,
+                        grid::HardwareCcDatabase& hardwareDbToUse)
     : macroBindings (bindingsToUse), midiTarget (midiTargetToUse),
       liveSetModel (liveSetModelToUse), touchLiveClient (touchLiveClientToUse),
-      midiInBindings (midiInBindingsToUse)
+      midiInBindings (midiInBindingsToUse), hardwareDb (hardwareDbToUse)
 {
     addAndMakeVisible (titleLabel);
     addChildComponent (axisXTile);

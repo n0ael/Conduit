@@ -10,6 +10,7 @@
 #include "Core/ChordMemory.h"
 #include "Core/GridPanelSettings.h"
 #include "Core/GridSessionStore.h"
+#include "Core/HardwareCcDatabase.h"
 #include "Core/GridVoiceEngine.h"
 #include "Core/MacroBindings.h"
 #include "Core/MidiControlInput.h"
@@ -242,6 +243,11 @@ private:
     // Lebensdauer identisch, roher Zeiger ist hier sicher).
     grid::MacroBindings macroBindings;
     MacroPanel* macroPanel = nullptr;
+
+    // Block L2: Hardware-CC-Datenbank (Device -> Parameter fuer den
+    // Macro-Panel-Ziel-Typ "Hardware") -- geladen im Ctor (Faktor-Daten +
+    // optionale User-Datei neben GridSession.xml).
+    grid::HardwareCcDatabase hardwareCcDatabase;
 
     // Block H v2: Settings-Tab-Content (roher Zeiger wie macroPanel — das
     // dockPanel besitzt ihn, Lebensdauer identisch) für die Master-Input-

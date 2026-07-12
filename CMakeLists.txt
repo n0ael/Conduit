@@ -79,6 +79,7 @@ juce_add_binary_data(ConduitAssets
     SOURCES
         Assets/Fonts/Jost-Regular.ttf
         Assets/Fonts/Jost-Medium.ttf
+        Assets/HardwareDevices.txt
 )
 
 # ---------------------------------------------------------------------------
@@ -107,6 +108,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/GridPhysics.cpp
     Source/Core/GridSessionStore.cpp
     Source/Core/GridVoiceEngine.cpp
+    Source/Core/HardwareCcDatabase.cpp
     Source/Core/InputLinkSend.cpp
     Source/Core/LinkClock.cpp
     Source/Core/LinkReceiveStream.cpp
@@ -314,6 +316,7 @@ target_sources(Conduit PRIVATE
     Source/Core/GraphManager.h
     Source/Core/GridPanelSettings.h
     Source/Core/GridVoiceEngine.h
+    Source/Core/HardwareCcDatabase.h
     Source/Core/InputLinkSend.h
     Source/Core/LinkClock.h
     Source/Core/LinkSendTaps.h
@@ -600,6 +603,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/GridPhysicsTests.cpp
         Tests/Core/GridSessionStoreTests.cpp
         Tests/Core/GridVoiceEngineTests.cpp
+        Tests/Core/HardwareCcDatabaseTests.cpp
         Tests/Core/PadGridLayoutTests.cpp
         Tests/Core/RingTouchModelTests.cpp
         Tests/Core/GridSensitivityTests.cpp
@@ -687,6 +691,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/GridPhysics.cpp
         Source/Core/GridSessionStore.cpp
         Source/Core/GridVoiceEngine.cpp
+        Source/Core/HardwareCcDatabase.cpp
         Source/Core/InputLinkSend.cpp
         Source/Core/LinkClock.cpp
         Source/Core/LinkReceiveStream.cpp

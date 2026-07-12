@@ -462,6 +462,43 @@
     `juce::SettableTooltipClient` als zweite Basis — TooltipWindow
     existiert app-weit in EngineEditor). Bewusst KEIN neues
     Persistenz-Format, keine User-Overrides (Scope-Vorgabe „nur kurz").
+  - **Hardware-CC-Datenbank (Block L2, 07/2026, eigener Meilenstein):**
+    User-Vision ging über Block L hinaus — nicht nur generische GM-CC-
+    Namen, sondern GERÄTE-SPEZIFISCHE Zuordnungen ("Analog Heat: Filter
+    Cutoff" statt "CC 74"), analog zum Ableton-Parameter-Browser
+    (Track → Device → Parameter). `Core/HardwareCcDatabase.h/.cpp`:
+    Klartext-Format (KEIN XML — User-Entscheidung, leicht von Hand
+    editierbar), `[Gerätename]` eröffnet einen Block, darin `CC = Name`
+    je Zeile; `parse()`/`merge()` sind pure Funktionen. Faktor-Daten
+    via BinaryData (`Assets/HardwareDevices.txt`, `juce_add_binary_data`
+    ConduitAssets-Target — CMake-Reconfigure nötig nach Asset-Änderung!);
+    optionale User-Datei `Conduit/HardwareDevices.txt` NEBEN
+    GridSession.xml ergänzt/überschreibt pro Gerät (gleicher Name =
+    gleiches Gerät, gleiche CC = überschreiben, neue CC = ergänzen).
+    Faktor-Bestückung (5 Test-Geräte, ein Hersteller je Eintrag, CC-Daten
+    aus offiziellen Handbüchern/midi.guide via WebSearch/WebFetch
+    recherchiert): Elektron Digitakt, Moog Minitaur, Arturia MicroFreak,
+    Sequential Prophet Rev2, Waldorf Blofeld. **Elektron Analog Heat
+    (Users Beispiel) nutzt AUSSCHLIESSLICH NRPN (14-Bit MSB/LSB), keine
+    Plain-CCs** — verifiziert gegen offizielles Manual + GitHub-CSV,
+    daher stellvertretend der Digitakt (gleiche Elektron-Philosophie,
+    aber mit echten CCs); NRPN-Geräte sind für dieses Klartext-Format
+    (noch) out of scope.
+    UI: dritter Ziel-Typ „Hardware" im Macro-Panel (`MacroPanel.h/.cpp`,
+    `TargetType::hardware`) neben MIDI/Live — Device-Dropdown →
+    Parameter-Dropdown baut technisch einen GANZ NORMALEN `MidiCcTarget`
+    (kein neues Ziel/Persistenz-Format; nach dem Neuladen zeigt sich das
+    Ziel wieder im MIDI-Tab, Tooltip nennt weiter den generischen
+    CcNames-Namen — akzeptiert). `GridPage` besitzt die
+    `HardwareCcDatabase`-Instanz (geladen im Ctor, Datei-Pfad aus
+    `sessionFile().getSiblingFile("HardwareDevices.txt")`), reicht sie
+    an `MacroPanel` durch. Tests: Tests/Core/HardwareCcDatabaseTests.cpp
+    (Parse/Merge/Faktor-Laden/User-Overlay).
+    **Recherche-Falle:** WebFetch auf PDF-Handbücher lieferte nur
+    Adobe-Metadaten statt Text (Analog-Heat-Manual) — GitHub-CSV
+    (`pencilresearch/midi`) und midi.guide-Seiten lieferten sauber
+    strukturierte Daten, PDF-Handbücher NICHT verlässlich per WebFetch
+    auslesbar.
   - **Sinks/Stränge später:** OSC (Remote + Transcoder) und CV (Software-CVC)
     docken am selben Voice-Modell an; Gesten-State-Machine (Drone/Latch/
     Pinch/Drift), Chord-Squares, Hardware-MPE-Input, MPE-Shaping (Kurven +

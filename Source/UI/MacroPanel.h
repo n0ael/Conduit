@@ -5,6 +5,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "Core/HardwareCcDatabase.h"
 #include "Core/MacroBindings.h"
 #include "Core/MidiDeviceTarget.h"
 #include "Core/MidiInBindings.h"
@@ -44,7 +45,8 @@ class MacroPanel final : public juce::Component
 public:
     MacroPanel (grid::MacroBindings& bindingsToUse, grid::MidiDeviceTarget& midiTargetToUse,
                 LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
-                grid::MidiInBindings& midiInBindingsToUse);
+                grid::MidiInBindings& midiInBindingsToUse,
+                grid::HardwareCcDatabase& hardwareDbToUse);
     ~MacroPanel() override;
 
     /** Long-Press-Ziel setzen: layer/controlId (Achse 0); hasYAxis = true
@@ -78,7 +80,7 @@ private:
         static constexpr int kExpandedHeight  = 236;
 
     private:
-        enum class TargetType { none, midi, live };
+        enum class TargetType { none, midi, live, hardware };
 
         [[nodiscard]] grid::MacroBinding* binding() const noexcept;
         void applyTargetType (TargetType newType);
@@ -87,6 +89,15 @@ private:
         void populateDeviceCombo();
         void populateParameterCombo();
         void createAbletonTarget();
+
+        /** Block L2 (Hardware-CC-Datenbank): Device-/Parameter-Auswahl
+            baut technisch einen ganz normalen MidiCcTarget (nur die
+            Zahlen-Herkunft ist gefuehrt) -- kein neues Persistenz-Format,
+            reine Eingabehilfe. Nach dem Neuladen zeigt sich das Ziel daher
+            wieder im MIDI-Tab (akzeptiert, Tooltip nennt weiter den Namen). */
+        void populateHardwareDeviceCombo();
+        void populateHardwareParamCombo();
+        void createHardwareTarget();
 
         /** Block K2: die persistierte Live-Zuweisung (LiveParamSpec) in den
             drei Combos spiegeln — ohne createAbletonTarget auszulösen
@@ -99,8 +110,9 @@ private:
         bool expanded = false;
         TargetType targetType = TargetType::none;
 
-        push::TextTile midiTile { "MIDI" };
-        push::TextTile liveTile { "Live" };
+        push::TextTile midiTile     { "MIDI" };
+        push::TextTile liveTile     { "Live" };
+        push::TextTile hardwareTile { "HW" };
         push::TextTile removeTile { juce::String::fromUTF8 ("\xc3\x97") };   // ×
 
         NumberFieldBracket channelField { NumberFieldBracket::Config { 1.0, 16.0, 1.0, 1.0, 0, 0.1, "Ch" } };
@@ -108,6 +120,9 @@ private:
 
         juce::ComboBox trackCombo, deviceCombo, parameterCombo;
         juce::StringArray trackKeys, deviceIds;   // parallel zu den Combo-Ids
+
+        // Block L2: Geraet -> Parameter, analog zu trackCombo/deviceCombo.
+        juce::ComboBox hwDeviceCombo, hwParamCombo;
 
         std::unique_ptr<CurveEditorTile> curveTile;   // gebaut in rebuildFromBinding (Kurve lebt im Binding)
 
@@ -132,6 +147,7 @@ private:
     LiveSetModel& liveSetModel;
     TouchLiveClient& touchLiveClient;
     grid::MidiInBindings& midiInBindings;
+    grid::HardwareCcDatabase& hardwareDb;   // Block L2
 
     int  currentLayer = 0;
     int  currentControlId = -1;   // -1 = kein Control gewaehlt (Leerzustand)

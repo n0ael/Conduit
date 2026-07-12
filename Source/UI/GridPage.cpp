@@ -88,6 +88,10 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     loadSession();
     startTimer (30 * 1000);   // Auto-Save; zusätzlich Save im Destruktor
 
+    // Block L2: Faktor-Geräte + optionale User-Datei (gleiche Ablage wie
+    // GridSession.xml, gleiche Struktur wie die Faktor-Datei).
+    hardwareCcDatabase.load (sessionFile.getSiblingFile ("HardwareDevices.txt"));
+
     // Track-Tabs (Block H3): Tap = Fokus-Wechsel, gleicher Command-Weg wie
     // der Long-Press-Selector (EngineEditor ruft ebenfalls sendFocusCommand).
     trackTabs.onTrackChosen = [this] (const juce::String& trackKey)
@@ -224,7 +228,8 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     // Tab 4 „Macro" (Block E): Ziel-Listen der Controls. Der rohe Zeiger
     // bleibt gueltig, solange das dockPanel (GridPage-Member) lebt.
     auto macroView = std::make_unique<MacroPanel> (macroBindings, midiTarget,
-                                                   liveSetModel, touchLiveClient, midiInBindings);
+                                                   liveSetModel, touchLiveClient, midiInBindings,
+                                                   hardwareCcDatabase);
     macroPanel = macroView.get();
     dockPanel.addTab ("macro", "Macro", std::move (macroView));
 
