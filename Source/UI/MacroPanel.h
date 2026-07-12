@@ -8,6 +8,7 @@
 #include "Core/HardwareCcDatabase.h"
 #include "Core/MacroBindings.h"
 #include "Core/MidiInBindings.h"
+#include "Core/MidiProfileLibrary.h"
 #include "Interfaces/IMidiOutputTarget.h"
 #include "CurveEditorTile.h"
 #include "NumberFieldBracket.h"
@@ -46,7 +47,8 @@ public:
     MacroPanel (grid::MacroBindings& bindingsToUse, grid::IMidiOutputTarget& midiTargetToUse,
                 LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
                 grid::MidiInBindings& midiInBindingsToUse,
-                grid::HardwareCcDatabase& hardwareDbToUse);
+                grid::HardwareCcDatabase& hardwareDbToUse,
+                MidiProfileLibrary& profileLibraryToUse);
     ~MacroPanel() override;
 
     /** Long-Press-Ziel setzen: layer/controlId (Achse 0); hasYAxis = true
@@ -90,11 +92,10 @@ private:
         void populateParameterCombo();
         void createAbletonTarget();
 
-        /** Block L2 (Hardware-CC-Datenbank): Device-/Parameter-Auswahl
-            baut technisch einen ganz normalen MidiCcTarget (nur die
-            Zahlen-Herkunft ist gefuehrt) -- kein neues Persistenz-Format,
-            reine Eingabehilfe. Nach dem Neuladen zeigt sich das Ziel daher
-            wieder im MIDI-Tab (akzeptiert, Tooltip nennt weiter den Namen). */
+        /** Block L2 + MIDI-Rig M2: das Device-Dropdown listet die
+            Klartext-CC-Geraete UND die CSV-Profile (midi.guide). CC-Params
+            bauen weiter einen normalen MidiCcTarget; NRPN-Params (nur
+            Profile) einen MidiNrpnTarget mit min/max aus dem Profil. */
         void populateHardwareDeviceCombo();
         void populateHardwareParamCombo();
         void createHardwareTarget();
@@ -147,7 +148,8 @@ private:
     LiveSetModel& liveSetModel;
     TouchLiveClient& touchLiveClient;
     grid::MidiInBindings& midiInBindings;
-    grid::HardwareCcDatabase& hardwareDb;   // Block L2
+    grid::HardwareCcDatabase& hardwareDb;   // Block L2 (Klartext-Schnellpfad)
+    MidiProfileLibrary& profileLibrary;     // M2: midi.guide-CSV-Profile
 
     int  currentLayer = 0;
     int  currentControlId = -1;   // -1 = kein Control gewaehlt (Leerzustand)

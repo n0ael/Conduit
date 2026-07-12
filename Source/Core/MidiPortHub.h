@@ -10,6 +10,7 @@
 #include "Interfaces/IMidiOutputTarget.h"
 #include "MidiControllerEvent.h"
 #include "MidiRigSettings.h"
+#include "NrpnAssembler.h"
 #include "Util/SpscQueue.h"
 
 namespace conduit::midirig
@@ -174,6 +175,11 @@ private:
         juce::String openName;
         SpscQueue<midi::ControllerEvent> controllerQueue { 512 };
         SpscQueue<midi::NoteEvent> noteQueue { 512 };
+
+        // NRPN-Assembler PRO PORT (ADR E4, M2): setzt MSB/LSB-Paare auf
+        // dem MIDI-System-Thread VOR dem Queue-Push zusammen — NUR im
+        // MIDI-Callback berührt (Producer-Zustand).
+        midirig::NrpnAssembler nrpnAssembler;
 
         // Latest-Pending-Überlauf: gepacktes ControllerEvent + Present-Bit.
         std::atomic<juce::uint64> overflowSlot { 0 };

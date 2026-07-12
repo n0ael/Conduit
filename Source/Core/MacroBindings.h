@@ -85,6 +85,67 @@ private:
 };
 
 //==============================================================================
+/** MIDI-NRPN-Ziel (MIDI-Rig M2, ADR 006 E4): 14-bit-Parameter über die
+    Sequenz CC99 (Adress-MSB) → CC98 (Adress-LSB) → CC6 (Daten-MSB) →
+    CC38 (Daten-LSB). value01 wird auf [minValue, maxValue] des Geräte-
+    Profils gemappt (Analog Heat: 0..16383); Dedupe auf dem gemappten
+    Wert. Der Anzeigename kommt aus dem Profil (Picker) — persistiert
+    werden nur die stabilen Nummern. */
+class MidiNrpnTarget final : public MacroTarget
+{
+public:
+    MidiNrpnTarget (IMidiOutputTarget& outputToUse, int channelToUse, int nrpnNumberToUse,
+                    int minValueToUse, int maxValueToUse,
+                    const juce::String& displayNameToUse = {});
+
+    void sendValue (float value01) override;
+    [[nodiscard]] juce::String describe() const override;
+    [[nodiscard]] juce::ValueTree toState() const override;
+
+    [[nodiscard]] int channel() const noexcept { return midiChannel; }
+    [[nodiscard]] int nrpnNumber() const noexcept { return nrpn; }
+
+    static inline const juce::Identifier kStateType { "NrpnTarget" };
+
+private:
+    IMidiOutputTarget& output;
+    int midiChannel;    // 1..16
+    int nrpn;           // 0..16383 (msb*128+lsb)
+    int minValue;
+    int maxValue;
+    juce::String displayName;
+    int lastSent = -1;  // Dedupe auf dem gemappten Wert
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiNrpnTarget)
+};
+
+//==============================================================================
+/** Program-Change-Ziel (MIDI-Rig M2, ADR 006 E5): value01 → Programm
+    0..127 (Dedupe), optional mit Bank-Select-Vorstufe CC0/CC32
+    (bankMsb/bankLsb, -1 = keine Bank). */
+class MidiProgramChangeTarget final : public MacroTarget
+{
+public:
+    MidiProgramChangeTarget (IMidiOutputTarget& outputToUse, int channelToUse,
+                             int bankMsbToUse = -1, int bankLsbToUse = -1);
+
+    void sendValue (float value01) override;
+    [[nodiscard]] juce::String describe() const override;
+    [[nodiscard]] juce::ValueTree toState() const override;
+
+    static inline const juce::Identifier kStateType { "PcTarget" };
+
+private:
+    IMidiOutputTarget& output;
+    int midiChannel;   // 1..16
+    int bankMsb;       // -1 = keine Bank-Vorstufe
+    int bankLsb;
+    int lastSent = -1;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiProgramChangeTarget)
+};
+
+//==============================================================================
 /** Adressiert die Macro-Bindings eines Control-WERTS: Layer (System-Controls
     des XY+Fader-Modus vs. DIY-CC-Baukasten -- deren Control-Ids kollidieren,
     beide Modelle zaehlen ab 1), Control-Id und Achse (XY-Pads haben zwei

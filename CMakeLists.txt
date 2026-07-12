@@ -80,6 +80,13 @@ juce_add_binary_data(ConduitAssets
         Assets/Fonts/Jost-Regular.ttf
         Assets/Fonts/Jost-Medium.ttf
         Assets/HardwareDevices.txt
+        # MIDI-Rig M2: Factory-Geräteprofile (midi.guide, CC-BY-SA 4.0)
+        Assets/DeviceProfiles/Arturia_MicroFreak.csv
+        Assets/DeviceProfiles/Elektron_AnalogHeat.csv
+        Assets/DeviceProfiles/Elektron_Digitakt.csv
+        Assets/DeviceProfiles/Moog_Minitaur.csv
+        Assets/DeviceProfiles/Sequential_ProphetRev2.csv
+        Assets/DeviceProfiles/Waldorf_Blofeld.csv
 )
 
 # ---------------------------------------------------------------------------
@@ -116,8 +123,10 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/MeterSettings.cpp
     Source/Core/Metronome.cpp
     Source/Core/MidiDeviceTarget.cpp
+    Source/Core/MidiDeviceProfile.cpp
     Source/Core/MidiInBindings.cpp
     Source/Core/MidiPortHub.cpp
+    Source/Core/MidiProfileLibrary.cpp
     Source/Core/MidiRigSettings.cpp
     Source/Core/ModuleUiDefaults.cpp
     Source/Core/MpeEncoder.cpp
@@ -631,9 +640,12 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/MpeMidiSinkTests.cpp
         Tests/Core/MacroBindingsTests.cpp
         Tests/Core/FigmaSnapTests.cpp
+        Tests/Core/MidiDeviceProfileTests.cpp
         Tests/Core/MidiInBindingsTests.cpp
         Tests/Core/MidiPortHubTests.cpp
+        Tests/Core/MidiProfileLibraryTests.cpp
         Tests/Core/MidiRigSettingsTests.cpp
+        Tests/Core/NrpnAssemblerTests.cpp
         Tests/Core/OscControllerTests.cpp
         Tests/Core/OscSendServiceTests.cpp
         Tests/Core/PatchingTests.cpp
@@ -702,8 +714,10 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/MeterSettings.cpp
         Source/Core/Metronome.cpp
         Source/Core/MidiDeviceTarget.cpp
+        Source/Core/MidiDeviceProfile.cpp
         Source/Core/MidiInBindings.cpp
         Source/Core/MidiPortHub.cpp
+        Source/Core/MidiProfileLibrary.cpp
         Source/Core/MidiRigSettings.cpp
         Source/Core/ModuleUiDefaults.cpp
         Source/Core/MpeEncoder.cpp

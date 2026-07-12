@@ -170,3 +170,111 @@ TEST_CASE ("AbletonParamTarget: mapToNative skaliert auf den Live-Bereich", "[gr
     REQUIRE (T::mapToNative (0.5f, 0.0f, 5.0f, true) == Approx (3.0f));   // 2.5 -> round
     REQUIRE (T::mapToNative (0.2f, 0.0f, 5.0f, true) == Approx (1.0f));
 }
+
+//==============================================================================
+// MIDI-Rig M2: NRPN- und Program-Change-Ziele.
+
+TEST_CASE ("MidiNrpnTarget: Sequenz 99/98/6/38, Mapping und 14-bit-Dedupe", "[midirig][macro]")
+{
+    grid::FakeMidiTarget fake;
+    grid::MidiNrpnTarget target (fake, 3, 70, 0, 16383, "Analog Heat: Frequency");
+
+    target.sendValue (1.0f);
+    REQUIRE (fake.messages.size() == 4);
+
+    REQUIRE (fake.messages[0].getControllerNumber() == 99);   // Adresse MSB
+    REQUIRE (fake.messages[0].getControllerValue() == 0);     // 70 / 128
+    REQUIRE (fake.messages[0].getChannel() == 3);
+    REQUIRE (fake.messages[1].getControllerNumber() == 98);   // Adresse LSB
+    REQUIRE (fake.messages[1].getControllerValue() == 70);
+    REQUIRE (fake.messages[2].getControllerNumber() == 6);    // Daten MSB
+    REQUIRE (fake.messages[2].getControllerValue() == 127);
+    REQUIRE (fake.messages[3].getControllerNumber() == 38);   // Daten LSB
+    REQUIRE (fake.messages[3].getControllerValue() == 127);   // 16383 & 0x7f
+
+    // Dedupe: identischer gemappter Wert sendet nichts.
+    target.sendValue (1.0f);
+    REQUIRE (fake.messages.size() == 4);
+
+    // Mitte: 8192 → MSB 64, LSB 0.
+    target.sendValue (0.5f);
+    REQUIRE (fake.messages.size() == 8);
+    REQUIRE (fake.messages[6].getControllerValue() == 64);
+    REQUIRE (fake.messages[7].getControllerValue() == 0);
+}
+
+TEST_CASE ("MidiNrpnTarget: min/max aus dem Profil begrenzen das Mapping", "[midirig][macro]")
+{
+    grid::FakeMidiTarget fake;
+    grid::MidiNrpnTarget target (fake, 1, 200, 100, 200);
+
+    target.sendValue (0.0f);
+    REQUIRE (fake.messages.size() == 4);
+    REQUIRE ((fake.messages[2].getControllerValue() << 7 | fake.messages[3].getControllerValue()) == 100);
+
+    target.sendValue (1.0f);
+    REQUIRE ((fake.messages[6].getControllerValue() << 7 | fake.messages[7].getControllerValue()) == 200);
+}
+
+TEST_CASE ("MidiNrpnTarget: describe und toState-Roundtrip-Felder", "[midirig][macro]")
+{
+    grid::FakeMidiTarget fake;
+    grid::MidiNrpnTarget target (fake, 3, 70, 0, 16383, "Analog Heat: Frequency");
+
+    REQUIRE (target.describe() == "Analog Heat: Frequency / Kanal 3");
+
+    const auto state = target.toState();
+    REQUIRE (state.hasType (grid::MidiNrpnTarget::kStateType));
+    REQUIRE ((int) state.getProperty ("channel") == 3);
+    REQUIRE ((int) state.getProperty ("number") == 70);
+    REQUIRE ((int) state.getProperty ("min") == 0);
+    REQUIRE ((int) state.getProperty ("max") == 16383);
+    REQUIRE (state.getProperty ("name").toString() == "Analog Heat: Frequency");
+
+    grid::MidiNrpnTarget unnamed (fake, 2, 300, 0, 16383);
+    REQUIRE (unnamed.describe() == "NRPN 300 / Kanal 2");
+}
+
+TEST_CASE ("MidiProgramChangeTarget: PC mit optionaler Bank, Dedupe", "[midirig][macro]")
+{
+    grid::FakeMidiTarget fake;
+
+    SECTION ("ohne Bank")
+    {
+        grid::MidiProgramChangeTarget target (fake, 5);
+        target.sendValue (0.0f);
+        REQUIRE (fake.messages.size() == 1);
+        REQUIRE (fake.messages[0].isProgramChange());
+        REQUIRE (fake.messages[0].getProgramChangeNumber() == 0);
+        REQUIRE (fake.messages[0].getChannel() == 5);
+
+        target.sendValue (0.0f);   // Dedupe
+        REQUIRE (fake.messages.size() == 1);
+
+        target.sendValue (1.0f);
+        REQUIRE (fake.messages.size() == 2);
+        REQUIRE (fake.messages[1].getProgramChangeNumber() == 127);
+    }
+
+    SECTION ("mit Bank CC0/CC32 (ADR E5)")
+    {
+        grid::MidiProgramChangeTarget target (fake, 1, 2, 3);
+        target.sendValue (0.5f);
+        REQUIRE (fake.messages.size() == 3);
+        REQUIRE (fake.messages[0].getControllerNumber() == 0);
+        REQUIRE (fake.messages[0].getControllerValue() == 2);
+        REQUIRE (fake.messages[1].getControllerNumber() == 32);
+        REQUIRE (fake.messages[1].getControllerValue() == 3);
+        REQUIRE (fake.messages[2].isProgramChange());
+    }
+
+    SECTION ("toState")
+    {
+        grid::MidiProgramChangeTarget target (fake, 4, 7, -1);
+        const auto state = target.toState();
+        REQUIRE (state.hasType (grid::MidiProgramChangeTarget::kStateType));
+        REQUIRE ((int) state.getProperty ("channel") == 4);
+        REQUIRE ((int) state.getProperty ("bankMsb") == 7);
+        REQUIRE ((int) state.getProperty ("bankLsb") == -1);
+    }
+}

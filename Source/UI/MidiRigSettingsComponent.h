@@ -6,6 +6,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Core/MidiPortHub.h"
+#include "Core/MidiProfileLibrary.h"
 
 namespace conduit
 {
@@ -22,13 +23,19 @@ namespace conduit
     Zeilenhöhe 44 px (Touch-Target, CLAUDE.md §10.0), keine
     Schriftstauchung. Ein 1-Hz-Timer aktualisiert den Verbunden-Status
     (der Hub broadcastet nicht). Message Thread.
+
+    Sektion „Profile" (M2, ADR E1/E1b): Lade-Report der Klangerzeuger-
+    Profile (Factory-CSVs + Conduit/Devices) mit Warnungen — kein stilles
+    Scheitern; „Neu laden"-Button, Klartext-Schnellpfad-Toggle und die
+    CC-BY-SA-Attribution der midi.guide-Daten.
 */
 class MidiRigSettingsComponent final : public juce::Component,
                                        private juce::ChangeListener,
                                        private juce::Timer
 {
 public:
-    MidiRigSettingsComponent (MidiRigSettings& settingsToUse, MidiPortHub& hubToUse);
+    MidiRigSettingsComponent (MidiRigSettings& settingsToUse, MidiPortHub& hubToUse,
+                              MidiProfileLibrary& profileLibraryToUse);
     ~MidiRigSettingsComponent() override;
 
     void resized() override;
@@ -72,9 +79,11 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
     void timerCallback() override;
     void rebuildRows();
+    void refreshProfileReport();
 
     MidiRigSettings& settings;
     MidiPortHub& hub;
+    MidiProfileLibrary& profileLibrary;
 
     juce::Label header;
     juce::Label columnsLabel;
@@ -82,6 +91,13 @@ private:
     juce::Viewport viewport;
     juce::Component rowContainer;
     std::vector<std::unique_ptr<DeviceRow>> rows;
+
+    // Sektion „Profile" (M2).
+    juce::Label profileHeader;
+    juce::ToggleButton legacyToggle { "Klartext-CC-Liste laden (HardwareDevices.txt)" };
+    juce::TextEditor reportBox;   // read-only, mehrzeilig (Report je Quelle)
+    juce::TextButton reloadButton { "Neu laden" };
+    juce::Label attributionLabel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiRigSettingsComponent)
 };

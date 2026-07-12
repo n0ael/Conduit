@@ -15,6 +15,7 @@
 #include "Core/MacroBindings.h"
 #include "Core/MidiInBindings.h"
 #include "Core/MidiPortHub.h"
+#include "Core/MidiProfileLibrary.h"
 #include "Core/MpeMidiSink.h"
 #include "EditorDockPanel.h"
 #include "ExpressionRibbon.h"
@@ -110,7 +111,8 @@ public:
               grid::GridVoiceEngine& engineToUse,
               GridPanelSettings& panelSettingsToUse, grid::MpeMidiSink& mpeMidiSinkToUse,
               LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
-              MidiPortHub& midiPortHubToUse, MidiRigSettings& midiRigSettingsToUse);
+              MidiPortHub& midiPortHubToUse, MidiRigSettings& midiRigSettingsToUse,
+              MidiProfileLibrary& midiProfileLibraryToUse);
     ~GridPage() override;
 
     void resized() override;
@@ -239,6 +241,7 @@ private:
     // live aus der Registry auf — übersteht Rollen-Wechsel).
     MidiPortHub& midiPortHub;
     MidiRigSettings& midiRigSettings;
+    MidiProfileLibrary& midiProfileLibrary;   // M2: CSV-Profile (Hardware-Picker)
     grid::IMidiOutputTarget& midiTarget;
 
     GridPanelSettings& panelSettings;

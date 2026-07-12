@@ -59,6 +59,7 @@ void MidiRigSettings::loadFromFile()
     migratedFromGridPanel  = xml->getBoolAttribute ("migratedFromGridPanel", false);
     gridControllerDeviceId = juce::Uuid (xml->getStringAttribute ("gridControllerDeviceId"));
     gridOutputDeviceId     = juce::Uuid (xml->getStringAttribute ("gridOutputDeviceId"));
+    useLegacyCcList        = xml->getBoolAttribute ("useLegacyCcList", true);
 
     devices.clear();
 
@@ -85,6 +86,7 @@ void MidiRigSettings::writeAndNotify()
     xml.setAttribute ("migratedFromGridPanel", migratedFromGridPanel);
     xml.setAttribute ("gridControllerDeviceId", gridControllerDeviceId.toDashedString());
     xml.setAttribute ("gridOutputDeviceId", gridOutputDeviceId.toDashedString());
+    xml.setAttribute ("useLegacyCcList", useLegacyCcList);
 
     for (const auto& device : devices)
     {
@@ -231,6 +233,24 @@ void MidiRigSettings::migrateFromGridPanel (const juce::String& controlInName,
     }
 
     migratedFromGridPanel = true;
+    writeAndNotify();
+}
+
+//==============================================================================
+juce::File MidiRigSettings::settingsFile()
+{
+    if (auto* file = applicationProperties.getUserSettings())
+        return file->getFile();
+
+    return {};
+}
+
+void MidiRigSettings::setLegacyCcListEnabled (bool enabled)
+{
+    if (useLegacyCcList == enabled)
+        return;
+
+    useLegacyCcList = enabled;
     writeAndNotify();
 }
 

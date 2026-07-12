@@ -3,7 +3,26 @@
 > Letzte Aktualisierung: 2026-07-12 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (12.07.2026) — MIDI-Rig M1 (ADR 006): Registry + MidiPortHub
+## Aktueller Meilenstein (12.07.2026) — MIDI-Rig M2 (ADR 006): Profile + NRPN + PC
+
+- **CSV-Profile:** midi.guide-Parser (header-getrieben, tolerant, Quoting,
+  ParseReport) + MidiProfileLibrary (Factory-CSVs aus BinaryData:
+  Analog Heat, Digitakt, Minitaur, MicroFreak, Rev2, Blofeld —
+  CC-BY-SA 4.0; User-Ordner Conduit/Devices/**.csv ersetzt Factory).
+- **NRPN:** NrpnAssembler pro Port/Kanal (MIDI-Thread, vor dem
+  Queue-Push, Rule midirig/E4) — Empfang als kind=nrpn-Events;
+  MidiNrpnTarget sendet CC99/98/6/38 mit Profil-Range + Dedupe.
+  CC96/97 (Inc/Dec) bewusst descoped.
+- **Program Change:** Empfang als kind=programChange-Event (E5);
+  MidiProgramChangeTarget mit optionaler Bank CC0/CC32.
+- **UI:** Macro-Panel-Hardware-Tab listet Klartext-DB + Profile
+  (NRPN-Params → NrpnTarget); MIDI-Tab-Sektion „Profile" (Report,
+  Neu laden, Legacy-Toggle, Attribution). Persistenz-Zweige
+  NrpnTarget/PcTarget in makeTargetFromState.
+- Offen: Feldtest Analog Heat (User), PC-/NRPN-Empfang als sichtbare
+  Trigger-Quelle (M5-Mapping).
+
+## Davor (12.07.2026) — MIDI-Rig M1 (ADR 006): Registry + MidiPortHub
 
 Neues Subsystem (docs/MidiRig.md, Rule `midirig`), M1a + M1b komplett:
 

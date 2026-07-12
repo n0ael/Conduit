@@ -347,3 +347,77 @@ TEST_CASE ("MidiPortHub: Tick-Abo feuert bei jedem Drain, unsubscribe beendet es
     hub.drainNow();
     REQUIRE (ticks == 2);
 }
+
+//==============================================================================
+// MIDI-Rig M2: NRPN-Assembler + Program Change im Hub-Empfangspfad.
+
+TEST_CASE ("MidiPortHub: NRPN-Sequenz kommt als nrpn-Events an, Steuer-CCs nie roh", "[midirig]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettings temp;
+    MidiRigSettings settings { temp.options() };
+    FakePortRig rig;
+    rig.inputs = { juce::MidiDeviceInfo ("Heat In", "id-heat") };
+
+    const auto device = settings.addDevice ("Heat", RigDeviceKind::soundGenerator);
+    settings.setMidiInName (device, "Heat In");
+
+    MidiPortHub hub { settings, rig.inputProvider(), rig.outputProvider(),
+                      rig.inputOpener(), rig.outputOpener() };
+    hub.syncFromRegistry();
+
+    std::vector<conduit::midi::ControllerEvent> events;
+    hub.subscribeController (device, [&events] (const conduit::midi::ControllerEvent& e)
+                             { events.push_back (e); });
+
+    rig.feedCc ("id-heat", 1, 99, 0);    // Adresse MSB
+    rig.feedCc ("id-heat", 1, 98, 70);   // Adresse LSB
+    rig.feedCc ("id-heat", 1, 6, 100);   // Daten MSB -> Event 1
+    rig.feedCc ("id-heat", 1, 38, 5);    // Daten LSB -> Event 2 (14-bit)
+    rig.feedCc ("id-heat", 1, 74, 42);   // normale CC -> Event 3
+    hub.drainNow();
+
+    REQUIRE (events.size() == 3);
+
+    REQUIRE (events[0].kind == conduit::midi::ControllerEvent::Kind::nrpn);
+    REQUIRE (events[0].number == 70);
+    REQUIRE (events[0].value == 100);
+    REQUIRE_FALSE (events[0].is14Bit);
+
+    REQUIRE (events[1].kind == conduit::midi::ControllerEvent::Kind::nrpn);
+    REQUIRE (events[1].value == (100 << 7) + 5);
+    REQUIRE (events[1].is14Bit);
+
+    REQUIRE (events[2].kind == conduit::midi::ControllerEvent::Kind::cc);
+    REQUIRE (events[2].number == 74);
+}
+
+TEST_CASE ("MidiPortHub: Program Change kommt als programChange-Event an", "[midirig]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettings temp;
+    MidiRigSettings settings { temp.options() };
+    FakePortRig rig;
+    rig.inputs = { juce::MidiDeviceInfo ("Synth In", "id-synth") };
+
+    const auto device = settings.addDevice ("Synth", RigDeviceKind::soundGenerator);
+    settings.setMidiInName (device, "Synth In");
+
+    MidiPortHub hub { settings, rig.inputProvider(), rig.outputProvider(),
+                      rig.inputOpener(), rig.outputOpener() };
+    hub.syncFromRegistry();
+
+    std::vector<conduit::midi::ControllerEvent> events;
+    hub.subscribeController (device, [&events] (const conduit::midi::ControllerEvent& e)
+                             { events.push_back (e); });
+
+    REQUIRE (rig.openInputCallbacks.count ("id-synth") == 1);
+    rig.openInputCallbacks["id-synth"]->handleIncomingMidiMessage (
+        nullptr, juce::MidiMessage::programChange (2, 42));
+    hub.drainNow();
+
+    REQUIRE (events.size() == 1);
+    REQUIRE (events[0].kind == conduit::midi::ControllerEvent::Kind::programChange);
+    REQUIRE (events[0].channel == 2);
+    REQUIRE (events[0].number == 42);
+}

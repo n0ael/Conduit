@@ -42,6 +42,109 @@ juce::ValueTree MidiCcTarget::toState() const
 }
 
 //==============================================================================
+MidiNrpnTarget::MidiNrpnTarget (IMidiOutputTarget& outputToUse, int channelToUse,
+                                int nrpnNumberToUse, int minValueToUse, int maxValueToUse,
+                                const juce::String& displayNameToUse)
+    : output (outputToUse),
+      midiChannel (juce::jlimit (1, 16, channelToUse)),
+      nrpn (juce::jlimit (0, 16383, nrpnNumberToUse)),
+      minValue (juce::jlimit (0, 16383, minValueToUse)),
+      maxValue (juce::jlimit (0, 16383, maxValueToUse)),
+      displayName (displayNameToUse)
+{
+    if (maxValue <= minValue)   // kaputte Profil-Range reparieren
+    {
+        minValue = 0;
+        maxValue = 16383;
+    }
+}
+
+void MidiNrpnTarget::sendValue (float value01)
+{
+    const auto clamped = juce::jlimit (0.0f, 1.0f, value01);
+    const auto mapped = minValue
+        + (int) std::lround (clamped * (float) (maxValue - minValue));
+
+    if (mapped == lastSent)
+        return;   // Dedupe auf dem gemappten Wert (14-bit)
+
+    lastSent = mapped;
+
+    // ADR E4: Adresse zuerst (MSB/LSB), dann Daten-MSB/LSB — jedes send()
+    // traegt die volle Sequenz, damit parallel gesendete CC-Ziele die
+    // NRPN-Adresse des Geraets nicht verfaelschen koennen.
+    output.send (juce::MidiMessage::controllerEvent (midiChannel, 99, nrpn / 128));
+    output.send (juce::MidiMessage::controllerEvent (midiChannel, 98, nrpn % 128));
+    output.send (juce::MidiMessage::controllerEvent (midiChannel, 6,  (mapped >> 7) & 0x7f));
+    output.send (juce::MidiMessage::controllerEvent (midiChannel, 38, mapped & 0x7f));
+}
+
+juce::String MidiNrpnTarget::describe() const
+{
+    const auto base = displayName.isNotEmpty() ? displayName
+                                               : "NRPN " + juce::String (nrpn);
+    return base + " / Kanal " + juce::String (midiChannel);
+}
+
+juce::ValueTree MidiNrpnTarget::toState() const
+{
+    juce::ValueTree state (kStateType);
+    state.setProperty ("channel", midiChannel, nullptr);
+    state.setProperty ("number", nrpn, nullptr);
+    state.setProperty ("min", minValue, nullptr);
+    state.setProperty ("max", maxValue, nullptr);
+    state.setProperty ("name", displayName, nullptr);
+    return state;
+}
+
+//==============================================================================
+MidiProgramChangeTarget::MidiProgramChangeTarget (IMidiOutputTarget& outputToUse,
+                                                  int channelToUse,
+                                                  int bankMsbToUse, int bankLsbToUse)
+    : output (outputToUse),
+      midiChannel (juce::jlimit (1, 16, channelToUse)),
+      bankMsb (juce::jlimit (-1, 127, bankMsbToUse)),
+      bankLsb (juce::jlimit (-1, 127, bankLsbToUse))
+{
+}
+
+void MidiProgramChangeTarget::sendValue (float value01)
+{
+    const auto program = juce::jlimit (0, 127, (int) std::lround (value01 * 127.0f));
+
+    if (program == lastSent)
+        return;
+
+    lastSent = program;
+
+    // ADR E5: optionale Bank-Select-Vorstufe (CC0 MSB / CC32 LSB), dann PC.
+    if (bankMsb >= 0)
+        output.send (juce::MidiMessage::controllerEvent (midiChannel, 0, bankMsb));
+    if (bankLsb >= 0)
+        output.send (juce::MidiMessage::controllerEvent (midiChannel, 32, bankLsb));
+
+    output.send (juce::MidiMessage::programChange (midiChannel, program));
+}
+
+juce::String MidiProgramChangeTarget::describe() const
+{
+    auto text = "Program Change / Kanal " + juce::String (midiChannel);
+    if (bankMsb >= 0 || bankLsb >= 0)
+        text += " (Bank " + juce::String (juce::jmax (0, bankMsb))
+              + "/" + juce::String (juce::jmax (0, bankLsb)) + ")";
+    return text;
+}
+
+juce::ValueTree MidiProgramChangeTarget::toState() const
+{
+    juce::ValueTree state (kStateType);
+    state.setProperty ("channel", midiChannel, nullptr);
+    state.setProperty ("bankMsb", bankMsb, nullptr);
+    state.setProperty ("bankLsb", bankLsb, nullptr);
+    return state;
+}
+
+//==============================================================================
 MacroBinding* MacroBindings::add (const MacroControlKey& key)
 {
     auto& list = bindings[key];

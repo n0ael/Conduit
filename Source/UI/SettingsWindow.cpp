@@ -73,7 +73,8 @@ SettingsWindow::SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSe
                                 CaptureSettings& captureSettings, CaptureService& captureService,
                                 OscSendSettings& oscSendSettings, OscController& oscController,
                                 UiSettings& uiSettings,
-                                MidiRigSettings& midiRigSettings, MidiPortHub& midiPortHub)
+                                MidiRigSettings& midiRigSettings, MidiPortHub& midiPortHub,
+                                MidiProfileLibrary& midiProfileLibrary)
 {
     setLookAndFeel (&darkLook);
 
@@ -90,7 +91,8 @@ SettingsWindow::SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSe
     tabs.addTab ("OSC", tabBackground,
                  new OscSettingsComponent (oscSendSettings, oscController), true);
     tabs.addTab ("MIDI", tabBackground,
-                 new MidiRigSettingsComponent (midiRigSettings, midiPortHub), true);
+                 new MidiRigSettingsComponent (midiRigSettings, midiPortHub,
+                                               midiProfileLibrary), true);
 
     addAndMakeVisible (tabs);
     setSize (520, 520);

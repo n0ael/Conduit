@@ -17,10 +17,12 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
                      grid::GridVoiceEngine& engineToUse,
                      GridPanelSettings& panelSettingsToUse, grid::MpeMidiSink& mpeMidiSinkToUse,
                      LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
-                     MidiPortHub& midiPortHubToUse, MidiRigSettings& midiRigSettingsToUse)
+                     MidiPortHub& midiPortHubToUse, MidiRigSettings& midiRigSettingsToUse,
+                     MidiProfileLibrary& midiProfileLibraryToUse)
     : rootState (std::move (rootStateToUse)),
       engine (engineToUse),
       midiPortHub (midiPortHubToUse), midiRigSettings (midiRigSettingsToUse),
+      midiProfileLibrary (midiProfileLibraryToUse),
       midiTarget (midiPortHubToUse.gridOutputTarget()),
       panelSettings (panelSettingsToUse),
       mpeMidiSink (mpeMidiSinkToUse),
@@ -89,8 +91,10 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     startTimer (30 * 1000);   // Auto-Save; zusätzlich Save im Destruktor
 
     // Block L2: Faktor-Geräte + optionale User-Datei (gleiche Ablage wie
-    // GridSession.xml, gleiche Struktur wie die Faktor-Datei).
-    hardwareCcDatabase.load (sessionFile.getSiblingFile ("HardwareDevices.txt"));
+    // GridSession.xml). E1b-Schalter (MIDI-Tab): Klartext-Schnellpfad
+    // abschaltbar — dann liefert nur die CSV-Profile-Library Geräte.
+    if (midiRigSettings.isLegacyCcListEnabled())
+        hardwareCcDatabase.load (sessionFile.getSiblingFile ("HardwareDevices.txt"));
 
     // Track-Tabs (Block H3): Tap = Fokus-Wechsel, gleicher Command-Weg wie
     // der Long-Press-Selector (EngineEditor ruft ebenfalls sendFocusCommand).
@@ -230,7 +234,7 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     // bleibt gueltig, solange das dockPanel (GridPage-Member) lebt.
     auto macroView = std::make_unique<MacroPanel> (macroBindings, midiTarget,
                                                    liveSetModel, touchLiveClient, midiInBindings,
-                                                   hardwareCcDatabase);
+                                                   hardwareCcDatabase, midiProfileLibrary);
     macroPanel = macroView.get();
     dockPanel.addTab ("macro", "Macro", std::move (macroView));
 
@@ -781,6 +785,20 @@ std::unique_ptr<grid::MacroTarget> GridPage::makeTargetFromState (const juce::Va
         return std::make_unique<grid::MidiCcTarget> (
             midiTarget, (int) state.getProperty ("channel", 1),
             (int) state.getProperty ("cc", 74));
+
+    if (state.hasType (grid::MidiNrpnTarget::kStateType))
+        return std::make_unique<grid::MidiNrpnTarget> (
+            midiTarget, (int) state.getProperty ("channel", 1),
+            (int) state.getProperty ("number", 0),
+            (int) state.getProperty ("min", 0),
+            (int) state.getProperty ("max", 16383),
+            state.getProperty ("name").toString());
+
+    if (state.hasType (grid::MidiProgramChangeTarget::kStateType))
+        return std::make_unique<grid::MidiProgramChangeTarget> (
+            midiTarget, (int) state.getProperty ("channel", 1),
+            (int) state.getProperty ("bankMsb", -1),
+            (int) state.getProperty ("bankLsb", -1));
 
     if (state.hasType (grid::AbletonParamTarget::kStateType))
         return std::make_unique<grid::AbletonParamTarget> (

@@ -161,8 +161,9 @@ void MidiRigSettingsComponent::DeviceRow::resized()
 
 //==============================================================================
 MidiRigSettingsComponent::MidiRigSettingsComponent (MidiRigSettings& settingsToUse,
-                                                    MidiPortHub& hubToUse)
-    : settings (settingsToUse), hub (hubToUse)
+                                                    MidiPortHub& hubToUse,
+                                                    MidiProfileLibrary& profileLibraryToUse)
+    : settings (settingsToUse), hub (hubToUse), profileLibrary (profileLibraryToUse)
 {
     header.setText (juce::String::fromUTF8 ("MIDI-Ger\xc3\xa4te (Rig)"), juce::dontSendNotification);
     header.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
@@ -180,9 +181,68 @@ MidiRigSettingsComponent::MidiRigSettingsComponent (MidiRigSettings& settingsToU
     viewport.setScrollBarsShown (true, false);
     addAndMakeVisible (viewport);
 
+    // Sektion „Profile" (M2, ADR E1/E1b).
+    profileHeader.setText ("Profile", juce::dontSendNotification);
+    profileHeader.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
+    addAndMakeVisible (profileHeader);
+
+    legacyToggle.setToggleState (settings.isLegacyCcListEnabled(), juce::dontSendNotification);
+    legacyToggle.onClick = [this]
+    { settings.setLegacyCcListEnabled (legacyToggle.getToggleState()); };
+    addAndMakeVisible (legacyToggle);
+
+    reportBox.setMultiLine (true);
+    reportBox.setReadOnly (true);
+    reportBox.setScrollbarsShown (true);
+    addAndMakeVisible (reportBox);
+
+    reloadButton.onClick = [this]
+    {
+        profileLibrary.reload();
+        refreshProfileReport();
+    };
+    addAndMakeVisible (reloadButton);
+
+    attributionLabel.setText (juce::String::fromUTF8 (
+        "Ger\xc3\xa4teprofile: Daten von midi.guide (CC-BY-SA 4.0)"), juce::dontSendNotification);
+    attributionLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
+    addAndMakeVisible (attributionLabel);
+    refreshProfileReport();
+
     settings.addChangeListener (this);
     rebuildRows();
     startTimer (1000);   // Verbunden-Status (der Hub broadcastet nicht)
+}
+
+void MidiRigSettingsComponent::refreshProfileReport()
+{
+    // Nicht-ASCII-Literale NUR über fromUTF8 (Rule ui-design).
+    const auto dot        = juce::String::fromUTF8 (" \xc2\xb7 ");
+    const auto deviceWord = juce::String::fromUTF8 (" Ger\xc3\xa4t");
+    const auto skippedWord = juce::String::fromUTF8 (" \xc3\xbc" "bersprungen");
+
+    juce::String text;
+
+    for (const auto& source : profileLibrary.report())
+    {
+        text << (source.fromUserFolder ? "[User]    " : "[Factory] ")
+             << source.sourceName
+             << dot << source.devices << deviceWord << (source.devices == 1 ? "" : "e")
+             << ", " << source.parse.accepted << " Parameter";
+
+        if (source.parse.skipped > 0)
+            text << ", " << source.parse.skipped << skippedWord;
+
+        text << "\n";
+
+        for (const auto& warning : source.parse.warnings)
+            text << "    ! " << warning << "\n";
+    }
+
+    if (text.isEmpty())
+        text = "Keine Profile geladen.";
+
+    reportBox.setText (text, false);
 }
 
 MidiRigSettingsComponent::~MidiRigSettingsComponent()
@@ -225,6 +285,19 @@ void MidiRigSettingsComponent::resized()
     area.removeFromTop (4);
     columnsLabel.setBounds (area.removeFromTop (20));
     area.removeFromTop (8);
+
+    // Sektion „Profile" (M2) unten, feste Höhe — Geräteliste flext oben.
+    auto profileArea = area.removeFromBottom (190);
+    attributionLabel.setBounds (profileArea.removeFromBottom (20));
+    profileArea.removeFromBottom (4);
+    auto profileButtonRow = profileArea.removeFromBottom (28);
+    reloadButton.setBounds (profileButtonRow.removeFromLeft (110));
+    profileArea.removeFromBottom (4);
+    profileHeader.setBounds (profileArea.removeFromTop (24));
+    legacyToggle.setBounds (profileArea.removeFromTop (24));
+    profileArea.removeFromTop (4);
+    reportBox.setBounds (profileArea);
+    area.removeFromBottom (8);
 
     addButton.setBounds (area.removeFromBottom (kRowHeight).removeFromLeft (140));
     area.removeFromBottom (8);

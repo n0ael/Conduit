@@ -321,9 +321,17 @@ void MacroPanel::TargetRow::populateHardwareDeviceCombo()
     hwDeviceCombo.clear (juce::dontSendNotification);
     hwParamCombo.clear (juce::dontSendNotification);
 
+    // Kombinierte Liste: erst Klartext-DB (Block L2), dahinter die
+    // CSV-Profile (M2, Ids fortlaufend — Index-Mapping in den anderen
+    // beiden Methoden identisch).
     const auto& devices = owner.hardwareDb.devices();
     for (int i = 0; i < (int) devices.size(); ++i)
         hwDeviceCombo.addItem (devices[(size_t) i].name, i + 1);
+
+    const auto& profiles = owner.profileLibrary.profiles();
+    for (int i = 0; i < (int) profiles.size(); ++i)
+        hwDeviceCombo.addItem (profiles[(size_t) i].displayName(),
+                               (int) devices.size() + i + 1);
 }
 
 void MacroPanel::TargetRow::populateHardwareParamCombo()
@@ -332,13 +340,32 @@ void MacroPanel::TargetRow::populateHardwareParamCombo()
 
     const auto deviceIndex = hwDeviceCombo.getSelectedId() - 1;
     const auto& devices = owner.hardwareDb.devices();
-    if (deviceIndex < 0 || deviceIndex >= (int) devices.size())
+
+    if (deviceIndex >= 0 && deviceIndex < (int) devices.size())
+    {
+        const auto& params = devices[(size_t) deviceIndex].params;
+        for (int i = 0; i < (int) params.size(); ++i)
+            hwParamCombo.addItem (params[(size_t) i].name + " (CC "
+                                      + juce::String (params[(size_t) i].cc) + ")",
+                                  i + 1);
+        return;
+    }
+
+    const auto profileIndex = deviceIndex - (int) devices.size();
+    const auto& profiles = owner.profileLibrary.profiles();
+    if (profileIndex < 0 || profileIndex >= (int) profiles.size())
         return;
 
-    const auto& params = devices[(size_t) deviceIndex].params;
+    const auto& params = profiles[(size_t) profileIndex].params;
     for (int i = 0; i < (int) params.size(); ++i)
-        hwParamCombo.addItem (params[(size_t) i].name + " (CC " + juce::String (params[(size_t) i].cc) + ")",
-                              i + 1);
+    {
+        const auto& param = params[(size_t) i];
+        auto label = param.section.isNotEmpty() ? param.section + ": " + param.name
+                                                : param.name;
+        label += param.nrpn >= 0 ? " (NRPN " + juce::String (param.nrpn) + ")"
+                                 : " (CC " + juce::String (param.cc) + ")";
+        hwParamCombo.addItem (label, i + 1);
+    }
 }
 
 void MacroPanel::TargetRow::createHardwareTarget()
@@ -350,17 +377,41 @@ void MacroPanel::TargetRow::createHardwareTarget()
     const auto deviceIndex = hwDeviceCombo.getSelectedId() - 1;
     const auto paramIndex  = hwParamCombo.getSelectedId() - 1;
     const auto& devices = owner.hardwareDb.devices();
-    if (deviceIndex < 0 || deviceIndex >= (int) devices.size())
+
+    if (deviceIndex >= 0 && deviceIndex < (int) devices.size())
+    {
+        // Klartext-DB (Block L2): weiterhin ein ganz normaler MidiCcTarget.
+        const auto& params = devices[(size_t) deviceIndex].params;
+        if (paramIndex < 0 || paramIndex >= (int) params.size())
+            return;
+
+        b->target = std::make_unique<grid::MidiCcTarget> (
+            owner.midiTarget, (int) channelField.getValue(), params[(size_t) paramIndex].cc);
+        repaint();
+        return;
+    }
+
+    const auto profileIndex = deviceIndex - (int) devices.size();
+    const auto& profiles = owner.profileLibrary.profiles();
+    if (profileIndex < 0 || profileIndex >= (int) profiles.size())
         return;
 
-    const auto& params = devices[(size_t) deviceIndex].params;
-    if (paramIndex < 0 || paramIndex >= (int) params.size())
+    const auto& profile = profiles[(size_t) profileIndex];
+    if (paramIndex < 0 || paramIndex >= (int) profile.params.size())
         return;
 
-    // Technisch ein ganz normaler MidiCcTarget -- Hardware ist nur eine
-    // gefuehrte Eingabe fuer Kanal+CC (kein neues Ziel/Persistenz-Format).
-    b->target = std::make_unique<grid::MidiCcTarget> (
-        owner.midiTarget, (int) channelField.getValue(), params[(size_t) paramIndex].cc);
+    // CSV-Profil (M2): NRPN-Param → MidiNrpnTarget (min/max aus dem
+    // Profil, Anzeigename "Gerät: Param"); CC-Param → MidiCcTarget.
+    const auto& param = profile.params[(size_t) paramIndex];
+    if (param.nrpn >= 0)
+        b->target = std::make_unique<grid::MidiNrpnTarget> (
+            owner.midiTarget, (int) channelField.getValue(), param.nrpn,
+            param.minValue, param.maxValue,
+            profile.device + ": " + param.name);
+    else
+        b->target = std::make_unique<grid::MidiCcTarget> (
+            owner.midiTarget, (int) channelField.getValue(), param.cc);
+
     repaint();
 }
 
@@ -533,10 +584,12 @@ void MacroPanel::TargetRow::mouseUp (const juce::MouseEvent& event)
 MacroPanel::MacroPanel (grid::MacroBindings& bindingsToUse, grid::IMidiOutputTarget& midiTargetToUse,
                         LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
                         grid::MidiInBindings& midiInBindingsToUse,
-                        grid::HardwareCcDatabase& hardwareDbToUse)
+                        grid::HardwareCcDatabase& hardwareDbToUse,
+                        MidiProfileLibrary& profileLibraryToUse)
     : macroBindings (bindingsToUse), midiTarget (midiTargetToUse),
       liveSetModel (liveSetModelToUse), touchLiveClient (touchLiveClientToUse),
-      midiInBindings (midiInBindingsToUse), hardwareDb (hardwareDbToUse)
+      midiInBindings (midiInBindingsToUse), hardwareDb (hardwareDbToUse),
+      profileLibrary (profileLibraryToUse)
 {
     addAndMakeVisible (titleLabel);
     addChildComponent (axisXTile);

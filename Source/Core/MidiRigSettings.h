@@ -84,6 +84,17 @@ public:
     [[nodiscard]] bool hasMigratedFromGridPanel() const noexcept { return migratedFromGridPanel; }
 
     //==========================================================================
+    /** Pfad der eigenen Settings-Datei (Muster GridPanelSettings::
+        sessionFile) — Basis für Nachbar-Ablagen wie Conduit/Devices/.
+        Nicht-const: getUserSettings() erzeugt die PropertiesFile lazy. */
+    [[nodiscard]] juce::File settingsFile();
+
+    /** E1b-Schalter: Klartext-CC-Schnellpfad (HardwareDevices.txt +
+        Faktor-Klartext-DB) laden — Default an. */
+    [[nodiscard]] bool isLegacyCcListEnabled() const noexcept { return useLegacyCcList; }
+    void setLegacyCcListEnabled (bool enabled);
+
+    //==========================================================================
     /** [Message Thread] Ausstehende Änderungen sofort auf Platte schreiben. */
     void flush();
 
@@ -97,6 +108,7 @@ private:
     juce::Uuid gridControllerDeviceId = juce::Uuid::null();
     juce::Uuid gridOutputDeviceId     = juce::Uuid::null();
     bool migratedFromGridPanel = false;
+    bool useLegacyCcList = true;   // E1b-Schnellpfad, Default an
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiRigSettings)
 };

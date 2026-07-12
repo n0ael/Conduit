@@ -16,6 +16,7 @@
 #include "Metronome.h"
 #include "GridVoiceEngine.h"
 #include "MidiPortHub.h"
+#include "MidiProfileLibrary.h"
 #include "MidiRigSettings.h"
 #include "TouchLive/LiveSetModel.h"
 #include "TouchLive/LiveSpectrumTap.h"
@@ -187,10 +188,14 @@ public:
         (Conduit/MidiRig.settings). Noch ohne UI (folgt M3). */
     [[nodiscard]] MidiRigSettings& getMidiRigSettings() noexcept { return midiRigSettings; }
 
-    /** MIDI-Rig-Hub (ADR 006 M1): listet verfügbare MIDI-Ports und matcht
-        registrierte Geräte dagegen (exakt→Prefix). Öffnet noch keine
-        Ports (folgt M2). */
+    /** MIDI-Rig-Hub (ADR 006 M1): besitzt die offenen MIDI-Ports der
+        Registry (Queues pro Port, 60-Hz-Drain, Fassaden). */
     [[nodiscard]] MidiPortHub& getMidiPortHub() noexcept { return midiPortHub; }
+
+    /** Klangerzeuger-Profile (ADR 006 E1, M2): Factory-CSVs + User-Ordner
+        Conduit/Devices — Macro-Panel-Hardware-Picker + MIDI-Settings-
+        Report binden daran. */
+    [[nodiscard]] MidiProfileLibrary& getMidiProfileLibrary() noexcept { return midiProfileLibrary; }
 
     //==========================================================================
     /** Looper-Quelle (B3/M4) [Message Thread]: Quell-Schlüssel
@@ -445,9 +450,12 @@ private:
     LooperSettings looperSettings;
 
     // MIDI-Rig-Registry (ADR 006 M1) — App-Zustand in eigener Datei;
-    // der Hub braucht eine Referenz, deshalb VOR midiPortHub deklariert
+    // der Hub braucht eine Referenz, deshalb VOR midiPortHub deklariert.
+    // Die Profile-Bibliothek (M2) leitet ihren User-Ordner aus der
+    // Settings-Datei ab (Conduit/Devices — folgt Test-Redirects).
     MidiRigSettings midiRigSettings;
     MidiPortHub midiPortHub { midiRigSettings };
+    MidiProfileLibrary midiProfileLibrary { midiRigSettings.settingsFile().getSiblingFile ("Devices") };
 
     // Link-synchroner Click — läuft nach dem GraphFader auf die Anker-Kanäle
     Metronome metronome;

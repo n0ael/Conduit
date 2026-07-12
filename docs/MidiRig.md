@@ -90,6 +90,60 @@ Klassen MidiControlInput/MidiNoteInput (Grid Block G/H4) sind entfernt.
   (Fake-Handles, Tests spielen Messages direkt in den registrierten
   `MidiInputCallback` ein) + `drainNow()` als manueller Drain.
 
+## M2 — Profile + NRPN + PC (07/2026)
+
+User-Entscheidungen 12.07.2026: Hardware-Tab im Macro-Panel schon in M2
+auf CSV-Profile inkl. NRPN erweitert (feldtestbar); Factory-CSVs =
+Analog Heat + die 5 bestehenden Klartext-Geräte.
+
+- **CSV-Profile (ADR E1):** `Source/Core/MidiDeviceProfile.h/.cpp` —
+  toleranter, Header-Zeilen-getriebener midi.guide-Parser (Spalten per
+  Namen case-insensitiv, unbekannte ignoriert, RFC-4180-Quoting;
+  `ParseReport` zählt accepted/skipped + Warnungen). `ProfileParam`
+  trägt cc UND/ODER nrpn (msb*128+lsb) + min/max (NRPN-Range hat bei
+  Misch-Params Vorrang, kaputte Ranges werden repariert).
+- **Library:** `Source/Core/MidiProfileLibrary.h/.cpp` — Factory-CSVs
+  aus BinaryData (`Assets/DeviceProfiles/*.csv`, via
+  `namedResourceList`+`originalFilenames` nach Endung gefiltert) +
+  User-Ordner `Conduit/Devices/**/*.csv` (rekursiv). Ein User-Profil
+  mit gleichem manufacturer+device ERSETZT das Factory-Profil KOMPLETT
+  (kein stiller Merge — User-Hoheit, Rule midirig). Pro Quelle ein
+  `SourceReport` für die UI (E1b). EngineProcessor-Member, Ordner aus
+  `MidiRigSettings::settingsFile().getSiblingFile("Devices")`.
+- **NRPN-Empfang (ADR E4):** `Source/Core/NrpnAssembler.h` — pure
+  Zustandsmaschine PRO PORT (im `InputConnection`, MIDI-System-Thread,
+  VOR dem Queue-Push), Zustand pro Kanal. CC99/98 = Adresse (aktiviert),
+  CC101/100 = RPN (deaktiviert), CC6 → Event {value=msb, is14Bit=false},
+  CC38 → Event {value=(msb<<7)|lsb, is14Bit=true} — eine 14-bit-Fahrt
+  erzeugt ZWEI Events, der letzte gewinnt (Dedupe beim Konsumenten).
+  CC6/38 ohne aktive Adresse = passthrough (Plain-Data-Entry-Geräte).
+  **CC96/97 (Inc/Dec) bewusst out of scope** (passthrough).
+- **Program Change (ADR E5):** Empfang → ControllerEvent
+  {kind=programChange, number=Programm} (Trigger-Quelle, Konsumenten
+  folgen); Senden über `MidiProgramChangeTarget` (optional Bank
+  CC0/CC32 vor dem PC, Dedupe).
+- **NRPN-Senden:** `MidiNrpnTarget` (MacroBindings) — value01 →
+  [min,max] aus dem Profil, Dedupe auf dem gemappten Wert, Sequenz
+  CC99→98→6→38 bei JEDEM send() komplett (parallel sendende CC-Ziele
+  können die Geräte-Adresse nicht verfälschen). Persistenz:
+  Tree "NrpnTarget" {channel, number, min, max, name} bzw. "PcTarget"
+  {channel, bankMsb, bankLsb} — Zweige in GridPage::makeTargetFromState.
+- **Hardware-Picker (Macro-Panel):** Device-Dropdown = Klartext-DB
+  (Block L2) + Profile (Ids fortlaufend hinter der DB); Profil-Params
+  zeigen "Section: Name (CC n | NRPN n)"; NRPN-Param → MidiNrpnTarget,
+  CC-Param → MidiCcTarget. Klartext-Schnellpfad bleibt (E1b), abschaltbar
+  über `MidiRigSettings::useLegacyCcList` (Toggle im MIDI-Tab; wirkt beim
+  nächsten GridPage-Aufbau).
+- **MIDI-Tab Sektion „Profile":** Lade-Report je Quelle
+  (Factory/User · Geräte · Parameter · übersprungen + Warnungen),
+  „Neu laden", Legacy-Toggle, Attribution-Fußzeile.
+
+**Attribution (ADR E1):** Die Factory-Geräteprofile in
+`Assets/DeviceProfiles/` stammen von **midi.guide**
+(pencilresearch/midi, GitHub) und stehen unter **CC-BY-SA 4.0**.
+Ein App-About-Dialog existiert noch nicht — die Attribution lebt hier
+und als Fußzeile der Profile-Sektion im MIDI-Settings-Tab.
+
 ## Lektionen
 
 - **MSVC + verschachtelte Brace-Init:**
@@ -109,7 +163,7 @@ Klassen MidiControlInput/MidiNoteInput (Grid Block G/H4) sind entfernt.
 ## Meilensteinleiter
 
   M1  MidiPortHub + Registry — M1a Registry+Matching (erledigt 07/2026) + M1b Hub-Kern: Portbetrieb/Queues/Drain/Ablösung der Ein-Port-Klassen + Migration + Settings-UI (erledigt 07/2026)
-  M2  Profile + NRPN + PC — midi.guide-CSV-Parser (Klangerzeuger-Profile), NRPN-Assembler pro Port, Program-Change Senden/Empfangen — offen
+  M2  Profile + NRPN + PC — midi.guide-CSV-Parser (Klangerzeuger-Profile), NRPN-Assembler pro Port, Program-Change Senden/Empfangen — erledigt 07/2026 (inkl. Hardware-Picker-Vorgriff: NRPN/CC-Ziele aus Profilen)
   M3  Semantischer Picker — Geräte-/Parameter-Auswahl-UI (Analogie Ableton-Parameter-Browser Track→Device→Parameter) — offen
   M4  Controller-Profile + LED — Conduit-Controller-Profile-v1-CSV-Schema, Send-Adresse + bis zu 3 Feedback-Adressen pro Control — offen
   M5  Map-Modus + Tab + Chord-Learn — Zuweisungs-UI, Mehrfachbelegung/Akkord-Learn — offen

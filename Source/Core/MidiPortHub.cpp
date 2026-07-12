@@ -139,16 +139,42 @@ namespace
 void MidiPortHub::InputConnection::handleIncomingMidiMessage (juce::MidiInput*,
                                                               const juce::MidiMessage& message)
 {
-    // MIDI-SYSTEM-Thread (einziger Producer dieser Queues). M1b: nur CC und
-    // Noten — alles andere wird verworfen (NRPN/PC-Assembler folgt in M2,
-    // VOR dem Queue-Push, Rule midirig).
+    // MIDI-SYSTEM-Thread (einziger Producer dieser Queues). M2: CCs laufen
+    // durch den NRPN-Assembler (VOR dem Queue-Push, Rule midirig/E4) —
+    // (N)RPN-Steuer-CCs erreichen die Queue nie als Rohwerte; Program
+    // Change wird als eigenes Event gereicht (E5). Alles andere verworfen.
     if (message.isController())
     {
+        midi::ControllerEvent nrpnEvent;
+        switch (nrpnAssembler.feed (message.getChannel(), message.getControllerNumber(),
+                                    message.getControllerValue(), nrpnEvent))
+        {
+            case midirig::NrpnAssembler::Result::event:
+                pushController (nrpnEvent);
+                break;
+
+            case midirig::NrpnAssembler::Result::consumed:
+                break;
+
+            case midirig::NrpnAssembler::Result::passthrough:
+            {
+                midi::ControllerEvent event;
+                event.kind    = midi::ControllerEvent::Kind::cc;
+                event.channel = message.getChannel();
+                event.number  = message.getControllerNumber();
+                event.value   = message.getControllerValue();
+                pushController (event);
+                break;
+            }
+        }
+    }
+    else if (message.isProgramChange())
+    {
         midi::ControllerEvent event;
-        event.kind    = midi::ControllerEvent::Kind::cc;
+        event.kind    = midi::ControllerEvent::Kind::programChange;
         event.channel = message.getChannel();
-        event.number  = message.getControllerNumber();
-        event.value   = message.getControllerValue();
+        event.number  = message.getProgramChangeNumber();
+        event.value   = message.getProgramChangeNumber();
         pushController (event);
     }
     else if (message.isNoteOn())
