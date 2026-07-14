@@ -17,9 +17,9 @@ namespace conduit
     Ressourcen generisch durchsucht, wuerde ein generischer Scan hier mit
     den Klangerzeuger-CSVs im selben flachen BinaryData-Namensraum
     kollidieren, da `originalFilenames` keinen Ordnerpfad traegt) plus
-    User-Ordner `Conduit/Controllers/*.csv` (FLACH, nicht rekursiv --
-    ADR E2: eine Datei = ein Geraet, keine `{Hersteller}/`-Verschachtelung
-    wie bei den Klangerzeuger-Profilen).
+    User-Ordner `Conduit/Controllers` (alle .csv, FLACH, nicht rekursiv --
+    ADR E2: eine Datei = ein Geraet, keine Hersteller-Unterordner wie bei
+    den Klangerzeuger-Profilen).
 
     Traegt eine Datei kein `device`-Feld, wird der Dateiname (ohne
     Endung) als Geraetename verwendet. Pro Quelle ein SourceReport fuer
