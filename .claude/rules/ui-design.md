@@ -32,7 +32,8 @@ paths:
   `juce::VBlankAttachment`; Meter/Scope-Refresh 30 fps (Audio schreibt
   lock-free Ringbuffer, UI liest).
 - UI-Components binden NUR an den ValueTree-Subtree, nie an den Processor
-  (Zombie-UI-Schutz, CLAUDE.md 5.3); `stopUpdates()`-Hook für Phase 1.
+  (Zombie-UI-Schutz, CLAUDE.md §5 / docs/PatchEngine.md 5.3);
+  `stopUpdates()`-Hook für Phase 1.
 
 Touch-Gesten (App-weit):
 

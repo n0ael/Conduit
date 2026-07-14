@@ -16,7 +16,8 @@ selbst überschreiben (final).
   noteBlockBegin → CV lesen → In-Gain → In-Meter → processCore → Out-Gain →
   Out-Meter → Link-Tap.
 - **2×2-Kanal-LevelMeter** (eigene Instanzen im Modul; UI liest transient pro
-  Tick über `GraphManager::getModuleFor` — nie Meter-Pointer cachen, 5.3).
+  Tick über `GraphManager::getModuleFor` — nie Meter-Pointer cachen,
+  docs/PatchEngine.md 5.3).
 - **Link-Audio-Send-Tap** (LinkSendTaps, Kanal-Name = moduleId, Node-Property
   `linkSendEnabled` = Patch-Zustand, undo-fähig via
   `GraphManager::setLinkSendEnabled`); Chassis implementiert ILinkAudioClient
@@ -37,6 +38,14 @@ selbst überschreiben (final).
   (`ChassisSchema::LinkResponse`: Bezier-Form + Start-/Endwert — FALLENDE
   Responses drehen die Richtung direkt in der Kurve, z.B. Auto-Gain/
   Gain-Matching). APIs: `setParameterLink`/`setParameterLinkCurve`.
+- **Macro-Modulation (MIDI-Rig M5c, Addendum 07/2026):** der
+  GraphManager-ParamModulationBus verschiebt die BASIS (`dspBase`, „Stufe
+  0") auf dem bestehenden Tree→Atomic-Weg — das Chassis rechnet
+  unverändert CV (Stufe 1) und Links (Stufe 2) obendrauf, kein
+  Chassis-Code beteiligt. Der Tree behält den User-Basiswert
+  (dokumentierte 6.1-Erweiterung, docs/DataModel.md); der cyane
+  Zweit-Marker im FxModulePanel/CurvedSlider zeigt den macro-effektiven
+  Wert. Details: docs/MidiRig.md M5c.
 
 **Schema-Regeln:**
 
