@@ -348,6 +348,13 @@ Geräteverwaltung zentral, Grid-Tab minimal.
   `lines`/`patchline`-Quellen/Ziele bis zur `---nrpn <bank> <nummer>`-
   Message-Box verfolgen (inkl. Sprung über Subpatcher-Grenzen via
   `inlet`-Objekte).
+- **Glob-Muster gehören NIE in C-Blockkommentare** (beide Richtungen,
+  M2 + M4b je einmal bezahlt): `**/*.csv` — das `*/` BEENDET den
+  Kommentar (Kaskadenfehler); `Ordner/*.csv` — das `/*` triggert Clangs
+  `-Werror,-Wcomment` (MSVC schweigt, fällt erst in der CI auf).
+  Pfad-Konventionen in Kommentaren immer umschreiben („alle .csv im
+  Ordner X, rekursiv/flach") statt als Glob zu notieren; in
+  `//`-Zeilenkommentaren ist `/*` unkritisch.
 - **`BinaryData::originalFilenames` trägt KEINEN Ordnerpfad** — nur den
   reinen Dateinamen, egal aus welchem `Assets/`-Unterordner die Datei via
   `juce_add_binary_data` eingebunden wurde. Ein generischer Scan über
