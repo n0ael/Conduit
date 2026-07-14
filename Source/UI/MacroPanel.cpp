@@ -633,12 +633,15 @@ MacroPanel::MacroPanel (grid::MacroBindings& bindingsToUse, grid::IMidiOutputTar
             learnTile.setActive (true);
         }
     };
-    midiInBindings.onLearnCompleted = [this] (const grid::MacroControlKey&, int channel, int cc)
+    midiInBindings.onLearnCompleted = [this] (const grid::MacroControlKey&, int channel, int cc,
+                                              bool isNote)
     {
         learnTile.setActive (false);
         midiInChannelField.setValue (channel, juce::dontSendNotification);
         midiInCcField.setValue (cc, juce::dontSendNotification);
-        midiInCcField.setTooltip (CcNames::displayName (cc));   // Block L
+        // M4: gelernte Noten zeigen den Notennamen statt des CC-Funktionsnamens.
+        midiInCcField.setTooltip (isNote ? juce::MidiMessage::getMidiNoteName (cc, true, true, 4)
+                                         : CcNames::displayName (cc));
         midiInTile.setActive (true);
         refreshMidiInRow();
     };
@@ -718,7 +721,9 @@ void MacroPanel::refreshMidiInRow()
         midiInTile.setActive (true);
         midiInChannelField.setValue (binding->channel, juce::dontSendNotification);
         midiInCcField.setValue (binding->cc, juce::dontSendNotification);
-        midiInCcField.setTooltip (CcNames::displayName (binding->cc));   // Block L
+        midiInCcField.setTooltip (binding->isNote
+                                      ? juce::MidiMessage::getMidiNoteName (binding->cc, true, true, 4)
+                                      : CcNames::displayName (binding->cc));   // Block L / M4
     }
     else
     {
@@ -731,8 +736,13 @@ void MacroPanel::commitMidiInBinding()
     if (currentControlId < 0)
         return;
 
+    // M4: eine bestehende Note-Bindung (per Learn erzeugt) behaelt ihren
+    // Adressraum, wenn nur Kanal/Nummer per Feld editiert werden.
+    const auto* existing = midiInBindings.bindingFor (currentKey());
+    const auto isNote = existing != nullptr && existing->isNote;
+
     midiInBindings.bind (currentKey(), (int) midiInChannelField.getValue(),
-                         (int) midiInCcField.getValue());
+                         (int) midiInCcField.getValue(), isNote);
     midiInTile.setActive (true);
 }
 

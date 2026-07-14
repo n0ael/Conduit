@@ -327,6 +327,32 @@ TEST_CASE ("MidiPortHub: Senden ueber Fassade + Rollen-Fassade, No-op ohne Port"
     REQUIRE (rig.sentMessages.size() == 2);
 }
 
+TEST_CASE ("MidiPortHub: Controller-Rollen-Fassade (M4, LED-Feedback)", "[midirig]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettings temp;
+    MidiRigSettings settings { temp.options() };
+    FakePortRig rig;
+    rig.outputs = { juce::MidiDeviceInfo ("K1 Out", "id-k1-out") };
+
+    const auto device = settings.addDevice ("Xone:K1", RigDeviceKind::controller);
+    settings.setMidiOutName (device, "K1 Out");
+    settings.setGridControllerDeviceId (device);
+
+    MidiPortHub hub { settings, rig.inputProvider(), rig.outputProvider(),
+                      rig.inputOpener(), rig.outputOpener() };
+    hub.syncFromRegistry();
+
+    hub.gridControllerOutputTarget().send (juce::MidiMessage::controllerEvent (1, 0, 127));
+    REQUIRE (rig.sentMessages.size() == 1);
+    REQUIRE (rig.sentMessages[0].first == "id-k1-out");
+
+    // Rollen-Wechsel: Fassade folgt live, uebersteht Rollenwechsel wie gridOutputTarget().
+    settings.setGridControllerDeviceId (juce::Uuid());
+    hub.gridControllerOutputTarget().send (juce::MidiMessage::controllerEvent (1, 0, 0));
+    REQUIRE (rig.sentMessages.size() == 1);   // keine Rolle mehr -- No-op
+}
+
 TEST_CASE ("MidiPortHub: Tick-Abo feuert bei jedem Drain, unsubscribe beendet es", "[midirig]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;

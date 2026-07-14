@@ -155,9 +155,9 @@ TEST_CASE ("MidiInBindings: Feedback-Echo-Schnittstelle feuert beim Anwenden", "
     rig.bindings.bind (keyFor (1), 1, 20);
     rig.values[1] = 0.5f;
 
-    std::vector<std::tuple<int, int, float>> echoes;
-    rig.bindings.onFeedbackEcho = [&] (int channel, int cc, float value01)
-    { echoes.emplace_back (channel, cc, value01); };
+    std::vector<std::tuple<int, int, bool, float>> echoes;
+    rig.bindings.onFeedbackEcho = [&] (int channel, int cc, bool isNote, float value01)
+    { echoes.emplace_back (channel, cc, isNote, value01); };
 
     rig.bindings.handleIncomingCc (1, 20, 64);
     rig.tick();
@@ -165,6 +165,7 @@ TEST_CASE ("MidiInBindings: Feedback-Echo-Schnittstelle feuert beim Anwenden", "
     REQUIRE_FALSE (echoes.empty());
     REQUIRE (std::get<0> (echoes.back()) == 1);
     REQUIRE (std::get<1> (echoes.back()) == 20);
+    REQUIRE_FALSE (std::get<2> (echoes.back()));
 }
 
 TEST_CASE ("MidiInBindings: MIDI-Learn bindet den naechsten CC und meldet ihn", "[grid][midiin]")
@@ -173,7 +174,7 @@ TEST_CASE ("MidiInBindings: MIDI-Learn bindet den naechsten CC und meldet ihn", 
     rig.values[5] = 0.5f;
 
     std::vector<std::tuple<int, int>> learned;
-    rig.bindings.onLearnCompleted = [&] (const grid::MacroControlKey& key, int channel, int cc)
+    rig.bindings.onLearnCompleted = [&] (const grid::MacroControlKey& key, int channel, int cc, bool)
     {
         REQUIRE (key.controlId == 5);
         learned.emplace_back (channel, cc);
@@ -207,4 +208,84 @@ TEST_CASE ("MidiInBindings: cancelLearn entschaerft ohne zu binden", "[grid][mid
 
     rig.bindings.handleIncomingCc (1, 40, 100);
     REQUIRE (rig.bindings.bindingFor (keyFor (7)) == nullptr);
+}
+
+//==============================================================================
+// M4: Note-Bindungen (Controller-Pads)
+
+TEST_CASE ("MidiInBindings: Note-Bindung -- On setzt Velocity, Off setzt 0", "[grid][midiin][midirig]")
+{
+    Rig rig;
+    rig.bindings.bind (keyFor (3), 1, 36, true);   // Pad auf Note 36
+    rig.values[3] = 0.0f;   // Control unten -- Pickup greift sofort bei 0-Naehe? Nein: On=1.0.
+
+    // Erstes Event ist ein Off (0.0): seeded die Glaettung bei 0, nahe am
+    // Ist-Wert 0 -> Pickup nimmt sofort auf (engaged bleibt sticky).
+    rig.bindings.handleIncomingNote (1, 36, 0, false);
+    rig.tick();
+
+    rig.bindings.handleIncomingNote (1, 36, 127, true);
+    rig.ticks (30);   // Glaettung auslaufen lassen
+    REQUIRE (rig.values[3] == Approx (1.0f).margin (0.01));
+
+    rig.bindings.handleIncomingNote (1, 36, 0, false);
+    rig.ticks (30);
+    REQUIRE (rig.values[3] == Approx (0.0f).margin (0.01));
+
+    // Halbe Velocity -> halber Zielwert (Momentary + Velocity).
+    rig.bindings.handleIncomingNote (1, 36, 64, true);
+    rig.ticks (30);
+    REQUIRE (rig.values[3] == Approx (64.0f / 127.0f).margin (0.01));
+}
+
+TEST_CASE ("MidiInBindings: Note und CC mit gleicher Nummer sind getrennte Adressraeume", "[grid][midiin][midirig]")
+{
+    Rig rig;
+    rig.bindings.bind (keyFor (1), 1, 40, false);   // CC 40
+    rig.bindings.bind (keyFor (2), 1, 40, true);    // Note 40 -- darf CC 40 nicht verdraengen
+
+    REQUIRE (rig.bindings.count() == 2);
+    REQUIRE (rig.bindings.bindingFor (keyFor (1)) != nullptr);
+    REQUIRE (rig.bindings.bindingFor (keyFor (2)) != nullptr);
+
+    // Eingehende Note beruehrt nur die Note-Bindung.
+    rig.values[1] = 0.0f;
+    rig.values[2] = 0.0f;
+    rig.bindings.handleIncomingNote (1, 40, 0, false);   // Off = 0, Pickup sofort
+    rig.tick();
+    rig.bindings.handleIncomingNote (1, 40, 127, true);
+    for (int i = 0; i < 30; ++i)
+        rig.tick();
+
+    REQUIRE (rig.values[2] == Approx (1.0f).margin (0.01));
+    REQUIRE (rig.values[1] == Approx (0.0f).margin (0.001));   // CC-Bindung unberuehrt
+}
+
+TEST_CASE ("MidiInBindings: Learn bindet eine Note (nur On, nicht Off)", "[grid][midiin][midirig]")
+{
+    Rig rig;
+    rig.values[9] = 0.0f;
+
+    bool learnedAsNote = false;
+    rig.bindings.onLearnCompleted = [&] (const grid::MacroControlKey& key, int, int number, bool isNote)
+    {
+        REQUIRE (key.controlId == 9);
+        REQUIRE (number == 48);
+        learnedAsNote = isNote;
+    };
+
+    rig.bindings.armLearn (keyFor (9));
+
+    // Ein streunendes Note-Off darf das Learn NICHT ausloesen.
+    rig.bindings.handleIncomingNote (1, 47, 0, false);
+    REQUIRE (rig.bindings.isLearnArmed());
+
+    rig.bindings.handleIncomingNote (1, 48, 100, true);
+    REQUIRE_FALSE (rig.bindings.isLearnArmed());
+    REQUIRE (learnedAsNote);
+
+    const auto* binding = rig.bindings.bindingFor (keyFor (9));
+    REQUIRE (binding != nullptr);
+    REQUIRE (binding->isNote);
+    REQUIRE (binding->cc == 48);
 }

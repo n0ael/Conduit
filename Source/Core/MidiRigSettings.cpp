@@ -71,6 +71,8 @@ void MidiRigSettings::loadFromFile()
         device.kind        = kindFromKey (deviceXml->getStringAttribute ("kind"));
         device.midiOutName = deviceXml->getStringAttribute ("midiOutName");
         device.midiInName  = deviceXml->getStringAttribute ("midiInName");
+        device.controllerProfileName = deviceXml->getStringAttribute ("controllerProfileName");
+        device.midiChannel = juce::jlimit (1, 16, deviceXml->getIntAttribute ("midiChannel", 1));
 
         if (device.id.isNull())
             continue;   // korrupter/handbearbeiteter Eintrag ohne Id — überspringen
@@ -96,6 +98,8 @@ void MidiRigSettings::writeAndNotify()
         deviceXml->setAttribute ("kind", kindToKey (device.kind));
         deviceXml->setAttribute ("midiOutName", device.midiOutName);
         deviceXml->setAttribute ("midiInName", device.midiInName);
+        deviceXml->setAttribute ("controllerProfileName", device.controllerProfileName);
+        deviceXml->setAttribute ("midiChannel", device.midiChannel);
     }
 
     applicationProperties.getUserSettings()->setValue (keyMidiRigState, &xml);
@@ -177,6 +181,27 @@ void MidiRigSettings::setMidiInName (const juce::Uuid& id, const juce::String& p
         return;
 
     devices.getReference (index).midiInName = portName;
+    writeAndNotify();
+}
+
+void MidiRigSettings::setControllerProfileName (const juce::Uuid& id, const juce::String& profileName)
+{
+    const auto index = indexOfId (id);
+    if (index < 0 || devices.getReference (index).controllerProfileName == profileName)
+        return;
+
+    devices.getReference (index).controllerProfileName = profileName;
+    writeAndNotify();
+}
+
+void MidiRigSettings::setMidiChannel (const juce::Uuid& id, int channel)
+{
+    const auto clamped = juce::jlimit (1, 16, channel);
+    const auto index = indexOfId (id);
+    if (index < 0 || devices.getReference (index).midiChannel == clamped)
+        return;
+
+    devices.getReference (index).midiChannel = clamped;
     writeAndNotify();
 }
 

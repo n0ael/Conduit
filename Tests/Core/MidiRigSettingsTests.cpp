@@ -173,6 +173,9 @@ TEST_CASE ("MidiRigSettings: Roundtrip über Neuinstanz", "[midirig]")
         settings.setMidiOutName (soundGenId, "Elektron Digitakt");
         settings.setMidiOutName (controllerId, "LCXL Out");
         settings.setMidiInName (controllerId, "LCXL In");
+        settings.setControllerProfileName (controllerId, "Xone:K1");
+        settings.setMidiChannel (controllerId, 14);   // M4b: Geraete-Kanal
+        settings.setMidiChannel (soundGenId, 99);     // M4b: geklemmt auf 16
         settings.flush();
     }
 
@@ -195,5 +198,9 @@ TEST_CASE ("MidiRigSettings: Roundtrip über Neuinstanz", "[midirig]")
         REQUIRE (ctrl.kind == RigDeviceKind::controller);
         REQUIRE (ctrl.midiOutName == "LCXL Out");
         REQUIRE (ctrl.midiInName == "LCXL In");
+        REQUIRE (ctrl.controllerProfileName == "Xone:K1");
+        REQUIRE (gen.controllerProfileName.isEmpty());
+        REQUIRE (ctrl.midiChannel == 14);   // M4b: Kanal persistiert
+        REQUIRE (gen.midiChannel == 16);    // M4b: 99 auf 16 geklemmt
     }
 }

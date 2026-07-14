@@ -183,6 +183,8 @@ juce::ValueTree GridSessionStore::capture (const Refs& refs)
         auto bindingState = keyToState (kMidiInBind, binding.key);
         bindingState.setProperty ("channel", binding.channel, nullptr);
         bindingState.setProperty ("cc", binding.cc, nullptr);
+        if (binding.isNote)
+            bindingState.setProperty ("isNote", true, nullptr);   // M4 (fehlend = CC, rueckwaertskompatibel)
         midiIn.appendChild (bindingState, nullptr);
     }
     session.appendChild (midiIn, nullptr);
@@ -263,7 +265,8 @@ void GridSessionStore::apply (const juce::ValueTree& session, const Refs& refs,
         if (bindingState.hasType (kMidiInBind))
             refs.midiIn.bind (keyFromState (bindingState),
                               (int) bindingState.getProperty ("channel", 1),
-                              (int) bindingState.getProperty ("cc", 1));
+                              (int) bindingState.getProperty ("cc", 1),
+                              (bool) bindingState.getProperty ("isNote", false));
 
     for (const auto& controlState : session.getChildWithName (kMacros))
     {

@@ -198,6 +198,117 @@ Ableton-Parameter-Browser Track→Device→Parameter.
   `MidiProgramChangeTarget::channel()` (fürs Kanal-only-Rebuild eines
   geladenen Ziels ohne erneute Picker-Auswahl).
 
+## M4 — Controller-Profile + LED-Feedback (07/2026)
+
+Löst das Gegenstück zu M2 ein: nicht "wie heißt Parameter X am Klangerzeuger",
+sondern "welches physische Control AM CONTROLLER sendet was, und was schickt
+Conduit zur LED-/Motorfader-Rückmeldung dorthin zurück" — füllt den seit M1b
+vorbereiteten, nie verdrahteten Hook `MidiInBindings::onFeedbackEcho`.
+
+User-Entscheidungen (13.07.2026): Profil-Zuordnung über ein neues,
+explizit gesetztes `RigDevice`-Feld (`controllerProfileName`, Picker im
+MIDI-Tab) statt fragilem Label-Matching; Feedback-Typ `display` wird vom
+Schema/Parser bereits erkannt, aber bewusst NICHT gesendet (kein SysEx-Weg
+vor M8 — Laufzeit überspringt `meaning == "display"` still); Factory-Profil
+für den **Allen & Heath Xone:K1** aus einem User-Chart transkribiert
+(nicht midi.guide — eigene Quelle, ADR E1's Attribution gilt hier nicht).
+
+- **`Source/Core/ControllerProfile.h/.cpp`** (namespace `conduit::midirig`)
+  — `AddressKind{cc,note}`, `FeedbackAddress{kind,channel,number,meaning}`,
+  `ControllerControl{id,type,section,sendKind/Channel/Number,feedback[0..3]}`,
+  `ControllerProfile{device,controls}` + `findBySendAddress()` (pure, Kern
+  der Laufzeit-Zuordnung). `parseControllerProfileCsv()` — Muster
+  `MidiDeviceProfile.h/.cpp` (`splitCsvLine`/`fieldAsInt`/`fieldAsString`,
+  header-getriebene Spaltensuche, `ControllerParseReport`), aber EIN Profil
+  pro Aufruf (die Ordnerkonvention `Conduit/Controllers/{Geraet}.csv` ist
+  bereits pro Gerät benannt, kein Multi-Device-CSV wie bei den
+  Klangerzeuger-Profilen).
+- **`Source/Core/ControllerProfileLibrary.h/.cpp`** — Muster
+  `MidiProfileLibrary.h/.cpp`, aber FLACHER User-Ordner
+  `Conduit/Controllers/*.csv` (nicht rekursiv, kein `{Hersteller}/`-
+  Unterordner) und das Factory-Profil wird **direkt per BinaryData-Symbol**
+  referenziert statt generisch über alle `.csv`-Ressourcen gescannt —
+  `originalFilenames` trägt keinen Ordnerpfad, ein genereller Scan würde
+  mit den Klangerzeuger-CSVs im selben flachen BinaryData-Namensraum
+  kollidieren. Ordner-Basis `midiRigSettings.settingsFile()
+  .getSiblingFile("Controllers")` (identisches Muster wie M2s `Devices`).
+- **`Assets/ControllerProfiles/AllenHeath_XoneK1.csv`** — 52 Controls:
+  16 Encoder (CC0–15, nur die ersten 4 mit Send/Return + LED-Ring-Feedback
+  laut Chart, Rest Send-only), 4 Fader (CC16–19, Send-only — echte
+  Hardware ist nicht motorisiert), 2 Setup-Encoder (CC20/21), 30 Taster
+  (`type=pad`, `send_kind=note`) mit der roten "Send/Return"-Note als
+  Send-Adresse und den beiden "Return"-Noten (+3/+6 Oktaven laut Chart)
+  als Feedback1/2 (`meaning=led_layer_b`/`led_layer_c`). Notenwerte per
+  Konvention C-1=0/C4=60 (G9=127 = MIDI-Maximum, deckt sich exakt mit
+  dem höchsten Chart-Wert — bestätigt die Konvention).
+- **Registry:** `RigDevice::controllerProfileName` (neues Feld,
+  ValueTree-Property `controllerProfileName`) + `MidiRigSettings::
+  setControllerProfileName()`. `MidiPortHub::gridControllerOutputTarget()`
+  — neue Rollen-Fassade (Muster `gridOutputTarget()`), löst die
+  Controller-Rolle live auf.
+- **UI (`MidiRigSettingsComponent`):** pro Controller-Zeile ein viertes
+  Dropdown (Profil, nur sichtbar bei Rolle "Controller", Layout wechselt
+  zwischen 3/4 gleich breiten Combos); zweite Report-Sektion
+  "Controller-Profile" unter der M2-Sektion (kein Legacy-Toggle-Äquivalent).
+- **Laufzeit (`GridPage`):** `midiInBindings.onFeedbackEcho` einmalig im
+  Ctor gesetzt (nicht in `refreshRigSubscriptions()` — löst Rolle/Profil
+  bei jedem Aufruf live auf, wie die Output-Fassaden): Controller-Rolle →
+  `controllerProfileName` → `ControllerProfileLibrary::find` →
+  `findBySendAddress(kind, channel, number)` → für jede Feedback-Adresse
+  (außer `display`) eine CC- oder Note-On-Message über
+  `gridControllerOutputTarget()`.
+- **Note-Bindungen (Feldtest-Fund 14.07.2026, Xone:K1-Pads):** die gesamte
+  Macro-Eingangs-Kette war CC-only — Pads (Noten) liefen ins Leere.
+  Behoben: `midi::NoteEvent` trägt jetzt einen `channel`;
+  `MidiInBindings::Binding` hat `isNote` (CC- und Note-Adressraum getrennt,
+  Persistenz-Property `isNote` im GridSessionStore, fehlend = CC —
+  rückwärtskompatibel); `handleIncomingNote()` (Momentary + Velocity,
+  User-Entscheidung: On = Velocity/127, Off = 0 — Toggle-Verhalten macht
+  das Ziel-Control); MIDI-Learn bindet auch die nächste Note (nur Note-On,
+  ein streunendes Off löst nicht aus); GridPage abonniert zusätzlich die
+  Noten der Controller-Rolle (`controllerNoteSubToken`);
+  `onFeedbackEcho`/`onLearnCompleted` tragen den Address-Kind mit.
+
+## M4b — Aufräumen: zentrale Geräteverwaltung + Feldtest-Fixes (07/2026)
+
+Feldtest-Runde 2 (14.07.2026, Xone:K1): Mapping ging, LED-Feedback blieb
+stumm, Toggles verhielten sich momentary, und die drei gleich aussehenden
+Geräte-Combos im Grid-Settings-Tab waren unverständlich. User-Richtung:
+Geräteverwaltung zentral, Grid-Tab minimal.
+
+- **Kanal ist Geräte-Eigenschaft (LED-Fix):** `RigDevice::midiChannel`
+  (1..16, XML-Attribut `midiChannel`, fehlend = 1).
+  `ControllerProfile::findBySendAddress (kind, number)` matcht
+  KANAL-AGNOSTISCH (die Kanal-Spalten im CSV werden geparst, aber
+  ignoriert — das K1 ist frei umkanalisierbar, der User stellt den Kanal
+  im MIDI-Menü ein); Feedback wird auf dem Geräte-Kanal gesendet.
+  Ursache des stummen Feedbacks: das K1 sendete nicht auf Kanal 1, das
+  CSV matchte aber hart darauf — Learn lernt den echten Kanal, deshalb
+  ging das Mapping trotzdem (tückisch: halbe Kette funktioniert).
+- **Toggle-Flankenerkennung:** `GridPage::applyExternalValue` schaltete
+  Toggles direkt (`on = value >= 0.5`) — Note-Off zog sie sofort wieder
+  aus (= momentary). Jetzt: Toggles schalten NUR auf steigender Flanke um
+  (`externalHigh`-Map pro MacroControlKey), Push bleibt momentary.
+  Dazu spiegelt `onFeedbackEcho` jetzt den IST-Zustand des Controls NACH
+  dem Anwenden (`currentValueFor`) statt des rohen Eingangswerts — die
+  Pad-LED zeigt den Toggle-Zustand, nicht den Tastendruck.
+- **Haupt-MIDI-Menü (`MidiRigSettingsComponent`):** Liste gruppiert nach
+  Kategorie (Header „Instrumente"/„Controller"; die Kind-Combo pro Zeile
+  entfällt), Kanal-Dropdown pro Zeile, Controller-Zeilen mit
+  „Grid"-Marker (setzt `gridControllerDeviceId` — ehemals `inputCombo`
+  des Grid-Tabs; der erste angelegte Controller übernimmt die Rolle
+  automatisch). „+ Gerät" öffnet einen CallOutBox-Anlage-Picker
+  (`DeviceCreatePicker`): Profile beider Bibliotheken + „Eigenes …"-
+  Einträge; Controller-Auswahl setzt `controllerProfileName` direkt.
+- **Grid-Settings-Tab (`GridSettingsView`):** die drei Port-Combos
+  (Output/Controller-In/Echo-In) ersetzt durch EIN Instrument-Dropdown
+  (RigDevices mit `kind == soundGenerator` → `setGridOutputDeviceId`);
+  `ensureGridOutputDevice`/`ensureControllerDevice`/`roleDevicePortName`
+  entfallen. Der Tab ist jetzt `MidiRigSettings`-ChangeListener (neue
+  Geräte erscheinen live). Alle Rollen-Konsumenten (Hub-Fassaden,
+  `refreshRigSubscriptions`, `sendFocusCommand`-Fallback) laufen über
+  die Rollen-Ids — keine Änderung nötig.
+
 ## Lektionen
 
 - **MSVC + verschachtelte Brace-Init:**
@@ -237,13 +348,27 @@ Ableton-Parameter-Browser Track→Device→Parameter.
   `lines`/`patchline`-Quellen/Ziele bis zur `---nrpn <bank> <nummer>`-
   Message-Box verfolgen (inkl. Sprung über Subpatcher-Grenzen via
   `inlet`-Objekte).
+- **`BinaryData::originalFilenames` trägt KEINEN Ordnerpfad** — nur den
+  reinen Dateinamen, egal aus welchem `Assets/`-Unterordner die Datei via
+  `juce_add_binary_data` eingebunden wurde. Ein generischer Scan über
+  „alle `.csv`-Ressourcen" (Muster `MidiProfileLibrary`) kann deshalb
+  NICHT zwischen z. B. Klangerzeuger- und Controller-Profilen unterscheiden,
+  sobald beide Kategorien im selben `ConduitAssets`-Blob landen. Bei
+  wenigen, namentlich bekannten Factory-Dateien (M4: nur der Xone:K1)
+  stattdessen das generierte Symbol direkt referenzieren
+  (`BinaryData::AllenHeath_XoneK1_csv`/`_csvSize`) statt zu scannen.
+- **`\x`-Hex-Escapes in C++-String-Literalen sind NICHT auf 2 Ziffern
+  begrenzt** (bereits in M3 gefunden, hier erneut bestätigt) — vor jedem
+  neuen UTF-8-Literal prüfen, ob auf das letzte `\xNN` ein Hex-Digit-
+  Zeichen (0-9a-fA-F) im Klartext folgt; im Zweifel mit Python
+  (`s.encode('utf-8')`) verifizieren statt von Hand zu rechnen.
 
 ## Meilensteinleiter
 
   M1  MidiPortHub + Registry — M1a Registry+Matching (erledigt 07/2026) + M1b Hub-Kern: Portbetrieb/Queues/Drain/Ablösung der Ein-Port-Klassen + Migration + Settings-UI (erledigt 07/2026)
   M2  Profile + NRPN + PC — midi.guide-CSV-Parser (Klangerzeuger-Profile), NRPN-Assembler pro Port, Program-Change Senden/Empfangen — erledigt 07/2026 (inkl. Hardware-Picker-Vorgriff: NRPN/CC-Ziele aus Profilen)
   M3  Semantischer Picker — Geräte-/Parameter-Auswahl-UI (Analogie Ableton-Parameter-Browser Track→Device→Parameter) — erledigt 07/2026
-  M4  Controller-Profile + LED — Conduit-Controller-Profile-v1-CSV-Schema, Send-Adresse + bis zu 3 Feedback-Adressen pro Control — offen
+  M4  Controller-Profile + LED — Conduit-Controller-Profile-v1-CSV-Schema, Send-Adresse + bis zu 3 Feedback-Adressen pro Control — erledigt 07/2026
   M5  Map-Modus + Tab + Chord-Learn — Zuweisungs-UI, Mehrfachbelegung/Akkord-Learn — offen
   M6  Pickup-LED + Verhalten — Soft-Takeover-Feedback über Controller-Profile-LEDs — offen
   M7  Bidirektional Ribbons — Motorfader-/Ribbon-Feedback in beide Richtungen — offen

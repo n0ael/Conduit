@@ -5,14 +5,13 @@ namespace conduit
 
 namespace
 {
-    constexpr int kRowHeight   = 44;   // Touch-Target (CLAUDE.md §10.0)
-    constexpr int kRowGap      = 4;
-    constexpr int kPadding     = 18;
-    constexpr int kStatusWidth = 40;   // zwei LED-Punkte (In/Out)
+    constexpr int kRowHeight    = 44;   // Touch-Target (CLAUDE.md §10.0)
+    constexpr int kRowGap       = 4;
+    constexpr int kGroupGap     = 22;   // Abschnitts-Header-Hoehe (M4b)
+    constexpr int kPadding      = 18;
+    constexpr int kStatusWidth  = 40;   // zwei LED-Punkte (In/Out)
 
-    constexpr int kKindSoundGenerator = 1;
-    constexpr int kKindController     = 2;
-    constexpr int kNoPortId           = 1;
+    constexpr int kNoPortId     = 1;
 }
 
 //==============================================================================
@@ -30,19 +29,26 @@ MidiRigSettingsComponent::DeviceRow::DeviceRow (MidiRigSettingsComponent& ownerT
     { owner.settings.setLabel (deviceId, nameLabel.getText()); };
     addAndMakeVisible (nameLabel);
 
-    kindBox.addItem ("Klangerzeuger", kKindSoundGenerator);
-    kindBox.addItem ("Controller", kKindController);
-    kindBox.setSelectedId (device.kind == RigDeviceKind::controller ? kKindController
-                                                                    : kKindSoundGenerator,
-                           juce::dontSendNotification);
-    kindBox.onChange = [this]
-    {
-        owner.settings.setKind (deviceId,
-                                kindBox.getSelectedId() == kKindController
-                                    ? RigDeviceKind::controller
-                                    : RigDeviceKind::soundGenerator);
-    };
-    addAndMakeVisible (kindBox);
+    // M4b: Kanal-Dropdown statt Kind-Combo (die Kategorie bestimmt der
+    // Anlage-Picker; Kanal ist Geraete-Eigenschaft, Profil-Matching
+    // kanal-agnostisch).
+    for (int ch = 1; ch <= 16; ++ch)
+        channelBox.addItem ("Ch " + juce::String (ch), ch);
+    channelBox.setSelectedId (juce::jlimit (1, 16, device.midiChannel), juce::dontSendNotification);
+    channelBox.onChange = [this]
+    { owner.settings.setMidiChannel (deviceId, channelBox.getSelectedId()); };
+    addAndMakeVisible (channelBox);
+
+    // M4b: Grid-Marker -- welcher Controller steuert das Grid (ehemals
+    // inputCombo des Grid-Settings-Tabs). Nur bei Controller-Zeilen sichtbar;
+    // der Registry-Broadcast baut die Zeilen neu, der Zustand ist also
+    // immer frisch aus dem Ctor.
+    gridButton.setClickingTogglesState (false);
+    gridButton.setToggleState (owner.settings.getGridControllerDeviceId() == deviceId,
+                               juce::dontSendNotification);
+    gridButton.onClick = [this]
+    { owner.settings.setGridControllerDeviceId (deviceId); };
+    addChildComponent (gridButton);
 
     populatePortCombo (inBox, owner.hub.availableInputs(), device.midiInName);
     inBox.onChange = [this]
@@ -54,10 +60,53 @@ MidiRigSettingsComponent::DeviceRow::DeviceRow (MidiRigSettingsComponent& ownerT
     { owner.settings.setMidiOutName (deviceId, selectedPortName (outBox, owner.hub.availableOutputs())); };
     addAndMakeVisible (outBox);
 
+    populateProfileCombo (device.controllerProfileName);
+    profileBox.onChange = [this]
+    {
+        const auto selectedId = profileBox.getSelectedId();
+        const auto& profiles = owner.controllerProfileLibrary.profiles();
+        const auto profileIndex = selectedId - 2;   // 1 = kNoPortId-Aequivalent "-"
+        owner.settings.setControllerProfileName (
+            deviceId, profileIndex >= 0 && profileIndex < (int) profiles.size()
+                          ? profiles[(size_t) profileIndex].device
+                          : juce::String());
+    };
+    addChildComponent (profileBox);   // sichtbar nur bei kind == controller (resized())
+
     removeButton.onClick = [this] { owner.settings.removeDevice (deviceId); };
     addAndMakeVisible (removeButton);
 
     refreshStatus();
+}
+
+void MidiRigSettingsComponent::DeviceRow::populateProfileCombo (const juce::String& savedProfileName)
+{
+    profileBox.clear (juce::dontSendNotification);
+    profileBox.addItem (juce::String::fromUTF8 ("\xe2\x80\x94"), kNoPortId);   // „—" = kein Profil
+
+    const auto& profiles = owner.controllerProfileLibrary.profiles();
+    for (int i = 0; i < (int) profiles.size(); ++i)
+        profileBox.addItem (profiles[(size_t) i].device, i + 2);
+
+    profileBox.setSelectedId (kNoPortId, juce::dontSendNotification);
+
+    for (int i = 0; savedProfileName.isNotEmpty() && i < (int) profiles.size(); ++i)
+    {
+        if (profiles[(size_t) i].device == savedProfileName)
+        {
+            profileBox.setSelectedId (i + 2, juce::dontSendNotification);
+            return;
+        }
+    }
+
+    // Gespeichertes Profil aktuell nicht geladen: als deaktivierten Eintrag
+    // zeigen statt still auf „—" zu fallen (Muster (getrennt)-Geist).
+    if (savedProfileName.isNotEmpty())
+    {
+        const auto ghostId = (int) profiles.size() + 2;
+        profileBox.addItem (savedProfileName + " (fehlt)", ghostId);
+        profileBox.setSelectedId (ghostId, juce::dontSendNotification);
+    }
 }
 
 void MidiRigSettingsComponent::DeviceRow::populatePortCombo (juce::ComboBox& combo,
@@ -144,38 +193,76 @@ void MidiRigSettingsComponent::DeviceRow::paint (juce::Graphics& g)
 
 void MidiRigSettingsComponent::DeviceRow::resized()
 {
+    const auto index = owner.settings.indexOfId (deviceId);
+    const auto isController = index >= 0
+        && owner.settings.getDevice (index).kind == RigDeviceKind::controller;
+    profileBox.setVisible (isController);
+    gridButton.setVisible (isController);
+
     auto area = getLocalBounds();
     area.removeFromRight (kStatusWidth);   // Status-LEDs (paint)
 
-    removeButton.setBounds (area.removeFromRight (44).reduced (2));
-    nameLabel.setBounds (area.removeFromLeft (juce::jmax (90, area.getWidth() / 4)));
+    removeButton.setBounds (area.removeFromRight (36).reduced (2));
+
+    if (isController)
+    {
+        gridButton.setBounds (area.removeFromRight (48).reduced (2, 6));
+        area.removeFromRight (2);
+    }
+
+    nameLabel.setBounds (area.removeFromLeft (juce::jmax (80, area.getWidth() / 5)));
     area.removeFromLeft (4);
 
-    const auto comboWidth = (area.getWidth() - 8) / 3;
-    kindBox.setBounds (area.removeFromLeft (comboWidth).reduced (0, 6));
+    // M4b: Kanal schmal, In/Out (und bei Controllern das Profil) teilen den Rest.
+    channelBox.setBounds (area.removeFromLeft (64).reduced (0, 6));
     area.removeFromLeft (4);
+
+    const auto comboCount = isController ? 3 : 2;
+    const auto comboWidth = (area.getWidth() - 4 * (comboCount - 1)) / comboCount;
+
     inBox.setBounds (area.removeFromLeft (comboWidth).reduced (0, 6));
     area.removeFromLeft (4);
-    outBox.setBounds (area.reduced (0, 6));
+
+    if (isController)
+    {
+        outBox.setBounds (area.removeFromLeft (comboWidth).reduced (0, 6));
+        area.removeFromLeft (4);
+        profileBox.setBounds (area.reduced (0, 6));
+    }
+    else
+    {
+        outBox.setBounds (area.reduced (0, 6));
+    }
 }
 
 //==============================================================================
 MidiRigSettingsComponent::MidiRigSettingsComponent (MidiRigSettings& settingsToUse,
                                                     MidiPortHub& hubToUse,
-                                                    MidiProfileLibrary& profileLibraryToUse)
-    : settings (settingsToUse), hub (hubToUse), profileLibrary (profileLibraryToUse)
+                                                    MidiProfileLibrary& profileLibraryToUse,
+                                                    ControllerProfileLibrary& controllerProfileLibraryToUse)
+    : settings (settingsToUse), hub (hubToUse), profileLibrary (profileLibraryToUse),
+      controllerProfileLibrary (controllerProfileLibraryToUse)
 {
     header.setText (juce::String::fromUTF8 ("MIDI-Ger\xc3\xa4te (Rig)"), juce::dontSendNotification);
     header.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
     addAndMakeVisible (header);
 
-    columnsLabel.setText ("Name / Rolle / In / Out / Verbunden", juce::dontSendNotification);
+    columnsLabel.setText ("Name / Kanal / In / Out / Verbunden", juce::dontSendNotification);
     columnsLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     addAndMakeVisible (columnsLabel);
 
-    addButton.onClick = [this]
-    { settings.addDevice (juce::String::fromUTF8 ("Neues Ger\xc3\xa4t"), RigDeviceKind::soundGenerator); };
+    // M4b: "+ Geraet" oeffnet den Anlage-Picker (Profil-Liste beider
+    // Bibliotheken) statt direkt ein leeres Geraet anzulegen.
+    addButton.onClick = [this] { openCreatePicker(); };
     addAndMakeVisible (addButton);
+
+    instrumentsHeader.setText ("Instrumente", juce::dontSendNotification);
+    instrumentsHeader.setColour (juce::Label::textColourId, juce::Colours::grey);
+    rowContainer.addAndMakeVisible (instrumentsHeader);
+
+    controllersHeader.setText ("Controller", juce::dontSendNotification);
+    controllersHeader.setColour (juce::Label::textColourId, juce::Colours::grey);
+    rowContainer.addAndMakeVisible (controllersHeader);
 
     viewport.setViewedComponent (&rowContainer, false);
     viewport.setScrollBarsShown (true, false);
@@ -208,6 +295,26 @@ MidiRigSettingsComponent::MidiRigSettingsComponent (MidiRigSettings& settingsToU
     attributionLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
     addAndMakeVisible (attributionLabel);
     refreshProfileReport();
+
+    // Sektion „Controller-Profile" (M4, ADR E2) -- kein Legacy-Toggle-Aequivalent.
+    controllerProfileHeader.setText (juce::String::fromUTF8 ("Controller-Profile"),
+                                     juce::dontSendNotification);
+    controllerProfileHeader.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
+    addAndMakeVisible (controllerProfileHeader);
+
+    controllerReportBox.setMultiLine (true);
+    controllerReportBox.setReadOnly (true);
+    controllerReportBox.setScrollbarsShown (true);
+    addAndMakeVisible (controllerReportBox);
+
+    controllerReloadButton.onClick = [this]
+    {
+        controllerProfileLibrary.reload();
+        refreshControllerProfileReport();
+        rebuildRows();   // Profil-Dropdowns koennen neue/entfallene Eintraege haben
+    };
+    addAndMakeVisible (controllerReloadButton);
+    refreshControllerProfileReport();
 
     settings.addChangeListener (this);
     rebuildRows();
@@ -245,6 +352,35 @@ void MidiRigSettingsComponent::refreshProfileReport()
     reportBox.setText (text, false);
 }
 
+void MidiRigSettingsComponent::refreshControllerProfileReport()
+{
+    const auto dot         = juce::String::fromUTF8 (" \xc2\xb7 ");
+    const auto skippedWord = juce::String::fromUTF8 (" \xc3\xbc" "bersprungen");
+
+    juce::String text;
+
+    for (const auto& source : controllerProfileLibrary.report())
+    {
+        text << (source.fromUserFolder ? "[User]    " : "[Factory] ")
+             << source.sourceName
+             << dot << source.controls << " Controls"
+             << ", " << source.parse.accepted << " Zeilen";
+
+        if (source.parse.skipped > 0)
+            text << ", " << source.parse.skipped << skippedWord;
+
+        text << "\n";
+
+        for (const auto& warning : source.parse.warnings)
+            text << "    ! " << warning << "\n";
+    }
+
+    if (text.isEmpty())
+        text = "Keine Controller-Profile geladen.";
+
+    controllerReportBox.setText (text, false);
+}
+
 MidiRigSettingsComponent::~MidiRigSettingsComponent()
 {
     stopTimer();
@@ -268,14 +404,134 @@ void MidiRigSettingsComponent::rebuildRows()
     hub.refreshAvailableDevices();
     rows.clear();
 
-    for (int i = 0; i < settings.getNumDevices(); ++i)
+    // M4b: gruppiert -- erst Instrumente, dann Controller (die Abschnitts-
+    // Header setzt resized() vor die jeweils erste Zeile der Gruppe).
+    for (const auto wantedKind : { RigDeviceKind::soundGenerator, RigDeviceKind::controller })
     {
-        auto row = std::make_unique<DeviceRow> (*this, settings.getDevice (i).id);
-        rowContainer.addAndMakeVisible (*row);
-        rows.push_back (std::move (row));
+        for (int i = 0; i < settings.getNumDevices(); ++i)
+        {
+            const auto device = settings.getDevice (i);
+            if (device.kind != wantedKind)
+                continue;
+
+            auto row = std::make_unique<DeviceRow> (*this, device.id);
+            rowContainer.addAndMakeVisible (*row);
+            rows.push_back (std::move (row));
+        }
     }
 
     resized();
+}
+
+//==============================================================================
+// M4b: Anlage-Picker ("+ Geraet")
+
+namespace
+{
+    /** CallOutBox-Inhalt: flache Liste bekannter Profile beider Bibliotheken
+        + "Eigenes ..."-Eintraege (Muster TrackSelectorPanel: custom paint,
+        Tap waehlt, schliesst selbst). */
+    class DeviceCreatePicker final : public juce::Component
+    {
+    public:
+        struct Entry
+        {
+            juce::String label;
+            conduit::RigDeviceKind kind = conduit::RigDeviceKind::soundGenerator;
+            juce::String profileName;   // leer = "Eigenes ..." ohne Profil
+            bool isHeader = false;
+        };
+
+        DeviceCreatePicker (const conduit::MidiProfileLibrary& instruments,
+                            const conduit::ControllerProfileLibrary& controllers)
+        {
+            entries.push_back ({ "Instrumente", conduit::RigDeviceKind::soundGenerator, {}, true });
+            for (const auto& profile : instruments.profiles())
+                entries.push_back ({ profile.displayName(), conduit::RigDeviceKind::soundGenerator,
+                                     profile.displayName(), false });
+            entries.push_back ({ juce::String::fromUTF8 ("Eigenes Instrument\xe2\x80\xa6"),
+                                 conduit::RigDeviceKind::soundGenerator, {}, false });
+
+            entries.push_back ({ "Controller", conduit::RigDeviceKind::controller, {}, true });
+            for (const auto& profile : controllers.profiles())
+                entries.push_back ({ profile.device, conduit::RigDeviceKind::controller,
+                                     profile.device, false });
+            entries.push_back ({ juce::String::fromUTF8 ("Eigener Controller\xe2\x80\xa6"),
+                                 conduit::RigDeviceKind::controller, {}, false });
+
+            setSize (kWidth, (int) entries.size() * kEntryHeight);
+        }
+
+        std::function<void (conduit::RigDeviceKind, const juce::String& profileName)> onChosen;
+
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (juce::Colour (0xff23262b));
+
+            for (int i = 0; i < (int) entries.size(); ++i)
+            {
+                const auto& entry = entries[(size_t) i];
+                const juce::Rectangle<int> bounds (0, i * kEntryHeight, getWidth(), kEntryHeight);
+
+                g.setColour (entry.isHeader ? juce::Colours::grey : juce::Colours::white);
+                g.setFont (juce::Font (juce::FontOptions (entry.isHeader ? 12.0f : 14.0f,
+                                                          entry.isHeader ? juce::Font::bold
+                                                                         : juce::Font::plain)));
+                g.drawFittedText (entry.label, bounds.reduced (entry.isHeader ? 8 : 16, 0),
+                                  juce::Justification::centredLeft, 1, 1.0f);
+            }
+        }
+
+        void mouseUp (const juce::MouseEvent& event) override
+        {
+            const auto index = event.getPosition().y / kEntryHeight;
+            if (index < 0 || index >= (int) entries.size() || entries[(size_t) index].isHeader)
+                return;
+
+            if (onChosen != nullptr)
+                onChosen (entries[(size_t) index].kind, entries[(size_t) index].profileName);
+
+            if (auto* box = findParentComponentOfClass<juce::CallOutBox>())
+                box->dismiss();
+        }
+
+        static constexpr int kWidth = 280;
+        static constexpr int kEntryHeight = 44;   // Touch-Zone (CLAUDE.md 10.0)
+
+    private:
+        std::vector<Entry> entries;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DeviceCreatePicker)
+    };
+}
+
+void MidiRigSettingsComponent::openCreatePicker()
+{
+    auto picker = std::make_unique<DeviceCreatePicker> (profileLibrary, controllerProfileLibrary);
+    picker->onChosen = [this] (RigDeviceKind kind, const juce::String& profileName)
+    { createDeviceFromPicker (kind, profileName); };
+
+    juce::CallOutBox::launchAsynchronously (std::move (picker),
+                                            addButton.getScreenBounds(), nullptr);
+}
+
+void MidiRigSettingsComponent::createDeviceFromPicker (RigDeviceKind kind,
+                                                       const juce::String& profileName)
+{
+    const auto label = profileName.isNotEmpty() ? profileName
+                                                : juce::String::fromUTF8 ("Neues Ger\xc3\xa4t");
+    const auto id = settings.addDevice (label, kind);
+
+    if (kind == RigDeviceKind::controller)
+    {
+        if (profileName.isNotEmpty())
+            settings.setControllerProfileName (id, profileName);
+
+        // Erster Controller uebernimmt automatisch die Grid-Rolle.
+        if (settings.getGridControllerDeviceId().isNull()
+            || settings.indexOfId (settings.getGridControllerDeviceId()) < 0)
+            settings.setGridControllerDeviceId (id);
+    }
 }
 
 void MidiRigSettingsComponent::resized()
@@ -285,6 +541,17 @@ void MidiRigSettingsComponent::resized()
     area.removeFromTop (4);
     columnsLabel.setBounds (area.removeFromTop (20));
     area.removeFromTop (8);
+
+    // Sektion „Controller-Profile" (M4) ganz unten, feste Höhe — kein
+    // Legacy-Toggle-Aequivalent, daher etwas niedriger als die M2-Sektion.
+    auto controllerProfileArea = area.removeFromBottom (140);
+    auto controllerButtonRow = controllerProfileArea.removeFromBottom (28);
+    controllerReloadButton.setBounds (controllerButtonRow.removeFromLeft (110));
+    controllerProfileArea.removeFromBottom (4);
+    controllerProfileHeader.setBounds (controllerProfileArea.removeFromTop (24));
+    controllerProfileArea.removeFromTop (4);
+    controllerReportBox.setBounds (controllerProfileArea);
+    area.removeFromBottom (8);
 
     // Sektion „Profile" (M2) unten, feste Höhe — Geräteliste flext oben.
     auto profileArea = area.removeFromBottom (190);
@@ -304,16 +571,40 @@ void MidiRigSettingsComponent::resized()
 
     viewport.setBounds (area);
 
+    // M4b: gruppiert -- Abschnitts-Header vor der jeweils ersten Zeile
+    // jeder Kategorie (rows ist bereits Instrumente-zuerst sortiert).
     const auto rowWidth = viewport.getMaximumVisibleWidth();
-    rowContainer.setSize (rowWidth,
-                          static_cast<int> (rows.size()) * (kRowHeight + kRowGap));
 
     int y = 0;
+    bool seenInstrumentHeader = false;
+    bool seenControllerHeader = false;
+
     for (const auto& row : rows)
     {
+        const auto index = settings.indexOfId (row->id());
+        const auto isController = index >= 0
+            && settings.getDevice (index).kind == RigDeviceKind::controller;
+
+        if (! isController && ! seenInstrumentHeader)
+        {
+            instrumentsHeader.setBounds (0, y, rowWidth, kGroupGap);
+            seenInstrumentHeader = true;
+            y += kGroupGap;
+        }
+        else if (isController && ! seenControllerHeader)
+        {
+            controllersHeader.setBounds (0, y, rowWidth, kGroupGap);
+            seenControllerHeader = true;
+            y += kGroupGap;
+        }
+
         row->setBounds (0, y, rowWidth, kRowHeight);
         y += kRowHeight + kRowGap;
     }
+
+    instrumentsHeader.setVisible (seenInstrumentHeader);
+    controllersHeader.setVisible (seenControllerHeader);
+    rowContainer.setSize (rowWidth, y);
 }
 
 } // namespace conduit

@@ -9,6 +9,7 @@ namespace conduit
 
 class CaptureSettings;
 class CaptureService;
+class ControllerProfileLibrary;
 class MidiPortHub;
 class MidiProfileLibrary;
 class MidiRigSettings;
@@ -44,7 +45,8 @@ public:
                     OscSendSettings& oscSendSettings, OscController& oscController,
                     UiSettings& uiSettings,
                     MidiRigSettings& midiRigSettings, MidiPortHub& midiPortHub,
-                    MidiProfileLibrary& midiProfileLibrary);
+                    MidiProfileLibrary& midiProfileLibrary,
+                    ControllerProfileLibrary& controllerProfileLibrary);
     ~SettingsWindow() override;
 
     void paint (juce::Graphics& g) override;

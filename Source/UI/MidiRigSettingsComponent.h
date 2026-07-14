@@ -5,6 +5,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "Core/ControllerProfileLibrary.h"
 #include "Core/MidiPortHub.h"
 #include "Core/MidiProfileLibrary.h"
 
@@ -28,6 +29,22 @@ namespace conduit
     Profile (Factory-CSVs + Conduit/Devices) mit Warnungen — kein stilles
     Scheitern; „Neu laden"-Button, Klartext-Schnellpfad-Toggle und die
     CC-BY-SA-Attribution der midi.guide-Daten.
+
+    Sektion „Controller-Profile" (M4, ADR E2): analoger Lade-Report der
+    Controller-Profile (Factory Xone:K1 + Conduit/Controllers), KEIN
+    Klartext-Toggle (kein Aequivalent auf der Controller-Seite). Pro
+    Controller-Zeile zusaetzlich ein Profil-Dropdown (nur sichtbar bei
+    Rolle „Controller") — schreibt `MidiRigSettings::setControllerProfileName`.
+
+    M4b (User-Richtung 14.07.2026, zentrale Geraeteverwaltung): die Liste
+    ist nach Kategorie gruppiert (Abschnitts-Header „Instrumente" /
+    „Controller", die Kind-Combo pro Zeile entfaellt — die Kategorie
+    bestimmt der Anlage-Picker); pro Zeile ein Kanal-Dropdown (1..16,
+    `RigDevice::midiChannel` — Profil-Matching ist kanal-agnostisch);
+    „+ Geraet" oeffnet einen CallOutBox-Picker mit den bekannten Profilen
+    beider Bibliotheken plus „Eigenes …"-Eintraegen; Controller-Zeilen
+    tragen einen „Grid"-Marker (setzt `gridControllerDeviceId` — welcher
+    Controller steuert das Grid, ehemals inputCombo des Grid-Tabs).
 */
 class MidiRigSettingsComponent final : public juce::Component,
                                        private juce::ChangeListener,
@@ -35,7 +52,8 @@ class MidiRigSettingsComponent final : public juce::Component,
 {
 public:
     MidiRigSettingsComponent (MidiRigSettings& settingsToUse, MidiPortHub& hubToUse,
-                              MidiProfileLibrary& profileLibraryToUse);
+                              MidiProfileLibrary& profileLibraryToUse,
+                              ControllerProfileLibrary& controllerProfileLibraryToUse);
     ~MidiRigSettingsComponent() override;
 
     void resized() override;
@@ -64,10 +82,14 @@ private:
         MidiRigSettingsComponent& owner;
         juce::Uuid deviceId;
 
+        void populateProfileCombo (const juce::String& savedProfileName);
+
         juce::Label nameLabel;
-        juce::ComboBox kindBox;
+        juce::ComboBox channelBox;   // M4b: RigDevice::midiChannel (1..16)
         juce::ComboBox inBox;
         juce::ComboBox outBox;
+        juce::ComboBox profileBox;      // M4: nur sichtbar bei kind == controller
+        juce::TextButton gridButton { "Grid" };   // M4b: Grid-Controller-Marker
         juce::TextButton removeButton { "X" };
 
         bool inConnected = false;
@@ -80,16 +102,23 @@ private:
     void timerCallback() override;
     void rebuildRows();
     void refreshProfileReport();
+    void refreshControllerProfileReport();
 
     MidiRigSettings& settings;
     MidiPortHub& hub;
     MidiProfileLibrary& profileLibrary;
+    ControllerProfileLibrary& controllerProfileLibrary;
+
+    void openCreatePicker();
+    void createDeviceFromPicker (RigDeviceKind kind, const juce::String& profileName);
 
     juce::Label header;
     juce::Label columnsLabel;
     juce::TextButton addButton { juce::String::fromUTF8 ("+ Ger\xc3\xa4t") };
     juce::Viewport viewport;
     juce::Component rowContainer;
+    juce::Label instrumentsHeader;   // M4b: Abschnitts-Header der Gruppierung
+    juce::Label controllersHeader;
     std::vector<std::unique_ptr<DeviceRow>> rows;
 
     // Sektion „Profile" (M2).
@@ -98,6 +127,11 @@ private:
     juce::TextEditor reportBox;   // read-only, mehrzeilig (Report je Quelle)
     juce::TextButton reloadButton { "Neu laden" };
     juce::Label attributionLabel;
+
+    // Sektion „Controller-Profile" (M4) — analog, ohne Legacy-Toggle.
+    juce::Label controllerProfileHeader;
+    juce::TextEditor controllerReportBox;
+    juce::TextButton controllerReloadButton { "Neu laden" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiRigSettingsComponent)
 };

@@ -18,11 +18,13 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
                      GridPanelSettings& panelSettingsToUse, grid::MpeMidiSink& mpeMidiSinkToUse,
                      LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
                      MidiPortHub& midiPortHubToUse, MidiRigSettings& midiRigSettingsToUse,
-                     MidiProfileLibrary& midiProfileLibraryToUse)
+                     MidiProfileLibrary& midiProfileLibraryToUse,
+                     ControllerProfileLibrary& controllerProfileLibraryToUse)
     : rootState (std::move (rootStateToUse)),
       engine (engineToUse),
       midiPortHub (midiPortHubToUse), midiRigSettings (midiRigSettingsToUse),
       midiProfileLibrary (midiProfileLibraryToUse),
+      controllerProfileLibrary (controllerProfileLibraryToUse),
       midiTarget (midiPortHubToUse.gridOutputTarget()),
       panelSettings (panelSettingsToUse),
       mpeMidiSink (mpeMidiSinkToUse),
@@ -262,6 +264,50 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     // Tick (~60 Hz, auch ohne Events) treibt Glaettung + Soft-Takeover.
     refreshRigSubscriptions();
     midiRigSettings.addChangeListener (this);   // Rollen-/Geraete-Wechsel → neu binden
+
+    // MIDI-Rig M4 (ADR 006 E2): LED-/Motorfader-Feedback -- feuert, wenn
+    // MidiInBindings::tick() einen Wert per Soft-Takeover angewendet hat.
+    // Loest die Controller-Rolle + ihr Profil LIVE auf (Muster
+    // gridControllerOutputTarget() -- ueberlebt Rollen-/Profil-Wechsel,
+    // daher hier EINMAL gesetzt statt in refreshRigSubscriptions()).
+    midiInBindings.onFeedbackEcho = [this] (int /*channel*/, int number, bool isNote, float value01)
+    {
+        const auto controllerIndex = midiRigSettings.indexOfId (midiRigSettings.getGridControllerDeviceId());
+        if (controllerIndex < 0)
+            return;
+
+        const auto controllerDevice = midiRigSettings.getDevice (controllerIndex);
+        if (controllerDevice.controllerProfileName.isEmpty())
+            return;
+
+        const auto* profile = controllerProfileLibrary.find (controllerDevice.controllerProfileName);
+        if (profile == nullptr)
+            return;
+
+        // Kanal-agnostisch (M4b): Matching nur ueber Kind + Nummer, gesendet
+        // wird auf dem GERAETE-Kanal (RigDevice::midiChannel) -- nicht auf
+        // den Kanal-Spalten des CSV (das K1 ist frei umkanalisierbar).
+        const auto* control = profile->findBySendAddress (
+            isNote ? midirig::AddressKind::note : midirig::AddressKind::cc, number);
+        if (control == nullptr)
+            return;
+
+        auto& target = midiPortHub.gridControllerOutputTarget();
+        const auto deviceChannel = controllerDevice.midiChannel;
+        const auto value7bit = (juce::uint8) juce::jlimit (0, 127, juce::roundToInt (value01 * 127.0f));
+
+        for (const auto& feedback : control->feedback)
+        {
+            if (feedback.meaning == "display")
+                continue;   // Sende-Weg fehlt noch (M8, SysEx-Snippets) -- bewusst stumm
+
+            target.send (feedback.kind == midirig::AddressKind::note
+                             ? juce::MidiMessage::noteOn (deviceChannel, feedback.number, value7bit)
+                             : juce::MidiMessage::controllerEvent (deviceChannel, feedback.number,
+                                                                   (int) value7bit));
+        }
+    };
+
     tickSubToken = midiPortHub.subscribeTick ([this]
     {
         midiInBindings.tick ([this] (const grid::MacroControlKey& key) { return controlValueFor (key); },
@@ -327,6 +373,7 @@ GridPage::~GridPage()
     saveSession();   // Block K: letzter Stand (zusätzlich zum 30-s-Auto-Save)
     midiRigSettings.removeChangeListener (this);
     midiPortHub.unsubscribe (controllerSubToken);
+    midiPortHub.unsubscribe (controllerNoteSubToken);
     midiPortHub.unsubscribe (noteSubToken);
     midiPortHub.unsubscribe (tickSubToken);
     liveSetState.removeListener (this);
@@ -336,6 +383,7 @@ GridPage::~GridPage()
 void GridPage::refreshRigSubscriptions()
 {
     midiPortHub.unsubscribe (controllerSubToken);
+    midiPortHub.unsubscribe (controllerNoteSubToken);
     midiPortHub.unsubscribe (noteSubToken);
 
     // Controller-Rolle (Block G): CCs fuettern die Bindings (Soft-Takeover).
@@ -345,6 +393,16 @@ void GridPage::refreshRigSubscriptions()
         {
             if (event.kind == midi::ControllerEvent::Kind::cc)
                 midiInBindings.handleIncomingCc (event.channel, event.number, event.value);
+        });
+
+    // Controller-Rolle, Noten (M4): Pads senden Noten -- gleicher
+    // Bindungs-Pfad wie CCs (Momentary + Velocity, Learn inklusive).
+    controllerNoteSubToken = midiPortHub.subscribeNotes (
+        midiRigSettings.getGridControllerDeviceId(),
+        [this] (const midi::NoteEvent& event)
+        {
+            midiInBindings.handleIncomingNote (event.channel, event.note,
+                                               event.velocity, event.isOn);
         });
 
     // Grid-Ausgangs-Rolle, In-Port (Block H4): Noten-Echo aufs Pad-Raster.
@@ -620,6 +678,14 @@ void GridPage::applyExternalValue (const grid::MacroControlKey& key, float value
     if (control == nullptr)
         return;
 
+    // Flankenerkennung (M4b): Toggles schalten pro Pad-Druck UM (steigende
+    // Flanke), statt vom Note-Off sofort wieder ausgezogen zu werden --
+    // Push bleibt momentary (Feldtest-Fund 14.07.2026, Xone:K1-Pads).
+    const auto isHigh = value01 >= 0.5f;
+    auto& wasHigh = externalHigh[key];
+    const auto risingEdge = isHigh && ! wasHigh;
+    wasHigh = isHigh;
+
     switch (control->type)
     {
         case grid::CcTool::fader:
@@ -627,8 +693,13 @@ void GridPage::applyExternalValue (const grid::MacroControlKey& key, float value
             break;
 
         case grid::CcTool::push:
+            control->on = isHigh;
+            break;
+
         case grid::CcTool::toggle:
-            control->on = value01 >= 0.5f;
+            if (! risingEdge)
+                return;
+            control->on = ! control->on;
             break;
 
         case grid::CcTool::xy:

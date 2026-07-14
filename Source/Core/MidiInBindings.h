@@ -68,7 +68,8 @@ public:
     struct Binding
     {
         int channel = 1;   // 1..16
-        int cc      = 1;   // 0..127
+        int cc      = 1;   // CC-Nummer bzw. Notennummer (0..127)
+        bool isNote = false;   // M4: Pads senden Noten statt CCs
         MacroControlKey key;
 
         SoftTakeover takeover;
@@ -77,9 +78,10 @@ public:
         bool  pending    = false;   // Glaettung laeuft noch
     };
 
-    /** Bindet key an (channel, cc) -- ersetzt eine bestehende Bindung
-        desselben Keys UND eine bestehende Bindung desselben (channel, cc). */
-    void bind (const MacroControlKey& key, int channel, int cc);
+    /** Bindet key an (channel, cc/note) -- ersetzt eine bestehende Bindung
+        desselben Keys UND eine bestehende Bindung derselben Adresse
+        (channel, nummer, isNote). */
+    void bind (const MacroControlKey& key, int channel, int cc, bool isNote = false);
     void unbind (const MacroControlKey& key);
 
     [[nodiscard]] const Binding* bindingFor (const MacroControlKey& key) const noexcept;
@@ -90,6 +92,12 @@ public:
 
     /** Eingehender CC [Message Thread, vom MidiPortHub-Drain gepumpt]. */
     void handleIncomingCc (int channel, int cc, int value7bit);
+
+    /** Eingehende Note [Message Thread] (M4: Controller-Pads) --
+        Note-On setzt Velocity/127 als Zielwert (Momentary + Velocity,
+        User-Entscheidung 14.07.2026), Note-Off (bzw. Velocity 0) setzt 0.
+        Ein scharfes Learn bindet die Note wie einen CC (isNote = true). */
+    void handleIncomingNote (int channel, int note, int velocity7bit, bool isOn);
 
     /** Glaettungs-Tick (~60 Hz): schreibt anstehende Werte weich fort und
         wendet sie ueber Soft-Takeover an. currentValueFor liefert den
@@ -111,16 +119,22 @@ public:
     void cancelLearn() noexcept { learnArmed = false; }
     [[nodiscard]] bool isLearnArmed() const noexcept { return learnArmed; }
 
-    std::function<void (const MacroControlKey&, int channel, int cc)> onLearnCompleted;
+    std::function<void (const MacroControlKey&, int channel, int cc, bool isNote)> onLearnCompleted;
 
-    /** LED-/Motorfader-Echo (channel, cc, value01) -- nur Schnittstelle. */
-    std::function<void (int, int, float)> onFeedbackEcho;
+    /** LED-/Motorfader-Echo (channel, nummer, isNote, value01) -- feuert,
+        wenn ein Wert tatsaechlich angewendet wurde (M4: GridPage sendet
+        darueber Feedback an das Controller-Rollen-Geraet). */
+    std::function<void (int, int, bool, float)> onFeedbackEcho;
 
     // Glaettung: Anteil der Restdistanz pro Tick; darunter wird eingerastet.
     static constexpr float kSmoothingPerTick = 0.35f;
     static constexpr float kSmoothingSnap    = 0.004f;
 
 private:
+    /** Gemeinsamer Eingangs-Pfad von CC und Note: Zielwert setzen,
+        Glaettung anstossen (CC- und Note-Adressraum getrennt via isNote). */
+    void applyIncoming (int channel, int number, bool isNote, float value01);
+
     std::vector<Binding> bindings;
 
     bool learnArmed = false;

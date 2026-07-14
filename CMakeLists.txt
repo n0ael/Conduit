@@ -87,6 +87,8 @@ juce_add_binary_data(ConduitAssets
         Assets/DeviceProfiles/Moog_Minitaur.csv
         Assets/DeviceProfiles/Sequential_ProphetRev2.csv
         Assets/DeviceProfiles/Waldorf_Blofeld.csv
+        # MIDI-Rig M4: Factory-Controller-Profil (aus User-Chart transkribiert)
+        Assets/ControllerProfiles/AllenHeath_XoneK1.csv
 )
 
 # ---------------------------------------------------------------------------
@@ -105,6 +107,8 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/CcControlModel.cpp
     Source/Core/ChannelNames.cpp
     Source/Core/ChordMemory.cpp
+    Source/Core/ControllerProfile.cpp
+    Source/Core/ControllerProfileLibrary.cpp
     Source/Core/CurveEditInteraction.cpp
     Source/Core/EngineProcessor.cpp
     Source/Core/EngineEditor.cpp
@@ -606,6 +610,8 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/ChannelNamesTests.cpp
         Tests/Core/ChordMemoryTests.cpp
         Tests/Core/ClockTests.cpp
+        Tests/Core/ControllerProfileLibraryTests.cpp
+        Tests/Core/ControllerProfileTests.cpp
         Tests/Core/CurveEditInteractionTests.cpp
         Tests/Core/EngineIOChannelTests.cpp
         Tests/Core/ExpressionAxisTests.cpp
@@ -699,6 +705,8 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/CcControlModel.cpp
         Source/Core/ChannelNames.cpp
         Source/Core/ChordMemory.cpp
+        Source/Core/ControllerProfile.cpp
+        Source/Core/ControllerProfileLibrary.cpp
         Source/Core/CurveEditInteraction.cpp
         Source/Core/EngineEditor.cpp
         Source/Core/EngineProcessor.cpp

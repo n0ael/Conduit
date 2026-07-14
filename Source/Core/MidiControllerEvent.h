@@ -22,10 +22,12 @@ struct ControllerEvent
 };
 
 //==============================================================================
-/** Note-Event (Noten-Echo u. Ä., früherer Grid-Block H4).
+/** Note-Event (Noten-Echo, früherer Grid-Block H4; seit M4 auch
+    Eingangsquelle für Macro-Bindungen — Controller-Pads senden Noten).
     velocity 0..127; isOn=false deckt auch NoteOn mit Velocity 0 ab. */
 struct NoteEvent
 {
+    int  channel  = 1;   // 1..16 (M4: Note-Bindungen matchen auf Kanal)
     int  note     = 0;
     int  velocity = 0;
     bool isOn     = false;

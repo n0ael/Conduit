@@ -74,7 +74,8 @@ SettingsWindow::SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSe
                                 OscSendSettings& oscSendSettings, OscController& oscController,
                                 UiSettings& uiSettings,
                                 MidiRigSettings& midiRigSettings, MidiPortHub& midiPortHub,
-                                MidiProfileLibrary& midiProfileLibrary)
+                                MidiProfileLibrary& midiProfileLibrary,
+                                ControllerProfileLibrary& controllerProfileLibrary)
 {
     setLookAndFeel (&darkLook);
 
@@ -92,10 +93,13 @@ SettingsWindow::SettingsWindow (juce::AudioDeviceManager* deviceManager, MeterSe
                  new OscSettingsComponent (oscSendSettings, oscController), true);
     tabs.addTab ("MIDI", tabBackground,
                  new MidiRigSettingsComponent (midiRigSettings, midiPortHub,
-                                               midiProfileLibrary), true);
+                                               midiProfileLibrary, controllerProfileLibrary), true);
 
     addAndMakeVisible (tabs);
-    setSize (520, 520);
+    // M4: der MIDI-Tab hat jetzt zwei Profile-Sektionen (Klangerzeuger +
+    // Controller) uebereinander -- etwas mehr Hoehe, damit die Geraeteliste
+    // nicht auf einen Scroll-Streifen zusammenschrumpft.
+    setSize (520, 640);
 }
 
 SettingsWindow::~SettingsWindow()

@@ -1,9 +1,34 @@
 # Conduit Alpha — Projektstatus
 
-> Letzte Aktualisierung: 2026-07-13 | wird nach jedem Meilenstein gepflegt
+> Letzte Aktualisierung: 2026-07-14 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (13.07.2026) — MIDI-Rig M3 (ADR 006): Semantischer Picker
+## Aktueller Meilenstein (14.07.2026) — MIDI-Rig M4 (ADR 006): Controller-Profile + LED-Feedback
+
+- **Modell:** `ControllerProfile`/`ControllerProfileLibrary` (headless,
+  Muster M2) — CSV-Schema "Conduit Controller Profile v1" (id, typ,
+  Send-Adresse, bis zu 3 Feedback-Adressen mit Bedeutung), flacher
+  User-Ordner `Conduit/Controllers/*.csv`.
+- **Factory-Profil:** Allen & Heath Xone:K1 (52 Controls), aus einem
+  User-Chart transkribiert (nicht midi.guide).
+- **Registry:** `RigDevice::controllerProfileName` (Picker statt
+  Label-Matching) + `MidiPortHub::gridControllerOutputTarget()`.
+- **UI:** viertes Profil-Dropdown pro Controller-Zeile + zweite
+  Report-Sektion im MIDI-Tab.
+- **Laufzeit:** der seit M1b vorbereitete, nie verdrahtete Hook
+  `MidiInBindings::onFeedbackEcho` sendet jetzt LED-/Motorfader-Feedback
+  über die Controller-Rolle zurück (Display-Text-Feedback erkannt, aber
+  bewusst noch nicht gesendet — braucht M8/SysEx).
+- **M4b (14.07.2026)** nach Feldtest-Runde 2: Kanal ist Geräte-
+  Eigenschaft (`RigDevice::midiChannel`, Profil-Matching kanal-agnostisch
+  — LED-Fix), Toggle-Flankenerkennung (Toggles schalten um statt
+  momentary), Feedback spiegelt den Control-IST-Zustand; Haupt-MIDI-Menü
+  gruppiert (Instrumente/Controller) mit Kanal-Dropdown, Grid-Marker und
+  Anlage-Picker; Grid-Settings-Tab auf EIN Instrument-Dropdown reduziert.
+- Offen: Feldtest M4b mit Xone:K1 (User), M5 Map-Modus + Tab +
+  Chord-Learn.
+
+## Davor (13.07.2026) — MIDI-Rig M3 (ADR 006): Semantischer Picker
 
 - **Modell:** `MidiTargetBrowserModel` (headless) — Drill-down
   Manufacturer→Device→(Section)→Parameter aus HardwareCcDatabase +

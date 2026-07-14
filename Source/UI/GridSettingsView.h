@@ -48,7 +48,8 @@ namespace conduit
     Message Thread.
 */
 class GridSettingsView final : public juce::Component,
-                               private juce::ValueTree::Listener
+                               private juce::ValueTree::Listener,
+                               private juce::ChangeListener   // M4b: Registry-Broadcast
 {
 public:
     GridSettingsView (juce::ValueTree rootStateToUse, MidiPortHub& midiPortHubToUse,
@@ -98,13 +99,10 @@ public:
 private:
     void valueTreePropertyChanged (juce::ValueTree& tree,
                                    const juce::Identifier& property) override;
+    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
     void refreshScaleLabels();
-    void rebuildDeviceList();
-    void handleDeviceSelected();
-    void rebuildInputDeviceList();
-    void handleInputDeviceSelected();
-    void rebuildEchoDeviceList();
-    void handleEchoDeviceSelected();
+    void rebuildInstrumentList();
+    void handleInstrumentSelected();
     void handleMasterInputSelected();
     void handleGridInputSelected();
     void repopulateRoutingCombo (juce::ComboBox& combo, const juce::String& savedName);
@@ -120,26 +118,19 @@ private:
 
     juce::ValueTree rootState;
 
-    // MIDI-Rig (ADR 006 M1b): die drei Combos bearbeiten die zwei Grid-
-    // Rollen-Geraete der Registry (Controller-In, Grid-Ausgang-Out +
-    // Echo-In); der Hub oeffnet/schliesst die Ports selbst (Registry-
-    // Broadcast). ensure*Device() legt fehlende Rollen-Geraete an.
+    // MIDI-Rig (M4b, User-Richtung 14.07.2026): der Grid-Tab waehlt nur
+    // noch das INSTRUMENT (RigDevice mit kind == soundGenerator, setzt
+    // gridOutputDeviceId) -- Ports/Kanal/Controller-Zuordnung pflegt das
+    // Haupt-MIDI-Menue (MidiRigSettingsComponent). Registry-Broadcast
+    // haelt die Liste frisch (ChangeListener).
     MidiPortHub& midiPortHub;
     MidiRigSettings& midiRigSettings;
-    [[nodiscard]] juce::Uuid ensureGridOutputDevice();
-    [[nodiscard]] juce::Uuid ensureControllerDevice();
-    [[nodiscard]] juce::String roleDevicePortName (const juce::Uuid& roleId, bool inputSide) const;
 
     GridPanelSettings& panelSettings;
-    juce::Array<juce::MidiDeviceInfo> devices;
-    juce::Array<juce::MidiDeviceInfo> inputDevices;
-    juce::Array<juce::MidiDeviceInfo> echoDevices;
+    juce::Array<juce::Uuid> instrumentIds;   // parallel zu den Combo-Ids
 
-    // Performance-Slide-Out (umgezogen aus der ehemaligen GridPage-Top-Row);
-    // inputCombo = MIDI-EINGANG fuer die Control-Steuerung (Block G).
-    juce::ComboBox outputCombo;
-    juce::ComboBox inputCombo;
-    juce::ComboBox echoCombo;   // Block H4: Noten-Echo-Eingang (Conduit DAW)
+    // Performance-Slide-Out (umgezogen aus der ehemaligen GridPage-Top-Row).
+    juce::ComboBox instrumentCombo;
     push::TextTile rootTile  { "C" };
     push::TextTile scaleTile { "Chromatic" };
 

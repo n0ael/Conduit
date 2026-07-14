@@ -40,9 +40,7 @@ GridSettingsView::GridSettingsView (juce::ValueTree rootStateToUse, MidiPortHub&
           (double) GridPanelSettings::minTrackTabsFontPx, (double) GridPanelSettings::maxTrackTabsFontPx,
           (double) panelSettingsToUse.getTrackTabsFontPx(), 1.0, 0, 0.1, "Font" } }
 {
-    addAndMakeVisible (outputCombo);
-    addAndMakeVisible (inputCombo);
-    addAndMakeVisible (echoCombo);
+    addAndMakeVisible (instrumentCombo);
     addAndMakeVisible (rootTile);
     addAndMakeVisible (scaleTile);
     addAndMakeVisible (inTuneLocationPadTile);
@@ -82,17 +80,12 @@ GridSettingsView::GridSettingsView (juce::ValueTree rootStateToUse, MidiPortHub&
     modwheelLabel.setJustificationType (juce::Justification::centredLeft);
     modwheelLabel.setColour (juce::Label::textColourId, push::colours::textDim);
 
-    // MIDI-Rig (M1b): Listen einmal frisch vom Hub, die Combos spiegeln
-    // die Rollen-Geraete der Registry (Ports oeffnet der Hub selbst).
-    midiPortHub.refreshAvailableDevices();
-    rebuildDeviceList();
-    outputCombo.onChange = [this] { handleDeviceSelected(); };
-
-    rebuildInputDeviceList();
-    inputCombo.onChange = [this] { handleInputDeviceSelected(); };
-
-    rebuildEchoDeviceList();
-    echoCombo.onChange = [this] { handleEchoDeviceSelected(); };
+    // MIDI-Rig (M4b): der Grid-Tab waehlt nur noch das Instrument (welches
+    // Geraet spiele ich) -- Ports/Kanal pflegt das Haupt-MIDI-Menue. Der
+    // Registry-Broadcast haelt die Liste frisch (neue Geraete erscheinen).
+    rebuildInstrumentList();
+    instrumentCombo.onChange = [this] { handleInstrumentSelected(); };
+    midiRigSettings.addChangeListener (this);
 
     rootTile.onClick = [this]
     {
@@ -280,6 +273,7 @@ GridSettingsView::GridSettingsView (juce::ValueTree rootStateToUse, MidiPortHub&
 
 GridSettingsView::~GridSettingsView()
 {
+    midiRigSettings.removeChangeListener (this);
     rootState.removeListener (this);
 }
 
@@ -298,118 +292,52 @@ void GridSettingsView::refreshScaleLabels()
     scaleTile.setText (GridPage::scaleDisplayNameFor (type));
 }
 
-juce::Uuid GridSettingsView::ensureGridOutputDevice()
+void GridSettingsView::rebuildInstrumentList()
 {
-    auto roleId = midiRigSettings.getGridOutputDeviceId();
-    if (midiRigSettings.indexOfId (roleId) < 0)
+    instrumentIds.clear();
+    instrumentCombo.clear (juce::dontSendNotification);
+    instrumentCombo.addItem ("Kein Instrument", 1);
+
+    // M4b: Geraete statt Ports -- alle Klangerzeuger der Registry (Ports/
+    // Kanal pflegt das Haupt-MIDI-Menue, der Hub oeffnet selbst).
+    for (int i = 0; i < midiRigSettings.getNumDevices(); ++i)
     {
-        roleId = midiRigSettings.addDevice ("Grid-Ausgang", RigDeviceKind::soundGenerator);
-        midiRigSettings.setGridOutputDeviceId (roleId);
+        const auto device = midiRigSettings.getDevice (i);
+        if (device.kind != RigDeviceKind::soundGenerator)
+            continue;
+
+        instrumentIds.add (device.id);
+        instrumentCombo.addItem (device.label.isNotEmpty() ? device.label
+                                                           : device.id.toDashedString(),
+                                 instrumentIds.size() + 1);
     }
-    return roleId;
-}
 
-juce::Uuid GridSettingsView::ensureControllerDevice()
-{
-    auto roleId = midiRigSettings.getGridControllerDeviceId();
-    if (midiRigSettings.indexOfId (roleId) < 0)
+    instrumentCombo.setSelectedId (1, juce::dontSendNotification);
+
+    const auto currentRole = midiRigSettings.getGridOutputDeviceId();
+    for (int i = 0; i < instrumentIds.size(); ++i)
     {
-        roleId = midiRigSettings.addDevice ("Controller", RigDeviceKind::controller);
-        midiRigSettings.setGridControllerDeviceId (roleId);
-    }
-    return roleId;
-}
-
-juce::String GridSettingsView::roleDevicePortName (const juce::Uuid& roleId, bool inputSide) const
-{
-    const auto index = midiRigSettings.indexOfId (roleId);
-    if (index < 0)
-        return {};
-
-    const auto device = midiRigSettings.getDevice (index);
-    return inputSide ? device.midiInName : device.midiOutName;
-}
-
-void GridSettingsView::rebuildDeviceList()
-{
-    devices = midiPortHub.availableOutputs();
-
-    outputCombo.clear (juce::dontSendNotification);
-    outputCombo.addItem ("Kein Ausgang", 1);
-
-    for (int i = 0; i < devices.size(); ++i)
-        outputCombo.addItem (devices.getReference (i).name, i + 2);
-
-    outputCombo.setSelectedId (1, juce::dontSendNotification);
-
-    // Persistierte Auswahl = Out-Port des Grid-Ausgangs-Rollen-Geraets
-    // (Registry); das Oeffnen uebernimmt der Hub (K2-Verhalten bleibt:
-    // beim Start ist der Port wieder offen).
-    const auto saved = roleDevicePortName (midiRigSettings.getGridOutputDeviceId(), false);
-    for (int i = 0; saved.isNotEmpty() && i < devices.size(); ++i)
-    {
-        if (devices.getReference (i).name == saved)
+        if (instrumentIds.getReference (i) == currentRole)
         {
-            outputCombo.setSelectedId (i + 2, juce::dontSendNotification);
+            instrumentCombo.setSelectedId (i + 2, juce::dontSendNotification);
             break;
         }
     }
 }
 
-void GridSettingsView::handleDeviceSelected()
+void GridSettingsView::handleInstrumentSelected()
 {
-    const auto selectedId = outputCombo.getSelectedId();
+    const auto index = instrumentCombo.getSelectedId() - 2;
 
-    if (selectedId <= 1)
-    {
-        midiRigSettings.setMidiOutName (midiRigSettings.getGridOutputDeviceId(), {});
-        return;
-    }
-
-    const auto index = selectedId - 2;
-    if (index >= 0 && index < devices.size())
-        midiRigSettings.setMidiOutName (ensureGridOutputDevice(),
-                                        devices.getReference (index).name);
+    midiRigSettings.setGridOutputDeviceId (
+        index >= 0 && index < instrumentIds.size() ? instrumentIds.getReference (index)
+                                                   : juce::Uuid::null());
 }
 
-void GridSettingsView::rebuildInputDeviceList()
+void GridSettingsView::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
-    inputDevices = midiPortHub.availableInputs();
-
-    inputCombo.clear (juce::dontSendNotification);
-    inputCombo.addItem ("Kein MIDI-Eingang", 1);
-
-    for (int i = 0; i < inputDevices.size(); ++i)
-        inputCombo.addItem (inputDevices.getReference (i).name, i + 2);
-
-    inputCombo.setSelectedId (1, juce::dontSendNotification);
-
-    // Persistierte Auswahl = In-Port des Controller-Rollen-Geraets.
-    const auto saved = roleDevicePortName (midiRigSettings.getGridControllerDeviceId(), true);
-    for (int i = 0; saved.isNotEmpty() && i < inputDevices.size(); ++i)
-    {
-        if (inputDevices.getReference (i).name == saved)
-        {
-            inputCombo.setSelectedId (i + 2, juce::dontSendNotification);
-            break;
-        }
-    }
-}
-
-void GridSettingsView::handleInputDeviceSelected()
-{
-    const auto selectedId = inputCombo.getSelectedId();
-
-    if (selectedId <= 1)
-    {
-        midiRigSettings.setMidiInName (midiRigSettings.getGridControllerDeviceId(), {});
-        return;
-    }
-
-    const auto index = selectedId - 2;
-    if (index >= 0 && index < inputDevices.size())
-        midiRigSettings.setMidiInName (ensureControllerDevice(),
-                                       inputDevices.getReference (index).name);
+    if (source == &midiRigSettings)
+        rebuildInstrumentList();
 }
 
 void GridSettingsView::setMasterInputOptions (const juce::StringArray& options)
@@ -443,47 +371,6 @@ juce::String GridSettingsView::routingNameForSelection (const juce::ComboBox& co
     const auto index = combo.getSelectedId() - 2;
     return index >= 0 && index < masterInputOptions.size() ? masterInputOptions[index]
                                                            : juce::String();
-}
-
-void GridSettingsView::rebuildEchoDeviceList()
-{
-    echoDevices = midiPortHub.availableInputs();
-
-    echoCombo.clear (juce::dontSendNotification);
-    echoCombo.addItem ("Kein Noten-Echo", 1);
-
-    for (int i = 0; i < echoDevices.size(); ++i)
-        echoCombo.addItem (echoDevices.getReference (i).name, i + 2);
-
-    echoCombo.setSelectedId (1, juce::dontSendNotification);
-
-    // Persistierte Auswahl = In-Port des Grid-Ausgangs-Rollen-Geraets
-    // (Noten-Echo, Block H4).
-    const auto saved = roleDevicePortName (midiRigSettings.getGridOutputDeviceId(), true);
-    for (int i = 0; saved.isNotEmpty() && i < echoDevices.size(); ++i)
-    {
-        if (echoDevices.getReference (i).name == saved)
-        {
-            echoCombo.setSelectedId (i + 2, juce::dontSendNotification);
-            break;
-        }
-    }
-}
-
-void GridSettingsView::handleEchoDeviceSelected()
-{
-    const auto selectedId = echoCombo.getSelectedId();
-
-    if (selectedId <= 1)
-    {
-        midiRigSettings.setMidiInName (midiRigSettings.getGridOutputDeviceId(), {});
-        return;
-    }
-
-    const auto index = selectedId - 2;
-    if (index >= 0 && index < echoDevices.size())
-        midiRigSettings.setMidiInName (ensureGridOutputDevice(),
-                                       echoDevices.getReference (index).name);
 }
 
 void GridSettingsView::handleMasterInputSelected()
@@ -557,18 +444,14 @@ void GridSettingsView::resized()
 {
     auto area = getLocalBounds().reduced (kPaddingX, 8);
 
-    // Performance-Slide-Out: MIDI-Port + Skala-Kacheln in einer Zeile,
-    // darunter der MIDI-EINGANG fuer die Control-Steuerung (Block G).
+    // Performance-Slide-Out (M4b): Instrument-Wahl + Skala-Kacheln in einer
+    // Zeile -- Ports/Kanal/Controller pflegt das Haupt-MIDI-Menue.
     auto slideOutRow = area.removeFromTop (kRowHeight);
-    outputCombo.setBounds (slideOutRow.removeFromLeft (juce::jmax (80, slideOutRow.getWidth() - 152)));
+    instrumentCombo.setBounds (slideOutRow.removeFromLeft (juce::jmax (80, slideOutRow.getWidth() - 152)));
     slideOutRow.removeFromLeft (6);
     rootTile.setBounds (slideOutRow.removeFromLeft (44));
     slideOutRow.removeFromLeft (4);
     scaleTile.setBounds (slideOutRow);
-    area.removeFromTop (kRowGap);
-    inputCombo.setBounds (area.removeFromTop (kRowHeight));
-    area.removeFromTop (kRowGap);
-    echoCombo.setBounds (area.removeFromTop (kRowHeight));
     area.removeFromTop (kSectionGap);
 
     // Pitch: In-Tune Location (zwei Tiles) + Width-Feld.

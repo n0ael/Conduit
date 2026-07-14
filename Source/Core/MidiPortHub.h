@@ -157,6 +157,14 @@ public:
         MpeMidiSink/GridPage/MacroPanel). */
     [[nodiscard]] grid::IMidiOutputTarget& gridOutputTarget() noexcept { return gridOutputFacade; }
 
+    /** MIDI-Rig M4: Rollen-Fassade „Controller" -- sendet an das Gerät, das
+        die Registry AKTUELL als Controller-Rolle führt (LED-/Motorfader-
+        Feedback, GridPage::onFeedbackEcho). */
+    [[nodiscard]] grid::IMidiOutputTarget& gridControllerOutputTarget() noexcept
+    {
+        return gridControllerOutputFacade;
+    }
+
     //==========================================================================
     /** [Message Thread] Alle Queues jetzt entleeren + Tick feuern —
         Test-Hook; der 60-Hz-Timer ruft dieselbe Methode. */
@@ -226,6 +234,19 @@ private:
         MidiPortHub& hub;
     };
 
+    class GridControllerOutputFacade final : public grid::IMidiOutputTarget
+    {
+    public:
+        explicit GridControllerOutputFacade (MidiPortHub& hubToUse) : hub (hubToUse) {}
+        void send (const juce::MidiMessage& message) override
+        {
+            hub.send (hub.settings.getGridControllerDeviceId(), message);
+        }
+
+    private:
+        MidiPortHub& hub;
+    };
+
     struct ControllerSubscription { int token; juce::Uuid deviceId; ControllerCallback callback; };
     struct NoteSubscription       { int token; juce::Uuid deviceId; NoteCallback callback; };
     struct TickSubscription       { int token; TickCallback callback; };
@@ -256,6 +277,7 @@ private:
     std::vector<std::unique_ptr<OutputConnection>> outputs;
     std::vector<std::unique_ptr<DeviceFacade>> facades;
     GridOutputFacade gridOutputFacade { *this };
+    GridControllerOutputFacade gridControllerOutputFacade { *this };
 
     std::vector<ControllerSubscription> controllerSubscriptions;
     std::vector<NoteSubscription> noteSubscriptions;

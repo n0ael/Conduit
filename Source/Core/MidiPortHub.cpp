@@ -181,11 +181,12 @@ void MidiPortHub::InputConnection::handleIncomingMidiMessage (juce::MidiInput*,
     {
         // Volle Note-Queue verwirft das neue Event (M0-Parität — reine
         // Anzeige, der 60-Hz-Drain entleert schnell genug).
-        noteQueue.push ({ message.getNoteNumber(), message.getVelocity(), true });
+        noteQueue.push ({ message.getChannel(), message.getNoteNumber(),
+                          message.getVelocity(), true });
     }
     else if (message.isNoteOff())
     {
-        noteQueue.push ({ message.getNoteNumber(), 0, false });
+        noteQueue.push ({ message.getChannel(), message.getNoteNumber(), 0, false });
     }
 }
 

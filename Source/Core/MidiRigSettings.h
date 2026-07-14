@@ -19,6 +19,18 @@ struct RigDevice
     RigDeviceKind kind = RigDeviceKind::soundGenerator;
     juce::String midiOutName;
     juce::String midiInName;
+
+    /** MIDI-Rig M4b: der MIDI-Kanal, auf dem dieses Geraet sendet/empfaengt
+        (1..16) -- Controller-Profile matchen kanal-agnostisch, Feedback wird
+        auf DIESEM Kanal gesendet (User-Entscheidung 14.07.2026: Kanal ist
+        Geraete-Eigenschaft, nicht Profil-Eigenschaft). */
+    int midiChannel = 1;
+
+    /** MIDI-Rig M4 (ADR 006 E2): nur bei kind == controller sinnvoll --
+        Name eines geladenen `ControllerProfile` (ControllerProfileLibrary),
+        explizit über einen Picker gesetzt statt über `label` gematcht
+        (überlebt Umbenennung des Geräts). Leer = kein Profil zugewiesen. */
+    juce::String controllerProfileName;
 };
 
 //==============================================================================
@@ -58,6 +70,13 @@ public:
     void setKind (const juce::Uuid& id, RigDeviceKind kind);
     void setMidiOutName (const juce::Uuid& id, const juce::String& portName);
     void setMidiInName (const juce::Uuid& id, const juce::String& portName);
+
+    /** M4: welches ControllerProfile (ControllerProfileLibrary::find)
+        dieses Geraet nutzt -- nur bei kind == controller sinnvoll. */
+    void setControllerProfileName (const juce::Uuid& id, const juce::String& profileName);
+
+    /** M4b: MIDI-Kanal des Geraets (1..16, geklemmt). */
+    void setMidiChannel (const juce::Uuid& id, int channel);
 
     //==========================================================================
     // Grid-Rollen (M1b): die zwei aus den GridPanelSettings migrierten

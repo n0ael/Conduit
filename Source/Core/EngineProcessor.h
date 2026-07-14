@@ -16,6 +16,7 @@
 #include "Metronome.h"
 #include "GridVoiceEngine.h"
 #include "MidiPortHub.h"
+#include "ControllerProfileLibrary.h"
 #include "MidiProfileLibrary.h"
 #include "MidiRigSettings.h"
 #include "TouchLive/LiveSetModel.h"
@@ -196,6 +197,11 @@ public:
         Conduit/Devices — Macro-Panel-Hardware-Picker + MIDI-Settings-
         Report binden daran. */
     [[nodiscard]] MidiProfileLibrary& getMidiProfileLibrary() noexcept { return midiProfileLibrary; }
+
+    /** Controller-Profile (ADR 006 E2, M4): Factory-Profil (Xone:K1) +
+        User-Ordner Conduit/Controllers -- MIDI-Settings-Picker/Report und
+        GridPage::onFeedbackEcho binden daran. */
+    [[nodiscard]] ControllerProfileLibrary& getControllerProfileLibrary() noexcept { return controllerProfileLibrary; }
 
     //==========================================================================
     /** Looper-Quelle (B3/M4) [Message Thread]: Quell-Schlüssel
@@ -456,6 +462,10 @@ private:
     MidiRigSettings midiRigSettings;
     MidiPortHub midiPortHub { midiRigSettings };
     MidiProfileLibrary midiProfileLibrary { midiRigSettings.settingsFile().getSiblingFile ("Devices") };
+
+    // Controller-Profile (M4) -- gleiches Muster, eigener Nachbar-Ordner
+    // Conduit/Controllers (ADR 006 E2, flach statt {Hersteller}/-verschachtelt).
+    ControllerProfileLibrary controllerProfileLibrary { midiRigSettings.settingsFile().getSiblingFile ("Controllers") };
 
     // Link-synchroner Click — läuft nach dem GraphFader auf die Anker-Kanäle
     Metronome metronome;

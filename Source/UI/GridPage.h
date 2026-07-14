@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_data_structures/juce_data_structures.h>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -13,6 +15,7 @@
 #include "Core/HardwareCcDatabase.h"
 #include "Core/GridVoiceEngine.h"
 #include "Core/MacroBindings.h"
+#include "Core/ControllerProfileLibrary.h"
 #include "Core/MidiInBindings.h"
 #include "Core/MidiPortHub.h"
 #include "Core/MidiProfileLibrary.h"
@@ -112,7 +115,8 @@ public:
               GridPanelSettings& panelSettingsToUse, grid::MpeMidiSink& mpeMidiSinkToUse,
               LiveSetModel& liveSetModelToUse, TouchLiveClient& touchLiveClientToUse,
               MidiPortHub& midiPortHubToUse, MidiRigSettings& midiRigSettingsToUse,
-              MidiProfileLibrary& midiProfileLibraryToUse);
+              MidiProfileLibrary& midiProfileLibraryToUse,
+              ControllerProfileLibrary& controllerProfileLibraryToUse);
     ~GridPage() override;
 
     void resized() override;
@@ -242,6 +246,7 @@ private:
     MidiPortHub& midiPortHub;
     MidiRigSettings& midiRigSettings;
     MidiProfileLibrary& midiProfileLibrary;   // M2: CSV-Profile (Hardware-Picker)
+    ControllerProfileLibrary& controllerProfileLibrary;   // M4: LED-/Motorfader-Feedback
     grid::IMidiOutputTarget& midiTarget;
 
     GridPanelSettings& panelSettings;
@@ -275,8 +280,13 @@ private:
     // neu (MidiRigSettings-ChangeBroadcast, async).
     grid::MidiInBindings midiInBindings;
     int controllerSubToken = 0;
+    int controllerNoteSubToken = 0;   // M4: Pad-Noten der Controller-Rolle
     int noteSubToken = 0;
     int tickSubToken = 0;
+
+    // M4b: letzter externer High/Low-Zustand pro Control-Key -- Toggles
+    // schalten nur auf steigender Flanke um (applyExternalValue).
+    std::map<grid::MacroControlKey, bool> externalHigh;
 
     void refreshRigSubscriptions();
 
