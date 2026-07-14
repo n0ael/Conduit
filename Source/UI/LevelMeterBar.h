@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Core/Capture/LevelMeter.h"
+#include "UiFramePacer.h"
 
 namespace conduit
 {
@@ -17,15 +18,15 @@ namespace conduit
       - Clip als rotes Feld am 0-dB-Ende (Latch bis Klick).
 
     Liest die Werte lock-free vom LevelMeter (Owner: EngineProcessor); pro
-    Frame (30 fps) via Timer. Kanal-Index == Port-Index == Meter-Kanal
-    (der Meter misst den komprimierten aktiven Buffer, CLAUDE.md 9).
+    Frame-Tick (UiFramePacer: nativ per VBlank, global gedrosselt).
+    Kanal-Index == Port-Index == Meter-Kanal (der Meter misst den
+    komprimierten aktiven Buffer, CLAUDE.md 9).
 
     Maus: nur das Clip-Feld ist klickbar (resetClip) — der Rest fällt an die
     Kachel durch (Node-Drag). meter darf nullptr sein (Tests) → zeichnet nur
-    den leeren Track, kein Timer.
+    den leeren Track (Tick ist ein No-op).
 */
-class LevelMeterBar final : public juce::Component,
-                            private juce::Timer
+class LevelMeterBar final : public juce::Component
 {
 public:
     LevelMeterBar (LevelMeter* meterToUse, int channelToShow);
@@ -43,14 +44,20 @@ public:
     static constexpr float minDb = -60.0f;
 
 private:
-    void timerCallback() override;
+    void refreshTick();
 
     LevelMeter* meter = nullptr;
     const int channel;
 
-    // Zwischengespeicherte Werte für Change-Detection (repaint nur bei Bedarf)
-    float lastRms = 0.0f, lastPeak = 0.0f, lastHold = 0.0f;
+    // Zwischengespeicherte ANZEIGE-Werte (dB-Norm 0..1) für die Change-
+    // Detection — der Vergleich muss im Anzeige-Maßstab passieren, sonst
+    // wird die Schwelle unterhalb ~-36 dB riesig (0,002 linear ≈ 1 dB dort;
+    // User-Feldtest 14.07.2026: Balken ruppelte im Keller).
+    float lastRmsNorm = 0.0f, lastPeakNorm = 0.0f, lastHoldNorm = 0.0f;
     bool lastClipped = false;
+
+    // Letzter Member: tickt erst nach vollständiger Konstruktion.
+    UiFramePacer framePacer { this, [this] { refreshTick(); } };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LevelMeterBar)
 };

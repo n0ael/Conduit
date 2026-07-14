@@ -159,3 +159,70 @@ TEST_CASE ("UiSettings: softKeyboard — Plattform-Default + Persistenz", "[uise
     REQUIRE (reloaded.isSoftKeyboardEnabled()
                  == ! UiSettings::defaultSoftKeyboardEnabled);
 }
+
+//==============================================================================
+// UI-Framerate (User-Regel 14.07.2026): uiFpsLimit + UiFramePacer-Gate
+
+#include "UI/UiFramePacer.h"
+
+TEST_CASE ("UiSettings: uiFpsLimit — Default 120, Clamp auf 120/60/30, Roundtrip", "[uisettings][io]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempUiSettings temp;
+
+    {
+        UiSettings settings (temp.options());
+        REQUIRE (settings.getUiFpsLimit() == 120);   // Default = Nativ (max 120)
+
+        settings.setUiFpsLimit (60);
+        REQUIRE (settings.getUiFpsLimit() == 60);
+
+        // Krumme Werte klemmen auf den naechsten erlaubten Modus.
+        settings.setUiFpsLimit (144);
+        REQUIRE (settings.getUiFpsLimit() == 120);
+        settings.setUiFpsLimit (1);
+        REQUIRE (settings.getUiFpsLimit() == 30);
+    }
+
+    UiSettings reloaded (temp.options());
+    REQUIRE (reloaded.getUiFpsLimit() == 30);   // persistiert
+}
+
+TEST_CASE ("uiframe::shouldRunFrame: Nativ laeuft jeden VBlank, Limits drosseln", "[uisettings][midirig]")
+{
+    double last = 0.0;
+
+    // Nativ (>= 120): jeder Frame laeuft.
+    for (double t = 0.0; t < 100.0; t += 8.33)
+        REQUIRE (conduit::uiframe::shouldRunFrame (t, last, 120));
+
+    // 60-fps-Limit auf einem 120-Hz-Monitor (8.33-ms-Frames): jeder zweite.
+    last = 0.0;
+    int ran = 0;
+    for (int frame = 1; frame <= 120; ++frame)
+        if (conduit::uiframe::shouldRunFrame (frame * 8.333, last, 60))
+            ++ran;
+    REQUIRE (ran >= 55);
+    REQUIRE (ran <= 65);
+
+    // 60-fps-Limit auf einem 60-Hz-Monitor (16.67 ms + Jitter): kippt NICHT
+    // auf 30 fps (1-ms-Toleranz).
+    last = 0.0;
+    ran = 0;
+    for (int frame = 1; frame <= 60; ++frame)
+    {
+        const auto jitter = (frame % 2 == 0) ? 0.3 : -0.3;
+        if (conduit::uiframe::shouldRunFrame (frame * 16.667 + jitter, last, 60))
+            ++ran;
+    }
+    REQUIRE (ran >= 58);
+
+    // 30-fps-Limit auf einem 60-Hz-Monitor: etwa jeder zweite Frame.
+    last = 0.0;
+    ran = 0;
+    for (int frame = 1; frame <= 60; ++frame)
+        if (conduit::uiframe::shouldRunFrame (frame * 16.667, last, 30))
+            ++ran;
+    REQUIRE (ran >= 28);
+    REQUIRE (ran <= 32);
+}

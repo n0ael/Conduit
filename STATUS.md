@@ -3,7 +3,38 @@
 > Letzte Aktualisierung: 2026-07-14 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (14.07.2026) — MIDI-Rig M5c (ADR 006): Conduit-Macro-Ziele mit Modulation
+## Aktueller Meilenstein (14.07.2026) — UI-Framerate nativ (User-Regel, ersetzt die 30-fps-Regel)
+
+- **Anlass:** User-Fund nach M5c — Node-Page-Meter/Mod-Marker wirkten
+  stufig (der FxModulePanel-Tick lief sogar nur mit 10 Hz).
+- **`Source/UI/UiFramePacer.h`:** VBlankAttachment + globales FPS-Limit
+  (`uiframe::setFpsLimit`, `shouldRunFrame` pure/testbar mit
+  1-ms-VSync-Toleranz); `UiSettings::uiFpsLimit` (120 = „Nativ, max
+  120" Default · 60 · 30, persistiert), Combo im Oberfläche-Tab/
+  Dev-Panel, angewendet vom EngineEditor (ChangeListener + Start).
+- **Migriert von festen Timern auf UiFramePacer:** GainFaderMeter,
+  LevelMeterBar, ScopeDisplay, StepGridDisplay, FxModulePanel
+  (Send-LED + M5c-Modulations-Marker), TouchLiveMixerView,
+  TouchLiveDeviceView (GR), TouchLiveEq8Panel-Spektrum. Geblieben:
+  dt-basierte Physik-Ticks (direkte VBlanks), niederfrequentes
+  Status-Polling (≤ 10 Hz), Daten-Pumpen (LiveSpectrumTap-FFT @30 Hz).
+- Regel-Nachzug: CLAUDE.md §10 + Rule `ui-design` (30-fps-Regel ersetzt),
+  Rule `touchlive` (Meter-Pfad). Tests: uiFpsLimit-Roundtrip/Clamp +
+  shouldRunFrame-Gate.
+- **Feldtest-Fixes (gleicher Tag):** VBlank-Timestamps sind SEKUNDEN
+  (JUCE-Parametername lügt — Freeze bei 60/30 behoben); GainFaderMeter
+  auf kumulierte Change-Detection (Snapshots nur beim Repaint — pro-
+  Frame-Delta < Epsilon verschluckte sonst weiche Fahrten);
+  **NodeCanvas-Kabel-Clip-Culling** (paint strokte ALLE Kabel bei jedem
+  Dirty-Rect — mit Metern @ nativ der Jank-Verstärker der Node-Page).
+- **Meter-Feintuning (User):** RMS-Fenster 150→300 ms, Peak als
+  halbheller Balken unter der RMS-Füllung; Ballistik jetzt einstellbar
+  im Metering-Tab (RMS-Trägheit 50–1000 ms · Peak-Release 0,2–3 s ·
+  Peak-Hold 0,5–5 s) — `LevelMeter::setGlobalBallistics` (klassenweite
+  Atomics, wirken auf ALLE Instanzen inkl. FX-Chassis/Looper),
+  persistiert in MeterSettings. Suite 855 Cases grün.
+
+## Davor (14.07.2026) — MIDI-Rig M5c (ADR 006): Conduit-Macro-Ziele mit Modulation
 
 - **ParamModulationBus (GraphManager + `Core/ParamModulation.h`):** Tree
   = Basiswert, `getParameterTarget()`-Atomic = macro-effektiver Wert

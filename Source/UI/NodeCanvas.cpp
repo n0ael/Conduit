@@ -298,6 +298,12 @@ void NodeCanvas::paint (juce::Graphics& g)
                                             juce::PathStrokeType::rounded);
     const auto connectionsTree = rootState.getChildWithName (id::connections);
 
+    // Clip-Culling (UI-Framerate 14.07.2026): Meter-/Marker-Frames
+    // invalidieren kleine Ausschnitte bis zu 120x pro Sekunde — Kabel,
+    // deren Hülle den Clip nicht schneidet, werden gar nicht erst gebaut/
+    // gestroket (Pfad-Stroking ist der teure Teil dieses paint()).
+    const auto clipBounds = g.getClipBounds().toFloat();
+
     for (int i = 0; i < connectionsTree.getNumChildren(); ++i)
     {
         const auto connection = connectionsTree.getChild (i);
@@ -311,8 +317,18 @@ void NodeCanvas::paint (juce::Graphics& g)
 
         if (start && end)
         {
+            // Hülle des Bezier: y bleibt zwischen den Endpunkten (horizontale
+            // Tangenten), x ragt maximal `bend` über sie hinaus (makeCablePath).
+            const auto startF = start->toFloat();
+            const auto endF   = end->toFloat();
+            const auto bend   = juce::jmax (40.0f, std::abs (endF.x - startF.x) * 0.5f);
+
+            if (! clipBounds.intersects (juce::Rectangle<float> (startF, endF)
+                                             .expanded (bend + 4.0f, 4.0f)))
+                continue;
+
             g.setColour (cableColourFor (sourceUuid, sourceChannel));
-            g.strokePath (makeCablePath (start->toFloat(), end->toFloat()), cableStroke);
+            g.strokePath (makeCablePath (startF, endF), cableStroke);
         }
     }
 

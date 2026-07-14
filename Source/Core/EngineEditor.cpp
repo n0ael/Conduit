@@ -11,6 +11,7 @@
 #include "UI/LooperSettingsMenu.h"
 #include "UI/SettingsWindow.h"
 #include "UI/TrackSelectorPanel.h"
+#include "UI/UiFramePacer.h"
 #include "Util/ScaleQuantizer.h"
 
 namespace conduit
@@ -391,6 +392,10 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
     appliedFontScale = engine.getUiSettings().getFontScale();
     engine.getUiSettings().addChangeListener (this);
 
+    // UI-Framerate (User-Regel 14.07.2026): globales FPS-Limit fuer alle
+    // UiFramePacer-Refreshes — Startwert + Live-Aenderungen (unten).
+    uiframe::setFpsLimit (engine.getUiSettings().getUiFpsLimit());
+
     // Looper-Quellen folgen Tap-Registrierungen (CaptureService-Broadcast)
     // und Label-/Pairing-Änderungen (ChannelNames-Broadcast)
     engine.getCaptureService().addChangeListener (this);
@@ -461,6 +466,9 @@ void EngineEditor::changeListenerCallback (juce::ChangeBroadcaster* source)
         return;
 
     auto& uiSettings = engine.getUiSettings();
+
+    // UI-Framerate-Limit (UiFramePacer) — billig, einfach immer setzen.
+    uiframe::setFpsLimit (uiSettings.getUiFpsLimit());
 
     // Globale Skalierung (Ableton-Verhalten: trifft ALLE Fenster inkl.
     // offener Dialoge; multipliziert sich auf das OS-Display-Scaling)

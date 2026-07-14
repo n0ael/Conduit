@@ -105,18 +105,18 @@ TouchLiveDeviceView::TouchLiveDeviceView (TouchLiveClient& clientToUse,
     addChildComponent (averagingTile);
 
     rebuild();
-    startTimerHz (30);   // GR-Meter-Refresh (roh, §5.1); ohne Sicht kostenlos
+    // GR-Meter-Refresh: UiFramePacer (nativ per VBlank, global gedrosselt);
+    // ohne sichtbare Page ist der Tick ein No-op (isShowing-Guard).
 }
 
 TouchLiveDeviceView::~TouchLiveDeviceView()
 {
-    stopTimer();
     modelState.removeListener (this);
     cancelPendingUpdate();
 }
 
 //==============================================================================
-void TouchLiveDeviceView::timerCallback()
+void TouchLiveDeviceView::refreshTick()
 {
     if (! isShowing())
         return;

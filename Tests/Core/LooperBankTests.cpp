@@ -925,13 +925,15 @@ TEST_CASE ("LooperBank: Track-Mix — Gain, Pan (Balance), Mute, Solo-Scope", "[
 
     SECTION ("Post-Fader-Meter folgt dem Fader")
     {
-        rig.feedBlocks (20);   // RMS-Fenster (150 ms) füllen
+        rig.feedBlocks (20);   // RMS-Fenster (Default 360 ms) füllen (Warm-Start seedet sofort)
         REQUIRE (rig.bank.getTrackMeter (0, 0).getPeak (0) > 0.35f);
         REQUIRE (rig.bank.getTrackMeter (0, 0).getRms (0) > 0.3f);
 
-        // Fader zu → RMS fällt (Peak hat 1,5-s-Ballistik, dauert länger)
+        // Fader zu → RMS fällt: meanSquare mit exp(−t/0.36 s), der RMS
+        // (Wurzel) also mit exp(−t/0.72 s) → ~0.025 nach 2 s
+        // (User-Default-Ballistik 14.07.2026, LevelMeter::defaultRmsWindowSeconds).
         rig.bank.setTrackGain (0, 0, 0.0f);
-        rig.feedBlocks (100);   // RMS fällt mit exp(−t/0.3 s) → ~0.014 nach 1 s
+        rig.feedBlocks (200);
         REQUIRE (rig.bank.getTrackMeter (0, 0).getRms (0) < 0.05f);
     }
 }

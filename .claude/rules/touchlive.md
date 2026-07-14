@@ -123,7 +123,8 @@ Meter-Pfad (M2):
   hängen `[dv-id, gr, gr]` an (Push-Vorbild). Subscription
   `/remote/meters/subscribe`, Heartbeat-Timeout beendet den Stream.
 - `TouchLiveMeterBus` NIE in den ValueTree; Meter sind ROH (kein Slew,
-  keine Echo-Suppression, §5.1); UI liest per Frame-Zähler @ 30 Hz und
+  keine Echo-Suppression, §5.1); UI liest per Frame-Zähler im
+  UiFramePacer-Tick (nativ, global gedrosselt — Rule ui-design) und
   nur bei sichtbarer Page. `clear()` erhöht den Frame-Zähler.
 - pytest der Gegenseite: lokal kollidieren Manager-Tests mit laufendem
   Live (Port 9010) — CI-Job `remote-script` läuft immer vollständig.

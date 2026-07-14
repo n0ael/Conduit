@@ -10,6 +10,16 @@ namespace
     constexpr const char* devModeKey   = "devModeEnabled";
     constexpr const char* dspMeterKey  = "dspMeterEnabled";
     constexpr const char* softKeyboardKey = "softKeyboardEnabled";
+    constexpr const char* uiFpsLimitKey   = "uiFpsLimit";
+
+    /** Erlaubte Modi: 120 (Nativ, max) | 60 | 30 — alles andere wird auf
+        den nächsten Modus geklemmt (handeditierte Datei, alte Versionen). */
+    int clampFpsLimit (int limitFps) noexcept
+    {
+        if (limitFps >= 90) return 120;
+        if (limitFps >= 45) return 60;
+        return 30;
+    }
 }
 
 //==============================================================================
@@ -51,7 +61,26 @@ void UiSettings::loadFromFile()
         dspMeterEnabled = file->getBoolValue (dspMeterKey, true);
         softKeyboardEnabled = file->getBoolValue (softKeyboardKey,
                                                   defaultSoftKeyboardEnabled);
+        uiFpsLimit = clampFpsLimit (file->getIntValue (uiFpsLimitKey, defaultUiFpsLimit));
     }
+}
+
+void UiSettings::setUiFpsLimit (int limitFps)
+{
+    const auto clamped = clampFpsLimit (limitFps);
+
+    if (clamped == uiFpsLimit)
+        return;
+
+    uiFpsLimit = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (uiFpsLimitKey, clamped);
+        file->saveIfNeeded();
+    }
+
+    sendChangeMessage();
 }
 
 void UiSettings::setUiScale (float scale)

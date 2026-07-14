@@ -456,6 +456,12 @@ void EngineProcessor::applyMeterSettings()
     const auto hold = meterSettings.getClipHoldSeconds();
     inputLevels.setClipHoldSeconds (hold);
     outputLevels.setClipHoldSeconds (hold);
+
+    // Ballistik gilt app-weit fuer ALLE LevelMeter-Instanzen (Input/Output,
+    // FX-Chassis, Looper) — klassenweite Atomics (User-Feintuning 14.07.2026).
+    LevelMeter::setGlobalBallistics (meterSettings.getRmsWindowSeconds(),
+                                     meterSettings.getPeakReleaseSeconds(),
+                                     meterSettings.getPeakHoldSeconds());
 }
 
 //==============================================================================

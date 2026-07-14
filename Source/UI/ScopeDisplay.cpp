@@ -12,18 +12,12 @@ ScopeDisplay::ScopeDisplay (GraphManager& graphManagerToUse, juce::String nodeUu
       historyMax (historySize, 0.0f)
 {
     setInterceptsMouseClicks (false, false);  // Drag geht an die Node-Kachel
-    startTimerHz (30);                        // Scope-Refresh (CLAUDE.md 10)
+    // Scope-Refresh: UiFramePacer (nativ per VBlank, global gedrosselt).
 }
 
 void ScopeDisplay::stopUpdates()
 {
-    stopTimer();
-}
-
-//==============================================================================
-void ScopeDisplay::timerCallback()
-{
-    pullPendingSamples();
+    framePacer.stop();
 }
 
 void ScopeDisplay::pullPendingSamples()

@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Core/GraphManager.h"
+#include "UiFramePacer.h"
 
 namespace conduit
 {
@@ -20,14 +21,14 @@ class LevelMeter;
     (OSC-Nachzug, Undo, Preset-Load) kommen über den ValueTree-Listener.
 
     Meter (Zombie-UI-Regel): die LevelMeter-Instanz lebt IM Modul — hier wird
-    NIE ein Pointer gecached, sondern pro 30-fps-Tick transient über
-    GraphManager::getModuleFor() aufgelöst (Muster ScopeDisplay/StatusBadge);
-    nullptr (Deleting/Preset-Load/Tests) → leerer Track, kein Crash.
+    NIE ein Pointer gecached, sondern pro Frame-Tick (UiFramePacer: nativ,
+    global gedeckelt) transient über GraphManager::getModuleFor() aufgelöst
+    (Muster ScopeDisplay/StatusBadge); nullptr (Deleting/Preset-Load/Tests)
+    → leerer Track, kein Crash.
 
     Klick auf das Clip-Feld (oben) setzt den Clip-Latch beider Kanäle zurück.
 */
 class GainFaderMeter final : public juce::Component,
-                             private juce::Timer,
                              private juce::ValueTree::Listener
 {
 public:
@@ -53,7 +54,7 @@ public:
 
 private:
     //==========================================================================
-    void timerCallback() override;
+    void refreshTick();
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override;
 
     /** Transiente Auflösung pro Tick — Pointer nie über den Tick hinaus halten. */
@@ -70,9 +71,14 @@ private:
     const juce::String nodeUuid;
     const bool isInputMeter;
 
-    // Zwischengespeicherte Meter-Werte (Change-Detection, 2 Kanäle)
-    float lastRms[2] {}, lastPeak[2] {}, lastHold[2] {};
+    // Zwischengespeicherte ANZEIGE-Werte (dB-Norm 0..1, 2 Kanäle) — der
+    // Change-Vergleich muss im Anzeige-Maßstab passieren, sonst wird die
+    // Schwelle unterhalb ~-36 dB riesig (User-Feldtest 14.07.2026).
+    float lastRmsNorm[2] {}, lastPeakNorm[2] {}, lastHoldNorm[2] {};
     bool lastClipped = false;
+
+    // Letzter Member: tickt erst nach vollständiger Konstruktion.
+    UiFramePacer framePacer { this, [this] { refreshTick(); } };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GainFaderMeter)
 };

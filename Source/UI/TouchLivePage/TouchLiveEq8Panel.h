@@ -4,6 +4,7 @@
 #include <map>
 
 #include "TouchLiveBespokePanel.h"
+#include "UI/UiFramePacer.h"
 
 namespace conduit
 {
@@ -146,7 +147,11 @@ private:
 
     void dragActiveBandBy (juce::Point<float> delta);
     void beginFreeGesture();
-    void timerCallback (int timerId) override;
+    void timerCallback (int timerId) override;   // nur noch Long-Press
+
+    /** Spektrum-Repaint bei neuem Analyse-Frame (UiFramePacer: nativ,
+        global gedrosselt — die Analyse selbst taktet der LiveSpectrumTap). */
+    void spectrumTick();
     void commitTypeSelector();
     void drawSpectrum (juce::Graphics& g, juce::Rectangle<float> area);
     [[nodiscard]] juce::Rectangle<float> typeSelectorBounds() const;
@@ -174,7 +179,6 @@ private:
     [[nodiscard]] double effectiveQ (Shape shape, double q, double gainDb) const;
 
     static constexpr int longPressTimerId = 1;
-    static constexpr int spectrumTimerId = 2;
 
     TouchLiveClient& client;
     LiveSpectrumTap* spectrumTap = nullptr;   // nullptr in Tests
@@ -223,6 +227,9 @@ private:
     bool curveDirty = true;
 
     static constexpr double plotDbRange = 15.0;   // ±15 dB wie Lives Anzeige
+
+    // Letzter Member: tickt erst nach vollständiger Konstruktion.
+    UiFramePacer spectrumPacer { this, [this] { spectrumTick(); } };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TouchLiveEq8Panel)
 };

@@ -315,6 +315,11 @@ Querschnitts-Kern:
 - UI-Components binden NUR an den ValueTree-Subtree, nie an den
   Processor (§5); Animationen via `VBlankAttachment`, kein Blocking
   in `paint()`.
+- **UI-Framerate (User-Regel 14.07.2026):** Anzeige-Refreshes laufen
+  NATIV mit der Monitor-Rate über `UiFramePacer` (global gedeckelt via
+  `UiSettings::uiFpsLimit`: Default 120 „Nativ", Drossel 60/30 im
+  Oberfläche-Menü) — keine festen `startTimerHz`-Refreshes; Details
+  Rule `ui-design`.
 
 Subsystem-Regeln + Spezifikationen (je eigene Rule + Dossier):
 **TransportBar/Metronom** → Rule `transport`, docs/Transport.md ·

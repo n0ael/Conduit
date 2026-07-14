@@ -2,6 +2,8 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include "Capture/LevelMeter.h"   // Ballistik-Defaults + Klemm-Bereiche
+
 namespace conduit
 {
 
@@ -11,14 +13,18 @@ namespace conduit
     (eigene juce::PropertiesFile "Conduit/Meter.settings", überlebt Preset-
     Load, kein Undo — gleiche Trennung wie ChannelNames/CaptureSettings).
 
-    Aktuell: Clip-Reset-Verhalten.
+    Clip-Reset-Verhalten:
       - manual    → Clip-Latch bleibt bis Klick auf das Clip-Feld
       - automatic → Latch verlischt nach autoClearSeconds von selbst
                     (Klick funktioniert zusätzlich weiterhin)
 
+    Ballistik (User-Feintuning 14.07.2026, Metering-Tab): RMS-Fenster,
+    Peak-Release und Peak-Hold-Zeit — app-weit für ALLE Pegelanzeigen
+    (LevelMeter::setGlobalBallistics), persönlicher Geschmack.
+
     Threading: Setter/Getter auf dem Message Thread. UI-Benachrichtigung über
     juce::ChangeBroadcaster; der EngineProcessor lauscht und speist die
-    LevelMeter (setClipHoldSeconds).
+    LevelMeter (setClipHoldSeconds + setGlobalBallistics).
 */
 class MeterSettings : public juce::ChangeBroadcaster
 {
@@ -44,11 +50,31 @@ public:
         return clipResetMode == ClipResetMode::automatic ? autoClearSeconds : 0.0f;
     }
 
+    //==========================================================================
+    // Ballistik (Metering-Tab) — geklemmt auf die UI-Bereiche unten.
+
+    static constexpr float minRmsWindowSeconds = 0.05f,  maxRmsWindowSeconds = 1.0f;
+    static constexpr float minPeakReleaseSeconds = 0.2f, maxPeakReleaseSeconds = 3.0f;
+    static constexpr float minPeakHoldSeconds = 0.5f,    maxPeakHoldSeconds = 5.0f;
+
+    [[nodiscard]] float getRmsWindowSeconds() const noexcept { return rmsWindowSeconds; }
+    void setRmsWindowSeconds (float seconds);
+
+    [[nodiscard]] float getPeakReleaseSeconds() const noexcept { return peakReleaseSeconds; }
+    void setPeakReleaseSeconds (float seconds);
+
+    [[nodiscard]] float getPeakHoldSeconds() const noexcept { return peakHoldSeconds; }
+    void setPeakHoldSeconds (float seconds);
+
 private:
     void loadFromFile();
+    void storeFloat (const char* key, float value);
 
     juce::ApplicationProperties applicationProperties;
     ClipResetMode clipResetMode = defaultMode;
+    float rmsWindowSeconds   = LevelMeter::defaultRmsWindowSeconds;
+    float peakReleaseSeconds = LevelMeter::defaultPeakReleaseSeconds;
+    float peakHoldSeconds    = LevelMeter::defaultPeakHoldSeconds;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MeterSettings)
 };

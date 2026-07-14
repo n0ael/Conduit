@@ -316,12 +316,12 @@ TouchLiveMixerView::TouchLiveMixerView (TouchLiveClient& clientToUse, LiveSetMod
     addAndMakeVisible (viewport);
 
     rebuildStrips();
-    startTimerHz (30);   // Meter-Refresh (CLAUDE.md 10); ohne Sicht kostenlos
+    // Meter-Refresh: UiFramePacer (nativ per VBlank, global gedrosselt);
+    // ohne sichtbare Page ist der Tick ein No-op (isShowing-Guard).
 }
 
 TouchLiveMixerView::~TouchLiveMixerView()
 {
-    stopTimer();
     settings.removeChangeListener (this);
     modelState.removeListener (this);
     cancelPendingUpdate();
@@ -392,7 +392,7 @@ void TouchLiveMixerView::flushPendingRebuild()
     handleUpdateNowIfNeeded();
 }
 
-void TouchLiveMixerView::timerCallback()
+void TouchLiveMixerView::refreshTick()
 {
     if (! isShowing())
         return;   // Page nicht sichtbar → kein Meter-Aufwand

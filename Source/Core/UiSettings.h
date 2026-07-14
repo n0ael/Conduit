@@ -19,6 +19,12 @@ namespace conduit
       - softKeyboard: On-Screen-Tastatur des Browser-Suchfelds (M5) —
                    Plattform-Default: AN auf Linux (Kiosk/Touch), AUS auf
                    Desktop (Windows/macOS); zur Laufzeit umschaltbar
+      - uiFpsLimit: globale Obergrenze der UI-Refresh-Rate (User-Regel
+                   14.07.2026: Anzeige läuft nativ per VBlank, gedeckelt) —
+                   120 = Nativ (max 120, VBlank liefert ohnehin höchstens
+                   die Monitor-Rate), Drossel-Modi 60 und 30. Angewendet
+                   über uiframe::setFpsLimit (UiFramePacer) durch den
+                   EngineEditor als ChangeListener.
 
     WICHTIG: diese Klasse SPEICHERT nur und broadcastet Änderungen — sie ruft
     nie juce::Desktop::setGlobalScaleFactor und fasst keine Fonts an. Die
@@ -67,6 +73,13 @@ public:
     [[nodiscard]] bool isSoftKeyboardEnabled() const noexcept { return softKeyboardEnabled; }
     void setSoftKeyboardEnabled (bool enabled);
 
+    static constexpr int defaultUiFpsLimit = 120;   // = Nativ (max 120)
+
+    /** 120 (Nativ, max) | 60 | 30 — andere Werte werden auf den nächsten
+        erlaubten Modus geklemmt. */
+    [[nodiscard]] int getUiFpsLimit() const noexcept { return uiFpsLimit; }
+    void setUiFpsLimit (int limitFps);
+
 private:
     void loadFromFile();
 
@@ -76,6 +89,7 @@ private:
     bool  devModeEnabled  = false;
     bool  dspMeterEnabled = true;
     bool  softKeyboardEnabled = defaultSoftKeyboardEnabled;
+    int   uiFpsLimit = defaultUiFpsLimit;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UiSettings)
 };

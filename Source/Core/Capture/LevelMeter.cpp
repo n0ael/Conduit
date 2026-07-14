@@ -11,8 +11,6 @@ void LevelMeter::prepare (double newSampleRate, int numChannels)
     sampleRate = newSampleRate > 0.0 ? newSampleRate : 48000.0;
     activeChannels = juce::jlimit (0, MAX_CAPTURE_CHANNELS, numChannels);
 
-    rmsCoeff = 1.0f - static_cast<float> (std::exp (-1.0 / (rmsWindowSeconds * sampleRate)));
-
     for (std::size_t ch = 0; ch < meanSquareState.size(); ++ch)
     {
         meanSquareState[ch] = 0.0f;
@@ -40,17 +38,26 @@ void LevelMeter::process (const juce::AudioBuffer<float>& buffer, int numChannel
     const auto channels = juce::jmin (numChannels, buffer.getNumChannels(), activeChannels);
 
     // Block-Ballistik einmal pro Block — std::exp ist RT-sicher (kein Lock,
-    // keine Allokation); die Blocklänge darf zwischen Callbacks variieren
+    // keine Allokation); die Blocklänge darf zwischen Callbacks variieren.
+    // Die Zeitkonstanten kommen aus den klassenweiten Atomics (Metering-Tab)
+    // — pro Block gelesen, Änderungen wirken sofort auf alle Instanzen.
+    const auto rmsWindowNow   = static_cast<double> (getGlobalRmsWindowSeconds());
+    const auto peakReleaseNow = static_cast<double> (getGlobalPeakReleaseSeconds());
+    const auto peakHoldNow    = static_cast<double> (getGlobalPeakHoldSeconds());
+
     const auto blockSeconds = static_cast<double> (numSamples) / sampleRate;
-    const auto peakDecay = static_cast<float> (std::exp (-blockSeconds / peakReleaseSeconds));
+    const auto rmsCoeffBlock = 1.0f - static_cast<float> (std::exp (-1.0 / (rmsWindowNow * sampleRate)));
+    const auto peakDecay = static_cast<float> (std::exp (-blockSeconds / peakReleaseNow));
     const auto holdDecay = static_cast<float> (std::exp (-blockSeconds / peakHoldReleaseSeconds));
 
     for (int ch = 0; ch < channels; ++ch)
-        meterOneChannel (ch, buffer.getReadPointer (ch), numSamples, peakDecay, holdDecay, blockSeconds);
+        meterOneChannel (ch, buffer.getReadPointer (ch), numSamples,
+                         rmsCoeffBlock, peakDecay, holdDecay, peakHoldNow, blockSeconds);
 }
 
 void LevelMeter::meterOneChannel (int channel, const float* data, int numSamples,
-                                  float peakDecay, float holdDecay, double blockSeconds) noexcept
+                                  float rmsCoeffBlock, float peakDecay, float holdDecay,
+                                  double peakHoldSecondsNow, double blockSeconds) noexcept
 {
     const auto idx = static_cast<std::size_t> (channel);
 
@@ -63,7 +70,7 @@ void LevelMeter::meterOneChannel (int channel, const float* data, int numSamples
         const float x = data[i];
         blockPeak   = juce::jmax (blockPeak, std::abs (x));
         blockSumSq += x * x;
-        meanSquare += rmsCoeff * (x * x - meanSquare);
+        meanSquare += rmsCoeffBlock * (x * x - meanSquare);
     }
 
     // Warm-Start pro Kanal: der erste Block seedet mit dem Block-Mittel statt
@@ -85,7 +92,7 @@ void LevelMeter::meterOneChannel (int channel, const float* data, int numSamples
     if (blockPeak >= peakHoldState[idx])
     {
         peakHoldState[idx] = blockPeak;
-        holdRemaining[idx] = peakHoldSeconds;
+        holdRemaining[idx] = peakHoldSecondsNow;
     }
     else
     {

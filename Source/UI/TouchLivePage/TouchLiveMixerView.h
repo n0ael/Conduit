@@ -11,6 +11,7 @@
 #include "TouchLive/TouchLiveSettings.h"
 #include "TouchLiveFader.h"
 #include "UI/PushTiles.h"
+#include "UI/UiFramePacer.h"
 
 namespace conduit
 {
@@ -97,14 +98,14 @@ private:
     Kanalbreite kommt aus TouchLiveSettings (User: „wie viele Tracks
     parallel"), Änderung wirkt sofort.
 
-    Meter (M2): 30-Hz-Timer liest den TouchLiveMeterBus pro Frame-Zähler
-    (nie cachen) und füttert die Fader-Meter; ohne sichtbare Page kostenlos.
+    Meter (M2): Frame-Tick (UiFramePacer: nativ, global gedrosselt) liest
+    den TouchLiveMeterBus pro Frame-Zähler (nie cachen) und füttert die
+    Fader-Meter; ohne sichtbare Page ist der Tick ein No-op.
 */
 class TouchLiveMixerView final : public juce::Component,
                                  private juce::ValueTree::Listener,
                                  private juce::ChangeListener,
-                                 private juce::AsyncUpdater,
-                                 private juce::Timer
+                                 private juce::AsyncUpdater
 {
 public:
     TouchLiveMixerView (TouchLiveClient& clientToUse, LiveSetModel& modelToUse,
@@ -134,7 +135,7 @@ private:
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int index) override;
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
     void handleAsyncUpdate() override;
-    void timerCallback() override;
+    void refreshTick();
 
     void rebuildStrips();
     void layoutStrips();
@@ -156,6 +157,9 @@ private:
     juce::Component stripRow;   // Inhalt des Viewports
     std::vector<std::unique_ptr<TouchLiveChannelStrip>> strips;
     std::unique_ptr<TouchLiveChannelStrip> masterStrip;
+
+    // Letzter Member: tickt erst nach vollständiger Konstruktion.
+    UiFramePacer framePacer { this, [this] { refreshTick(); } };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TouchLiveMixerView)
 };

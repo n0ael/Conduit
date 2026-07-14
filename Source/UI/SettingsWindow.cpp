@@ -14,7 +14,9 @@ namespace
     const juce::Colour tabBackground { 0xff23262b };
 
     //==========================================================================
-    /** Metering-Tab: Clip-Reset-Modus (bindet MeterSettings). */
+    /** Metering-Tab: Clip-Reset-Modus + Ballistik (bindet MeterSettings).
+        Die Ballistik wirkt LIVE beim Ziehen (User-Feintuning 14.07.2026)
+        — app-weit für alle Pegelanzeigen. */
     class MeterSettingsTab final : public juce::Component
     {
     public:
@@ -39,6 +41,34 @@ namespace
                                                : MeterSettings::ClipResetMode::manual);
             };
             addAndMakeVisible (modeBox);
+
+            ballisticsHeader.setText ("Ballistik", juce::dontSendNotification);
+            ballisticsHeader.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
+            addAndMakeVisible (ballisticsHeader);
+
+            initBallisticSlider (rmsWindowSlider, rmsWindowLabel,
+                                 juce::String::fromUTF8 ("RMS-Tr\xc3\xa4gheit"), " ms",
+                                 MeterSettings::minRmsWindowSeconds * 1000.0,
+                                 MeterSettings::maxRmsWindowSeconds * 1000.0, 10.0,
+                                 settings.getRmsWindowSeconds() * 1000.0f,
+                                 [this] (double ms)
+                                 { settings.setRmsWindowSeconds ((float) (ms / 1000.0)); });
+
+            initBallisticSlider (peakReleaseSlider, peakReleaseLabel,
+                                 "Peak-Release", " s",
+                                 MeterSettings::minPeakReleaseSeconds,
+                                 MeterSettings::maxPeakReleaseSeconds, 0.05,
+                                 settings.getPeakReleaseSeconds(),
+                                 [this] (double s)
+                                 { settings.setPeakReleaseSeconds ((float) s); });
+
+            initBallisticSlider (peakHoldSlider, peakHoldLabel,
+                                 "Peak-Hold", " s",
+                                 MeterSettings::minPeakHoldSeconds,
+                                 MeterSettings::maxPeakHoldSeconds, 0.1,
+                                 settings.getPeakHoldSeconds(),
+                                 [this] (double s)
+                                 { settings.setPeakHoldSeconds ((float) s); });
         }
 
         void resized() override
@@ -50,6 +80,14 @@ namespace
             auto row = area.removeFromTop (28);
             label.setBounds (row.removeFromLeft (110));
             modeBox.setBounds (row);
+
+            area.removeFromTop (16);
+            ballisticsHeader.setBounds (area.removeFromTop (28));
+            area.removeFromTop (8);
+
+            layoutRow (area, rmsWindowLabel, rmsWindowSlider);
+            layoutRow (area, peakReleaseLabel, peakReleaseSlider);
+            layoutRow (area, peakHoldLabel, peakHoldSlider);
         }
 
     private:
@@ -60,9 +98,40 @@ namespace
             return mode == MeterSettings::ClipResetMode::automatic ? automaticId : manualId;
         }
 
+        void initBallisticSlider (juce::Slider& slider, juce::Label& sliderLabel,
+                                  const juce::String& text, const juce::String& suffix,
+                                  double min, double max, double step, double value,
+                                  std::function<void (double)> apply)
+        {
+            sliderLabel.setText (text, juce::dontSendNotification);
+            addAndMakeVisible (sliderLabel);
+
+            slider.setRange (min, max, step);
+            slider.setTextValueSuffix (suffix);
+            slider.setValue (value, juce::dontSendNotification);
+            slider.onValueChange = [&slider, apply = std::move (apply)]
+            { apply (slider.getValue()); };
+            addAndMakeVisible (slider);
+        }
+
+        static void layoutRow (juce::Rectangle<int>& area, juce::Label& rowLabel,
+                               juce::Component& control)
+        {
+            auto row = area.removeFromTop (30);
+            rowLabel.setBounds (row.removeFromLeft (110));
+            control.setBounds (row.reduced (0, 2));
+            area.removeFromTop (6);
+        }
+
         MeterSettings& settings;
         juce::Label header, label;
         juce::ComboBox modeBox;
+
+        juce::Label ballisticsHeader;
+        juce::Label rmsWindowLabel, peakReleaseLabel, peakHoldLabel;
+        juce::Slider rmsWindowSlider   { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
+        juce::Slider peakReleaseSlider { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
+        juce::Slider peakHoldSlider    { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MeterSettingsTab)
     };

@@ -24,7 +24,7 @@ StepGridDisplay::StepGridDisplay (juce::ValueTree nodeTreeToBind, GraphManager& 
       nodeUuid (nodeTree.getProperty (id::nodeId).toString())
 {
     nodeTree.addListener (this);
-    startTimerHz (30);  // Playhead-Refresh (CLAUDE.md 10)
+    // Playhead-Refresh: UiFramePacer (nativ per VBlank, global gedrosselt).
 }
 
 StepGridDisplay::~StepGridDisplay()
@@ -34,11 +34,11 @@ StepGridDisplay::~StepGridDisplay()
 
 void StepGridDisplay::stopUpdates()
 {
-    stopTimer();
+    framePacer.stop();
 }
 
 //==============================================================================
-void StepGridDisplay::timerCallback()
+void StepGridDisplay::refreshTick()
 {
     // Transienter Lookup statt gehaltenem Pointer (5.3)
     if (auto* sequencer = dynamic_cast<StepSequencerModule*> (graphManager.getModuleFor (nodeUuid)))

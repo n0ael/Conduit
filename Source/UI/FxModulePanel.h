@@ -44,8 +44,7 @@ namespace conduit
     ParameterPanel); externe Änderungen kommen über den ValueTree-Listener.
 */
 class FxModulePanel final : public juce::Component,
-                            private juce::ValueTree::Listener,
-                            private juce::Timer
+                            private juce::ValueTree::Listener
 {
 public:
     FxModulePanel (juce::ValueTree nodeTreeToBind, GraphManager& graphManagerToUse);
@@ -217,7 +216,9 @@ public:
 private:
     //==========================================================================
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override;
-    void timerCallback() override;
+
+    /** Frame-Tick (UiFramePacer): Send-LED-Status + M5c-Modulations-Marker. */
+    void refreshTick();
 
     void buildColumns();
     void rebuildColumns();   // clear + build + resized + onLayoutChanged
@@ -242,6 +243,9 @@ private:
     // im eigenen onClick (Muster TransportBar: Destruktion deferred). Wird
     // asynchron bzw. beim nächsten Rebuild geleert.
     std::vector<std::unique_ptr<ParameterColumn>> retiredColumns;
+
+    // Letzter Member: tickt erst nach vollständiger Konstruktion.
+    UiFramePacer framePacer { this, [this] { refreshTick(); } };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FxModulePanel)
 };

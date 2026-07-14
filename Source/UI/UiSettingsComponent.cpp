@@ -35,6 +35,19 @@ UiSettingsComponent::UiSettingsComponent (UiSettings& settingsToUse)
     fontScaleSlider.onValueChange = [this] { applyFontScale(); };
     addAndMakeVisible (fontScaleSlider);
 
+    // UI-Framerate (User-Regel 14.07.2026): Anzeige läuft nativ per VBlank,
+    // hier nur die globale Obergrenze — Item-Ids = fps (30/60/120).
+    addAndMakeVisible (fpsLimitLabel);
+    fpsLimitCombo.addItem ("Nativ (max 120 fps)", 120);
+    fpsLimitCombo.addItem ("60 fps", 60);
+    fpsLimitCombo.addItem ("30 fps", 30);
+    fpsLimitCombo.onChange = [this]
+    {
+        if (fpsLimitCombo.getSelectedId() > 0)
+            settings.setUiFpsLimit (fpsLimitCombo.getSelectedId());
+    };
+    addAndMakeVisible (fpsLimitCombo);
+
     devModeToggle.setButtonText (juce::String::fromUTF8 (
         "Development-Modus (DEV-Buttons in den Modul-Köpfen)"));
     devModeToggle.onClick = [this] { settings.setDevModeEnabled (devModeToggle.getToggleState()); };
@@ -82,6 +95,7 @@ void UiSettingsComponent::syncControls()
                             juce::dontSendNotification);
     fontScaleSlider.setValue (static_cast<double> (settings.getFontScale()) * 100.0,
                               juce::dontSendNotification);
+    fpsLimitCombo.setSelectedId (settings.getUiFpsLimit(), juce::dontSendNotification);
     devModeToggle.setToggleState (settings.isDevModeEnabled(), juce::dontSendNotification);
     dspMeterToggle.setToggleState (settings.isDspMeterEnabled(), juce::dontSendNotification);
     softKeyboardToggle.setToggleState (settings.isSoftKeyboardEnabled(),
@@ -107,6 +121,7 @@ void UiSettingsComponent::resized()
 
     layoutRow (area, uiScaleLabel, uiScaleSlider);
     layoutRow (area, fontScaleLabel, fontScaleSlider);
+    layoutRow (area, fpsLimitLabel, fpsLimitCombo);
 
     devModeToggle.setBounds (area.removeFromTop (30));
     area.removeFromTop (6);

@@ -21,13 +21,13 @@ namespace
 LevelMeterBar::LevelMeterBar (LevelMeter* meterToUse, int channelToShow)
     : meter (meterToUse), channel (channelToShow)
 {
-    if (meter != nullptr)
-        startTimerHz (30);  // Meter-Refresh (CLAUDE.md 10)
+    // Meter-Refresh: UiFramePacer (nativ per VBlank, global gedrosselt);
+    // meter == nullptr (Tests) -> der Tick ist ein No-op.
 }
 
 void LevelMeterBar::stopUpdates()
 {
-    stopTimer();
+    framePacer.stop();
 }
 
 //==============================================================================
@@ -41,22 +41,24 @@ float LevelMeterBar::normFromLinear (float linearGain) noexcept
 }
 
 //==============================================================================
-void LevelMeterBar::timerCallback()
+void LevelMeterBar::refreshTick()
 {
     if (meter == nullptr)
         return;
 
-    const auto rms  = meter->getRms (channel);
-    const auto peak = meter->getPeak (channel);
-    const auto hold = meter->getPeakHold (channel);
+    // Vergleich im ANZEIGE-Maßstab (dB-Norm) — s. Member-Kommentar.
+    const auto rmsNorm  = normFromLinear (meter->getRms (channel));
+    const auto peakNorm = normFromLinear (meter->getPeak (channel));
+    const auto holdNorm = normFromLinear (meter->getPeakHold (channel));
     const auto clip = meter->isClipped (channel);
 
-    if (std::abs (rms - lastRms) > changeEpsilon
-        || std::abs (peak - lastPeak) > changeEpsilon
-        || std::abs (hold - lastHold) > changeEpsilon
+    if (std::abs (rmsNorm - lastRmsNorm) > changeEpsilon
+        || std::abs (peakNorm - lastPeakNorm) > changeEpsilon
+        || std::abs (holdNorm - lastHoldNorm) > changeEpsilon
         || clip != lastClipped)
     {
-        lastRms = rms; lastPeak = peak; lastHold = hold; lastClipped = clip;
+        lastRmsNorm = rmsNorm; lastPeakNorm = peakNorm; lastHoldNorm = holdNorm;
+        lastClipped = clip;
         repaint();
     }
 }
@@ -73,9 +75,18 @@ void LevelMeterBar::paint (juce::Graphics& g)
     const auto usable = bounds.reduced (1.0f);
     const auto w = usable.getWidth();
 
-    const auto rmsNorm  = normFromLinear (lastRms);
-    const auto peakNorm = normFromLinear (lastPeak);
-    const auto holdNorm = normFromLinear (lastHold);
+    const auto rmsNorm  = lastRmsNorm;
+    const auto peakNorm = lastPeakNorm;
+    const auto holdNorm = lastHoldNorm;
+
+    // Peak-Balken (schnelle Ballistik) UNTER der RMS-Füllung, halb so hell
+    // (User-Feintuning 14.07.2026: Balken statt Marker-Linie).
+    if (peakNorm > 0.0f)
+    {
+        auto fill = usable.withWidth (w * peakNorm);
+        g.setColour (levelColour (peakNorm).withAlpha (0.4f));
+        g.fillRoundedRectangle (fill, 2.0f);
+    }
 
     // RMS-Füllung (stetiger Balken), Farbe nach Pegel
     if (rmsNorm > 0.0f)
@@ -83,14 +94,6 @@ void LevelMeterBar::paint (juce::Graphics& g)
         auto fill = usable.withWidth (w * rmsNorm);
         g.setColour (levelColour (rmsNorm).withAlpha (0.85f));
         g.fillRoundedRectangle (fill, 2.0f);
-    }
-
-    // Peak-Marker-Linie (schnelle Ballistik)
-    if (peakNorm > 0.0f)
-    {
-        const auto x = usable.getX() + w * peakNorm;
-        g.setColour (levelColour (peakNorm));
-        g.fillRect (juce::Rectangle<float> (x - 1.0f, usable.getY(), 2.0f, usable.getHeight()));
     }
 
     // Peak-Hold-Marker (dünn, heller)

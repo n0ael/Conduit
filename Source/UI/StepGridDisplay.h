@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Core/GraphManager.h"
+#include "UiFramePacer.h"
 
 namespace conduit
 {
@@ -16,14 +17,13 @@ namespace conduit
     Parameter-Sync des GraphManager spiegelt aufs Audio-Atomic; OSC-/Undo-
     Änderungen kommen über den ValueTree-Listener zurück ins Bild.
 
-    Playhead: 30-fps-Timer + transienter getModuleFor-Lookup (Muster
-    ScopeDisplay) — im 4×16-Modus leuchtet die ganze Spalte, in den
-    verketteten Modi die einzelne Zelle. Steps jenseits der eingestellten
-    length werden abgedunkelt.
+    Playhead: Frame-Tick (UiFramePacer: nativ, global gedrosselt) +
+    transienter getModuleFor-Lookup (Muster ScopeDisplay) — im 4×16-Modus
+    leuchtet die ganze Spalte, in den verketteten Modi die einzelne Zelle.
+    Steps jenseits der eingestellten length werden abgedunkelt.
 */
 class StepGridDisplay final : public juce::Component,
-                              private juce::ValueTree::Listener,
-                              private juce::Timer
+                              private juce::ValueTree::Listener
 {
 public:
     StepGridDisplay (juce::ValueTree nodeTreeToBind, GraphManager& graphManagerToUse);
@@ -37,7 +37,7 @@ public:
     void mouseDrag (const juce::MouseEvent& event) override;
 
 private:
-    void timerCallback() override;
+    void refreshTick();
     void valueTreePropertyChanged (juce::ValueTree& tree, const juce::Identifier& property) override;
 
     void editCellAt (juce::Point<int> position);
@@ -50,6 +50,9 @@ private:
     const juce::String nodeUuid;
 
     int highlightedCell = -1;   // row·16+col, -1 = kein Playhead bekannt
+
+    // Letzter Member: tickt erst nach vollständiger Konstruktion.
+    UiFramePacer framePacer { this, [this] { refreshTick(); } };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StepGridDisplay)
 };

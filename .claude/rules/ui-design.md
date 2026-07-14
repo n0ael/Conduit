@@ -28,9 +28,17 @@ paths:
 - Touch-first: `setAcceptsTouchEvents(true)`, minimale Touch-Target-Größe
   44px, vollständig Mouse/Keyboard-kompatibel — kein Touch-only Code.
 - Jedes UI-Element mit Touch-State reagiert in ≤ 1 Frame visuell; keine
-  blockierenden Operationen im `paint()`-Callback; Animationen via
-  `juce::VBlankAttachment`; Meter/Scope-Refresh 30 fps (Audio schreibt
-  lock-free Ringbuffer, UI liest).
+  blockierenden Operationen im `paint()`-Callback.
+- **UI-Framerate (User-Regel 14.07.2026, ersetzt die alte 30-fps-Regel):**
+  Anzeige-Refreshes (Meter, Scopes, Playheads, Modulations-Marker) laufen
+  NATIV mit der Monitor-Rate über `UiFramePacer`
+  (`Source/UI/UiFramePacer.h` = VBlankAttachment + globales Limit aus
+  `UiSettings::uiFpsLimit`: Default 120 „Nativ", Drossel-Modi 60/30 im
+  Oberfläche-Tab/Dev-Panel). KEINE festen `startTimerHz`-Refreshes mehr;
+  dt-basierte Physik-Ticks (Federn/Gravity) bleiben direkte
+  `VBlankAttachment`s; niederfrequentes Status-Polling (LED-Badges ≤ 10 Hz,
+  seltene Wechsel) bleibt als Timer erlaubt. Audio schreibt weiterhin
+  lock-free Ringbuffer, die UI liest pro Frame-Tick.
 - UI-Components binden NUR an den ValueTree-Subtree, nie an den Processor
   (Zombie-UI-Schutz, CLAUDE.md §5 / docs/PatchEngine.md 5.3);
   `stopUpdates()`-Hook für Phase 1.

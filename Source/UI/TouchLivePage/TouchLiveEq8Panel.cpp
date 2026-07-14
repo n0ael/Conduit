@@ -53,15 +53,13 @@ TouchLiveEq8Panel::TouchLiveEq8Panel (TouchLiveClient& clientToUse,
       spectrumTap (spectrumTapToUse)
 {
     // Alles läuft über Gesten (§10j) — keine Footer-Bedienelemente.
-    // Der Spektrum-Timer repainted nur bei neuen Analyse-Frames.
-    if (spectrumTap != nullptr)
-        startTimer (spectrumTimerId, 33);
+    // Spektrum-Repaint: UiFramePacer (nativ, global gedrosselt); nur bei
+    // neuen Analyse-Frames (Revision) wird tatsächlich gezeichnet.
 }
 
 TouchLiveEq8Panel::~TouchLiveEq8Panel()
 {
     stopTimer (longPressTimerId);
-    stopTimer (spectrumTimerId);
 }
 
 //==============================================================================
@@ -415,11 +413,13 @@ void TouchLiveEq8Panel::timerCallback (int timerId)
     {
         stopTimer (longPressTimerId);
         triggerLongPress();
-        return;
     }
+}
 
+void TouchLiveEq8Panel::spectrumTick()
+{
     // Spektrum: nur repainten, wenn ein neuer Analyse-Frame vorliegt
-    if (timerId == spectrumTimerId && spectrumTap != nullptr && isShowing())
+    if (spectrumTap != nullptr && isShowing())
     {
         const auto revisionNow = spectrumTap->getRevision();
 

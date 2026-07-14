@@ -52,8 +52,8 @@ GainFaderMeter::GainFaderMeter (juce::ValueTree nodeTreeToBind, juce::String gai
             p.setProperty (id::paramValue, slider.getValue(), nullptr);
     };
     addAndMakeVisible (slider);
-
-    startTimerHz (30);  // Meter-Refresh (CLAUDE.md 10)
+    // Meter-Refresh: UiFramePacer (nativ per VBlank, global gedrosselt) —
+    // Member-Initialisierung, kein Timer mehr (User-Regel 14.07.2026).
 }
 
 GainFaderMeter::~GainFaderMeter()
@@ -63,7 +63,7 @@ GainFaderMeter::~GainFaderMeter()
 
 void GainFaderMeter::stopUpdates()
 {
-    stopTimer();
+    framePacer.stop();
     nodeTree.removeListener (this);
     setInterceptsMouseClicks (false, false);
     slider.setEnabled (false);
@@ -96,37 +96,49 @@ void GainFaderMeter::valueTreePropertyChanged (juce::ValueTree& tree, const juce
     slider.setValue ((double) tree.getProperty (id::paramValue), juce::dontSendNotification);
 }
 
-void GainFaderMeter::timerCallback()
+void GainFaderMeter::refreshTick()
 {
     const auto* meter = resolveMeter();
 
     if (meter == nullptr)
         return;
 
+    // Kumulierte Change-Detection (Muster LevelMeterBar): die Snapshots
+    // werden NUR beim Repaint fortgeschrieben — sonst verschluckt die
+    // Epsilon-Schwelle bei hoher Framerate langsame, weiche Fahrten
+    // (pro-Frame-Delta < Epsilon, kumuliert aber gross; User-Feldtest
+    // 14.07.2026: Modul-Meter wirkten bei nativer Rate stufig).
+    // Vergleich im ANZEIGE-Maßstab (dB-Norm) — s. Member-Kommentar.
     bool changed = false;
+    float rmsNorm[2], peakNorm[2], holdNorm[2];
 
     for (int channel = 0; channel < 2; ++channel)
     {
-        const auto rms  = meter->getRms (channel);
-        const auto peak = meter->getPeak (channel);
-        const auto hold = meter->getPeakHold (channel);
+        rmsNorm[channel]  = LevelMeterBar::normFromLinear (meter->getRms (channel));
+        peakNorm[channel] = LevelMeterBar::normFromLinear (meter->getPeak (channel));
+        holdNorm[channel] = LevelMeterBar::normFromLinear (meter->getPeakHold (channel));
 
         changed = changed
-               || std::abs (rms - lastRms[channel])   > changeEpsilon
-               || std::abs (peak - lastPeak[channel]) > changeEpsilon
-               || std::abs (hold - lastHold[channel]) > changeEpsilon;
-
-        lastRms[channel]  = rms;
-        lastPeak[channel] = peak;
-        lastHold[channel] = hold;
+               || std::abs (rmsNorm[channel]  - lastRmsNorm[channel])  > changeEpsilon
+               || std::abs (peakNorm[channel] - lastPeakNorm[channel]) > changeEpsilon
+               || std::abs (holdNorm[channel] - lastHoldNorm[channel]) > changeEpsilon;
     }
 
     const auto clip = meter->isClipped (0) || meter->isClipped (1);
     changed = changed || clip != lastClipped;
-    lastClipped = clip;
 
-    if (changed)
-        repaint();
+    if (! changed)
+        return;
+
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        lastRmsNorm[channel]  = rmsNorm[channel];
+        lastPeakNorm[channel] = peakNorm[channel];
+        lastHoldNorm[channel] = holdNorm[channel];
+    }
+
+    lastClipped = clip;
+    repaint();
 }
 
 //==============================================================================
@@ -180,22 +192,24 @@ void GainFaderMeter::paint (juce::Graphics& g)
         g.fillRoundedRectangle (bar, 2.0f);
 
         const auto usable   = bar.reduced (1.0f);
-        const auto rmsNorm  = LevelMeterBar::normFromLinear (lastRms[channel]);
-        const auto peakNorm = LevelMeterBar::normFromLinear (lastPeak[channel]);
-        const auto holdNorm = LevelMeterBar::normFromLinear (lastHold[channel]);
+        const auto rmsNorm  = lastRmsNorm[channel];
+        const auto peakNorm = lastPeakNorm[channel];
+        const auto holdNorm = lastHoldNorm[channel];
+
+        // Peak-Balken UNTER der RMS-Füllung, halb so hell (User-Feintuning
+        // 14.07.2026: Balken statt Marker-Linie).
+        if (peakNorm > 0.0f)
+        {
+            const auto fillHeight = usable.getHeight() * peakNorm;
+            g.setColour (levelColour (peakNorm).withAlpha (0.4f));
+            g.fillRoundedRectangle (usable.withTop (usable.getBottom() - fillHeight), 2.0f);
+        }
 
         if (rmsNorm > 0.0f)
         {
             const auto fillHeight = usable.getHeight() * rmsNorm;
             g.setColour (levelColour (rmsNorm).withAlpha (0.85f));
             g.fillRoundedRectangle (usable.withTop (usable.getBottom() - fillHeight), 2.0f);
-        }
-
-        if (peakNorm > 0.0f)
-        {
-            const auto peakY = usable.getBottom() - usable.getHeight() * peakNorm;
-            g.setColour (levelColour (peakNorm));
-            g.fillRect (juce::Rectangle<float> (usable.getX(), peakY - 1.0f, usable.getWidth(), 2.0f));
         }
 
         if (holdNorm > peakNorm)

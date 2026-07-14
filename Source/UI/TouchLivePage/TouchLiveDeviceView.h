@@ -13,6 +13,7 @@
 #include "TouchLive/TouchLiveSettings.h"
 #include "TouchLiveBespokePanel.h"
 #include "UI/PushTiles.h"
+#include "UI/UiFramePacer.h"
 
 namespace conduit
 {
@@ -52,8 +53,7 @@ namespace conduit
 */
 class TouchLiveDeviceView final : public juce::Component,
                                   private juce::ValueTree::Listener,
-                                  private juce::AsyncUpdater,
-                                  private juce::Timer
+                                  private juce::AsyncUpdater
 {
 public:
     /** spectrumTap darf nullptr sein (Tests) — dann keine SPEC-Kachel. */
@@ -124,7 +124,7 @@ private:
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int index) override;
     void handleAsyncUpdate() override;
-    void timerCallback() override;
+    void refreshTick();
 
     void rebuild();
     void rebuildParameterBank();
@@ -172,6 +172,9 @@ private:
     juce::String selectedTrack, selectedDevice;
     int bank = 0;
     bool deviceActive = true;
+
+    // Letzter Member: tickt erst nach vollständiger Konstruktion.
+    UiFramePacer framePacer { this, [this] { refreshTick(); } };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TouchLiveDeviceView)
 };

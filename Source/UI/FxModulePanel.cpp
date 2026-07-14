@@ -84,7 +84,9 @@ FxModulePanel::FxModulePanel (juce::ValueTree nodeTreeToBind, GraphManager& grap
     addChildComponent (saveDefaultsButton);   // sichtbar nur im Dev-Modus
 
     buildColumns();
-    startTimerHz (10);  // LED-Statuswechsel sind selten (Muster StatusBadge)
+    // LED-Status + Modulations-Marker: UiFramePacer (nativ per VBlank,
+    // global gedrosselt) — die 10-Hz-Stufigkeit des frueheren Timers war
+    // an den M5c-Markern sichtbar (User-Fund 14.07.2026).
 }
 
 FxModulePanel::~FxModulePanel()
@@ -94,7 +96,7 @@ FxModulePanel::~FxModulePanel()
 
 void FxModulePanel::stopUpdates()
 {
-    stopTimer();
+    framePacer.stop();
     nodeTree.removeListener (this);
     setInterceptsMouseClicks (false, false);
 
@@ -530,7 +532,7 @@ const PortComponent* FxModulePanel::getCvPort (int columnIndex) const noexcept
 }
 
 //==============================================================================
-void FxModulePanel::timerCallback()
+void FxModulePanel::refreshTick()
 {
     refreshSendStatusNow();
 

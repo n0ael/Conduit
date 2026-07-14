@@ -18,11 +18,19 @@ namespace conduit
     Pegel.
 
     Pro Kanal:
-      - RMS über ein ~150-ms-Fenster (One-Pole auf dem Signalquadrat) — der
-        stetige, hellere Balken.
-      - Peak mit sofortigem Attack und ~1,5-s-Release-Ballistik.
-      - Peak-Hold: hält das Maximum ~1,5 s, dann Abfall (Peak-Marker).
+      - RMS über ein einstellbares Fenster (One-Pole auf dem Signalquadrat,
+        Default ~360 ms) — der stetige, hellere Balken.
+      - Peak mit sofortigem Attack und einstellbarem Release (Default
+        ~0,45 s) — der halbhelle Balken unter dem RMS.
+      - Peak-Hold: hält das Maximum (einstellbar, Default ~1,6 s), dann
+        Abfall (dünner Marker).
       - Clip-Latch: gesetzt bei |x| >= 1.0 (0 dBFS), bleibt bis resetClip().
+
+    Ballistik ist KLASSENWEIT einstellbar (User-Feintuning 14.07.2026,
+    Metering-Tab): setGlobalBallistics() speist statische Atomics, die ALLE
+    Instanzen (Input/Output, FX-Chassis, Looper-Tracks) pro Block relaxed
+    lesen — persönlicher Geschmack gilt app-weit, kein Verdrahten jeder
+    einzelnen Meter-Instanz nötig.
 
     Threading: prepare() auf dem Message Thread (Audio steht), process() auf
     dem Audio Thread — allocation-free, lock-free. Getter/resetClip von
@@ -57,6 +65,39 @@ public:
     [[nodiscard]] int getNumActiveChannels() const noexcept { return activeChannels; }
 
     //==========================================================================
+    // Klassenweite Ballistik (Metering-Tab, MeterSettings → EngineProcessor).
+    // Setter [Message Thread], Reads [Audio Thread, relaxed pro Block].
+
+    // User-Defaults 14.07.2026 (im Feldtest ertastet)
+    static constexpr float defaultRmsWindowSeconds   = 0.36f;
+    static constexpr float defaultPeakReleaseSeconds = 0.45f;
+    static constexpr float defaultPeakHoldSeconds    = 1.6f;
+
+    static void setGlobalBallistics (float rmsWindowSec, float peakReleaseSec,
+                                     float peakHoldSec) noexcept
+    {
+        rmsWindowStore().store (juce::jlimit (0.01f, 5.0f, rmsWindowSec),
+                                std::memory_order_relaxed);
+        peakReleaseStore().store (juce::jlimit (0.05f, 10.0f, peakReleaseSec),
+                                  std::memory_order_relaxed);
+        peakHoldStore().store (juce::jlimit (0.1f, 10.0f, peakHoldSec),
+                               std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] static float getGlobalRmsWindowSeconds() noexcept
+    {
+        return rmsWindowStore().load (std::memory_order_relaxed);
+    }
+    [[nodiscard]] static float getGlobalPeakReleaseSeconds() noexcept
+    {
+        return peakReleaseStore().load (std::memory_order_relaxed);
+    }
+    [[nodiscard]] static float getGlobalPeakHoldSeconds() noexcept
+    {
+        return peakHoldStore().load (std::memory_order_relaxed);
+    }
+
+    //==========================================================================
     static constexpr float clipThreshold = 1.0f;  // 0 dBFS
 
 private:
@@ -64,17 +105,32 @@ private:
                        && std::atomic<bool>::is_always_lock_free,
                    "LevelMeter-Atomics müssen lock-free sein (Audio Thread)");
 
-    static constexpr double rmsWindowSeconds        = 0.15;  // ~150-ms-RMS-Fenster
-    static constexpr double peakReleaseSeconds       = 1.5;  // Peak-Ballistik
-    static constexpr double peakHoldSeconds          = 1.5;  // Peak-Marker-Haltezeit
-    static constexpr double peakHoldReleaseSeconds    = 1.0;  // Abfall nach dem Halten
+    static constexpr double peakHoldReleaseSeconds = 1.0;  // Abfall nach dem Halten
+
+    // Funktionslokale Statics (kein Init-Order-Risiko) fuer die
+    // klassenweite Ballistik — Defaults s. o.
+    static std::atomic<float>& rmsWindowStore() noexcept
+    {
+        static std::atomic<float> value { defaultRmsWindowSeconds };
+        return value;
+    }
+    static std::atomic<float>& peakReleaseStore() noexcept
+    {
+        static std::atomic<float> value { defaultPeakReleaseSeconds };
+        return value;
+    }
+    static std::atomic<float>& peakHoldStore() noexcept
+    {
+        static std::atomic<float> value { defaultPeakHoldSeconds };
+        return value;
+    }
 
     void meterOneChannel (int channel, const float* data, int numSamples,
-                          float peakDecay, float holdDecay, double blockSeconds) noexcept;
+                          float rmsCoeffBlock, float peakDecay, float holdDecay,
+                          double peakHoldSecondsNow, double blockSeconds) noexcept;
 
     double sampleRate = 48000.0;
     int activeChannels = 0;       // nur in prepare() geschrieben (Audio steht)
-    float rmsCoeff = 0.0f;        // One-Pole-Koeffizient pro Sample
 
     // Interner Zustand — nur der Audio Thread liest/schreibt
     std::array<float, MAX_CAPTURE_CHANNELS> meanSquareState {};
