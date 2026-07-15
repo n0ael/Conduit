@@ -4,6 +4,7 @@
 
 using conduit::MidiRigSettings;
 using conduit::RigDeviceKind;
+using conduit::TakeoverMode;
 
 namespace
 {
@@ -176,6 +177,7 @@ TEST_CASE ("MidiRigSettings: Roundtrip über Neuinstanz", "[midirig]")
         settings.setControllerProfileName (controllerId, "Xone:K1");
         settings.setMidiChannel (controllerId, 14);   // M4b: Geraete-Kanal
         settings.setMidiChannel (soundGenId, 99);     // M4b: geklemmt auf 16
+        settings.setTakeoverMode (controllerId, TakeoverMode::jump);   // M6
         settings.flush();
     }
 
@@ -202,5 +204,7 @@ TEST_CASE ("MidiRigSettings: Roundtrip über Neuinstanz", "[midirig]")
         REQUIRE (gen.controllerProfileName.isEmpty());
         REQUIRE (ctrl.midiChannel == 14);   // M4b: Kanal persistiert
         REQUIRE (gen.midiChannel == 16);    // M4b: 99 auf 16 geklemmt
+        REQUIRE (ctrl.takeoverMode == TakeoverMode::jump);     // M6: persistiert
+        REQUIRE (gen.takeoverMode == TakeoverMode::pickup);    // M6: Default
     }
 }

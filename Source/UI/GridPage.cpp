@@ -367,28 +367,20 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     // daher hier EINMAL gesetzt statt in refreshRigSubscriptions()).
     midiInBindings.onFeedbackEcho = [this] (int /*channel*/, int number, bool isNote, float value01)
     {
-        const auto controllerIndex = midiRigSettings.indexOfId (midiRigSettings.getGridControllerDeviceId());
-        if (controllerIndex < 0)
-            return;
-
-        const auto controllerDevice = midiRigSettings.getDevice (controllerIndex);
-        if (controllerDevice.controllerProfileName.isEmpty())
-            return;
-
-        const auto* profile = controllerProfileLibrary.find (controllerDevice.controllerProfileName);
-        if (profile == nullptr)
+        const auto context = controllerFeedbackContext();
+        if (! context.has_value())
             return;
 
         // Kanal-agnostisch (M4b): Matching nur ueber Kind + Nummer, gesendet
         // wird auf dem GERAETE-Kanal (RigDevice::midiChannel) -- nicht auf
         // den Kanal-Spalten des CSV (das K1 ist frei umkanalisierbar).
-        const auto* control = profile->findBySendAddress (
+        const auto* control = context->profile->findBySendAddress (
             isNote ? midirig::AddressKind::note : midirig::AddressKind::cc, number);
         if (control == nullptr)
             return;
 
         auto& target = midiPortHub.gridControllerOutputTarget();
-        const auto deviceChannel = controllerDevice.midiChannel;
+        const auto deviceChannel = context->device.midiChannel;
         const auto value7bit = (juce::uint8) juce::jlimit (0, 127, juce::roundToInt (value01 * 127.0f));
 
         for (const auto& feedback : control->feedback)
@@ -396,18 +388,68 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
             if (feedback.meaning == "display")
                 continue;   // Sende-Weg fehlt noch (M8, SysEx-Snippets) -- bewusst stumm
 
+            // M6: Pickup-/Status-Adressen gehoeren EXKLUSIV dem Router --
+            // normale Wert-Echos wuerden das Blink-/Aggregat-Signal stoeren.
+            if (feedback.meaning.equalsIgnoreCase (midirig::PickupLedRouter::kMeaningLedPickup)
+                || feedback.meaning.startsWithIgnoreCase ("status_"))
+                continue;
+
             target.send (feedback.kind == midirig::AddressKind::note
                              ? juce::MidiMessage::noteOn (deviceChannel, feedback.number, value7bit)
                              : juce::MidiMessage::controllerEvent (deviceChannel, feedback.number,
                                                                    (int) value7bit));
+
+            // Echo-Cache: Grundlage fuer den LED-Restore des Routers.
+            lastFeedbackSent[{ feedback.kind == midirig::AddressKind::note, feedback.number }]
+                = (int) value7bit;
         }
     };
+
+    // M6: Pickup-LED-Router -- uebersetzt Warte-Zustaende profilgetrieben in
+    // Status-/Blink-LEDs (Spalten-Status, Detail-Modus, Shift-Pad-Anzeige).
+    // Seams einmalig; Rolle/Profil setzt refreshRigSubscriptions().
+    pickupLedRouter.send = [this] (bool isNote, int number, int value7bit)
+    {
+        const auto context = controllerFeedbackContext();
+        if (! context.has_value())
+            return;
+
+        const auto channel = context->device.midiChannel;
+        midiPortHub.gridControllerOutputTarget().send (
+            isNote ? juce::MidiMessage::noteOn (channel, number,
+                                                (juce::uint8) juce::jlimit (0, 127, value7bit))
+                   : juce::MidiMessage::controllerEvent (channel, number,
+                                                         juce::jlimit (0, 127, value7bit)));
+    };
+
+    pickupLedRouter.lastEchoValueFor = [this] (bool isNote, int number)
+    {
+        const auto it = lastFeedbackSent.find ({ isNote, number });
+        return it != lastFeedbackSent.end() ? it->second : -1;
+    };
+
+    pickupLedRouter.isAddressBound = [this] (bool isNote, int number)
+    {
+        for (const auto& binding : midiInBindings.all())
+            if (binding.isNote == isNote && binding.cc == number)
+                return true;
+
+        return false;
+    };
+
+    midiInBindings.onPickupStateChanged = [this] (const grid::InputAddress& address,
+                                                  const grid::MidiInBindings::PickupState& state)
+    { pickupLedRouter.updatePickupState (address, state); };
 
     tickSubToken = midiPortHub.subscribeTick ([this]
     {
         midiInBindings.tick ([this] (const grid::MacroControlKey& key) { return controlValueFor (key); },
                              [this] (const grid::MacroControlKey& key, float value01)
                              { applyExternalValue (key, value01); });
+
+        // M6: NACH midiInBindings.tick() -- der Router sieht die Warte-
+        // Transitionen desselben Ticks (kein Flackern beim Uebergang).
+        pickupLedRouter.tick();
     });
 
     systemLayer.onLongPressControl = [this] (int controlId)
@@ -503,12 +545,15 @@ void GridPage::refreshRigSubscriptions()
 
     // Controller-Rolle, Noten (M4): Pads senden Noten -- gleicher
     // Bindungs-Pfad wie CCs (Momentary + Velocity, Learn inklusive).
+    // M6: der Router beobachtet die Noten zusaetzlich passiv (Status-Push
+    // haelt den momentary Detail-Modus) -- die Note bleibt mapp-/lernbar.
     controllerNoteSubToken = midiPortHub.subscribeNotes (
         midiRigSettings.getGridControllerDeviceId(),
         [this] (const midi::NoteEvent& event)
         {
             midiInBindings.handleIncomingNote (event.channel, event.note,
                                                event.velocity, event.isOn);
+            pickupLedRouter.handleControllerNote (event.note, event.isOn);
         });
 
     // Grid-Ausgangs-Rolle, In-Port (Block H4): Noten-Echo aufs Pad-Raster.
@@ -521,6 +566,55 @@ void GridPage::refreshRigSubscriptions()
             else
                 keyboard.echoNoteOff (event.note);
         });
+
+    // M6: Takeover-Modus + Controller-Profil der Rolle uebernehmen. Der
+    // Setter ist idempotent (laeuft bei JEDEM Registry-Broadcast, ein
+    // Settings-Save darf keine Engagements zerstoeren); Geraete-WECHSEL
+    // verwirft den Router-Zustand (Restores liefen sonst ans neue Geraet).
+    const auto controllerIndex = midiRigSettings.indexOfId (midiRigSettings.getGridControllerDeviceId());
+    const auto controllerId = controllerIndex >= 0 ? midiRigSettings.getDevice (controllerIndex).id
+                                                   : juce::Uuid::null();
+    if (controllerId != pickupRouterDeviceId)
+    {
+        pickupLedRouter.reset();
+        pickupRouterDeviceId = controllerId;
+    }
+
+    if (controllerIndex >= 0)
+    {
+        const auto device = midiRigSettings.getDevice (controllerIndex);
+        midiInBindings.setPickupEnabled (device.takeoverMode == TakeoverMode::pickup);
+
+        const auto* profile = device.controllerProfileName.isNotEmpty()
+                                  ? controllerProfileLibrary.find (device.controllerProfileName)
+                                  : nullptr;
+        if (profile != nullptr)
+            pickupLedRouter.setProfile (*profile);
+        else
+            pickupLedRouter.clearProfile();
+    }
+    else
+    {
+        midiInBindings.setPickupEnabled (true);
+        pickupLedRouter.clearProfile();
+    }
+}
+
+std::optional<GridPage::ControllerFeedbackContext> GridPage::controllerFeedbackContext() const
+{
+    const auto controllerIndex = midiRigSettings.indexOfId (midiRigSettings.getGridControllerDeviceId());
+    if (controllerIndex < 0)
+        return std::nullopt;
+
+    auto device = midiRigSettings.getDevice (controllerIndex);
+    if (device.controllerProfileName.isEmpty())
+        return std::nullopt;
+
+    const auto* profile = controllerProfileLibrary.find (device.controllerProfileName);
+    if (profile == nullptr)
+        return std::nullopt;
+
+    return ControllerFeedbackContext { profile, std::move (device) };
 }
 
 void GridPage::changeListenerCallback (juce::ChangeBroadcaster* source)

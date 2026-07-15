@@ -73,6 +73,15 @@ MidiRigSettingsComponent::DeviceRow::DeviceRow (MidiRigSettingsComponent& ownerT
     };
     addChildComponent (profileBox);   // sichtbar nur bei kind == controller (resized())
 
+    // M6: Takeover-Verhalten (nur Controller) -- Pickup = Soft-Takeover mit
+    // Pickup-LEDs, Sprung = Werte greifen sofort (Motorfader/Ribbons, M7).
+    takeoverBox.addItem ("Pickup", 1 + (int) TakeoverMode::pickup);
+    takeoverBox.addItem ("Sprung", 1 + (int) TakeoverMode::jump);
+    takeoverBox.setSelectedId (1 + (int) device.takeoverMode, juce::dontSendNotification);
+    takeoverBox.onChange = [this]
+    { owner.settings.setTakeoverMode (deviceId, (TakeoverMode) (takeoverBox.getSelectedId() - 1)); };
+    addChildComponent (takeoverBox);   // sichtbar nur bei kind == controller (resized())
+
     removeButton.onClick = [this] { owner.settings.removeDevice (deviceId); };
     addAndMakeVisible (removeButton);
 
@@ -197,6 +206,7 @@ void MidiRigSettingsComponent::DeviceRow::resized()
     const auto isController = index >= 0
         && owner.settings.getDevice (index).kind == RigDeviceKind::controller;
     profileBox.setVisible (isController);
+    takeoverBox.setVisible (isController);   // M6
     gridButton.setVisible (isController);
 
     auto area = getLocalBounds();
@@ -217,7 +227,8 @@ void MidiRigSettingsComponent::DeviceRow::resized()
     channelBox.setBounds (area.removeFromLeft (64).reduced (0, 6));
     area.removeFromLeft (4);
 
-    const auto comboCount = isController ? 3 : 2;
+    // M6: Controller-Zeilen tragen 4 Combos (In/Out/Profil/Takeover).
+    const auto comboCount = isController ? 4 : 2;
     const auto comboWidth = (area.getWidth() - 4 * (comboCount - 1)) / comboCount;
 
     inBox.setBounds (area.removeFromLeft (comboWidth).reduced (0, 6));
@@ -227,7 +238,9 @@ void MidiRigSettingsComponent::DeviceRow::resized()
     {
         outBox.setBounds (area.removeFromLeft (comboWidth).reduced (0, 6));
         area.removeFromLeft (4);
-        profileBox.setBounds (area.reduced (0, 6));
+        profileBox.setBounds (area.removeFromLeft (comboWidth).reduced (0, 6));
+        area.removeFromLeft (4);
+        takeoverBox.setBounds (area.reduced (0, 6));
     }
     else
     {

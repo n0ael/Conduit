@@ -19,6 +19,17 @@ namespace
     {
         return key == "controller" ? RigDeviceKind::controller : RigDeviceKind::soundGenerator;
     }
+
+    juce::String takeoverModeToKey (TakeoverMode mode)
+    {
+        return mode == TakeoverMode::jump ? "jump" : "pickup";
+    }
+
+    TakeoverMode takeoverModeFromKey (const juce::String& key)
+    {
+        // Fehlend/unbekannt = pickup (M6, rueckwaertskompatibel).
+        return key == "jump" ? TakeoverMode::jump : TakeoverMode::pickup;
+    }
 }
 
 //==============================================================================
@@ -73,6 +84,7 @@ void MidiRigSettings::loadFromFile()
         device.midiInName  = deviceXml->getStringAttribute ("midiInName");
         device.controllerProfileName = deviceXml->getStringAttribute ("controllerProfileName");
         device.midiChannel = juce::jlimit (1, 16, deviceXml->getIntAttribute ("midiChannel", 1));
+        device.takeoverMode = takeoverModeFromKey (deviceXml->getStringAttribute ("takeoverMode"));
 
         if (device.id.isNull())
             continue;   // korrupter/handbearbeiteter Eintrag ohne Id — überspringen
@@ -100,6 +112,7 @@ void MidiRigSettings::writeAndNotify()
         deviceXml->setAttribute ("midiInName", device.midiInName);
         deviceXml->setAttribute ("controllerProfileName", device.controllerProfileName);
         deviceXml->setAttribute ("midiChannel", device.midiChannel);
+        deviceXml->setAttribute ("takeoverMode", takeoverModeToKey (device.takeoverMode));
     }
 
     applicationProperties.getUserSettings()->setValue (keyMidiRigState, &xml);
@@ -202,6 +215,16 @@ void MidiRigSettings::setMidiChannel (const juce::Uuid& id, int channel)
         return;
 
     devices.getReference (index).midiChannel = clamped;
+    writeAndNotify();
+}
+
+void MidiRigSettings::setTakeoverMode (const juce::Uuid& id, TakeoverMode mode)
+{
+    const auto index = indexOfId (id);
+    if (index < 0 || devices.getReference (index).takeoverMode == mode)
+        return;
+
+    devices.getReference (index).takeoverMode = mode;
     writeAndNotify();
 }
 

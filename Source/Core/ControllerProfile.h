@@ -34,6 +34,13 @@ struct ControllerControl
     juce::String type;
     juce::String section;   // optionale Gruppierung (Anzeige), leer erlaubt
 
+    /** M6: optionale FUNKTIONS-Gruppe (z. B. "col1" fuer eine K1-Spalte) --
+        anders als `section` (reine Anzeige) traegt sie Laufzeit-Semantik:
+        Controls einer Gruppe teilen sich eine Status-LED (Feedback-meanings
+        status_red/status_amber/status_green am Status-Control der Gruppe),
+        deren Push die Detail-Anzeige der Gruppe aktiviert. Leer = keine. */
+    juce::String group;
+
     AddressKind sendKind = AddressKind::cc;
     int sendChannel = 1;
     int sendNumber  = -1;   // -1 = nicht belegt
@@ -77,10 +84,11 @@ struct ControllerParseReport
     getrieben, Spalten ueber ihre Namen (case-insensitiv), unbekannte
     Spalten ignoriert, RFC-4180-Quoting unterstuetzt.
 
-    Spalten: id, type, section, send_kind, send_channel, send_number,
+    Spalten: id, type, section, group, send_kind, send_channel, send_number,
     feedback1_kind, feedback1_channel, feedback1_number, feedback1_meaning,
     feedback2_kind, feedback2_channel, feedback2_number, feedback2_meaning,
     feedback3_kind, feedback3_channel, feedback3_number, feedback3_meaning.
+    `group` ist optional (M6) -- CSVs ohne die Spalte parsen unveraendert.
     `*_kind`-Spalten: "note" fuer Noten-Adressen, alles andere (auch leer)
     = CC (Default). Zeilen ohne `id` ODER ohne `send_number` werden
     uebersprungen + gezaehlt. `device` kommt aus einer eigenen Spalte

@@ -450,6 +450,81 @@ grafisch angezeigt.
   Message Thread), Marker im generischen ParameterPanel, SysEx (M8),
   Pickup-LED (M6).
 
+## M6 — Pickup-LED + Verhalten (07/2026)
+
+Soft-Takeover-Feedback über Controller-Profile-LEDs. Kernfrage des Users
+(„wie universell einbinden") beantwortet durch Trennung in drei Schichten:
+WARTE-Zustand pro Eingangs-Adresse (MidiInBindings, headless), ÜBERSETZUNG
+in LEDs rein profil-getrieben (`PickupLedRouter`, headless), Hardware-I/O
+in GridPage (Muster onFeedbackEcho). Neue Controller bekommen Pickup-LEDs
+NUR über CSV-Einträge — kein Code.
+
+User-Entscheidungen (14./15.07.2026): Blinken mit distanz-kodierter Rate
+(„wie weit man drehen muss": nah = schnell); Spalten-Status-LEDs auf den
+Encoder-Reihe-1-Pushes des K1 (Manual: rot E3–G3 = 52–55, orange E6–G6 =
+88–91, grün E9–G9 = 124–127); Detail-Anzeige momentary per Encoder-Druck;
+Fader-Pickup ohne Shift auf Pad-Reihe A–D; Takeover-Modus pro Gerät;
+K1 hat KEINE Encoder-LED-Ringe (die spekulativen `led_ring`-Einträge aus
+M4 sind entfernt).
+
+- **„+ Verhalten"-Bugfix (Ebenen-Wechsel-Sprung):** `SoftTakeover.engaged`
+  blieb beim Shift-Ebenen-Wechsel auf der inaktiven Ebene stehen — ihr
+  nächstes Event sprang hart (`shouldApply` kurzschließt bei engaged).
+  Jetzt: `physicalPositions` (Map `InputAddress{channel, number, isNote}`
+  → roher value01) teilt die EINE Fader-Position über alle Ebenen; jedes
+  CC-Event disengaged die Geschwister-Ebenen derselben Adresse. NUR CCs:
+  ein Note-Toggle muss sein Engagement behalten, sonst verschluckt der
+  Takeover den nächsten Press (Velocity vs. Zustand).
+- **Warte-Definition (`MidiInBindings::updatePickupStates`, am ENDE von
+  `tick()`):** waiting := aktive Ebene (Best-Match bei gehaltenen
+  Modifiern) nicht engaged UND Position BEKANNT UND Distanz >
+  `kPickupEpsilon` (= `shouldApply`-Epsilon, eine Konstante — LED und
+  Gate divergieren nie). Unbekannte Position wartet NIE (kein
+  Weihnachtsbaum nach App-Start; Blink = belegter Konflikt — deckt
+  zugleich die User-Regel „Anzeige erst bei leichter Bewegung"). Neue
+  Naht `onPickupStateChanged (InputAddress, PickupState{waiting,
+  distance01, modifiers, activeRecently})` mit Transition-Dedupe;
+  `setPickupEnabled(false)` = Sprung-Modus (Gate übersprungen, nie
+  waiting; Rückschalten disengaged alle). Noten warten nie (momentary).
+- **`PickupLedRouter` (Source/Core, headless):** rechnet pro Tick den
+  LED-SOLL-Zustand und difft gegen den letzten Send (Dedupe). Vier
+  Mechanismen: (1) Gruppen-Status — CSV-Feld `group` bündelt Controls,
+  das Control mit `status_red`/`status_amber`/`status_green`-Feedback ist
+  die Status-LED: rot = Fader der Gruppe wartet (dominiert), orange =
+  nur Knobs, grün = nichts wartet + ≥ 1 Member gebunden, aus = ungebunden;
+  aktiv gedrehtes wartendes Control lässt die Farbe distanz-kodiert
+  blinken (Halbperiode 20→4 Ticks). (2) Detail-Modus momentary: Push der
+  Status-Note gehalten → `led_pickup`-Adressen der Member zeigen
+  Einzel-Status (grün-Ebene solid = abgeholt, Basis rot-blinkend =
+  wartet, aus = ungebunden; grüne Ebene via `led_layer_c` des Ziel-Pads
+  aufgelöst). (3) Einfache Profile: `led_pickup` OHNE Gruppe blinkt
+  immer bei waiting. (4) Shift-Pad-Anzeige (profil-unabhängig): wartende
+  Shift-Ebene + Bewegung → LEDs der gehaltenen Modifier-Pads blinken mit.
+  LED-Restore beim Verlassen jedes Zustands aus dem Echo-Cache
+  (`GridPage::lastFeedbackSent`) — bloßes 0-Senden würde Toggle-LEDs
+  löschen. Der Echo-Pfad überspringt `led_pickup` und `status_...`
+  (exklusiv Router). Status-Pushes bleiben mapp-/lernbar (Router
+  beobachtet passiv).
+- **TakeoverMode pro Gerät:** `RigDevice::takeoverMode` (pickup|jump,
+  XML fehlend = pickup), fünfte Combo „Pickup"/„Sprung" pro
+  Controller-Zeile im MIDI-Menü. GridPage überträgt Modus + Profil in
+  `refreshRigSubscriptions()` (Setter idempotent — läuft bei JEDEM
+  Registry-Broadcast); Geräte-WECHSEL der Controller-Rolle resettet den
+  Router (Restores liefen sonst ans neue Gerät).
+- **Session-Load-Invalidierung gratis:** Takeover wird nicht persistiert,
+  `bind()` startet disengaged; `physicalPositions` überlebt als Member —
+  Session-Wechsel zur Laufzeit blinkt bei belegtem Mismatch sofort.
+- **K1-CSV:** 4 Status-Controls `enc_r1_n_push` (send Note 52–55, drei
+  Status-Farben, `group=col1..4`); Member `enc_r1/r2/r3/r4/fader{n}` mit
+  `group=col{n}` und `led_pickup`-Detail-Pads: r1 → Taster 48–51, r2 →
+  Pad-Grid E–H (32–35, kein Taster unter Reihe 2), r3 → Taster 44–47,
+  r4 → Taster 40–43, Fader → Pad-Grid A–D (36–39, expliziter
+  User-Wunsch). **Zuordnung r1/r2/r3/r4 ist Layout-Vorschlag — Feldtest
+  bestätigt.** Encoder-Pushes sind damit erstmals reguläre Profil-Controls.
+- **Dokumentierte Grenze:** Echo und Blink können auf geteilten Pad-LEDs
+  kurz konkurrieren (Restore heilt) — Echo-Suppression wäre Nachschlag.
+  Blink-Konstanten hängen an der 60-Hz-Hub-Tick-Annahme.
+
 ## Lektionen
 
 - **MSVC + verschachtelte Brace-Init:**
@@ -518,7 +593,7 @@ grafisch angezeigt.
   M3  Semantischer Picker — Geräte-/Parameter-Auswahl-UI (Analogie Ableton-Parameter-Browser Track→Device→Parameter) — erledigt 07/2026
   M4  Controller-Profile + LED — Conduit-Controller-Profile-v1-CSV-Schema, Send-Adresse + bis zu 3 Feedback-Adressen pro Control — erledigt 07/2026
   M5  Map-Modus + Tab + Chord-Learn — M5a Shift-Ebenen/Chord-Learn · M5b app-weites Dock + Map-Tab + Overlay · M5c Conduit-Macro-Ziele mit Modulation — komplett erledigt 07/2026
-  M6  Pickup-LED + Verhalten — Soft-Takeover-Feedback über Controller-Profile-LEDs — offen
+  M6  Pickup-LED + Verhalten — Soft-Takeover-Feedback über Controller-Profile-LEDs (PickupLedRouter: Spalten-Status/Detail-Modus/Shift-Pad-Anzeige, TakeoverMode pro Gerät, Ebenen-Wechsel-Sprung-Fix) — erledigt 07/2026 (Feldtest offen)
   M7  Bidirektional Ribbons — Motorfader-/Ribbon-Feedback in beide Richtungen — offen
   M8  SysEx-Snippets — Sende-only Hex-Snippets mit optionalem `{v}`-Platzhalterbyte — offen
 

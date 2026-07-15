@@ -236,6 +236,22 @@ void MidiInBindings::setBindingTarget (Binding& binding, float value01)
 
 void MidiInBindings::applyIncoming (int channel, int number, bool isNote, bool noteOn, float value01)
 {
+    // M6: geteilte physische Position pro CC-Adresse (roher Wert, vor der
+    // Glaettung) -- ueber alle Shift-Ebenen hinweg gibt es nur den EINEN
+    // Fader. Noten bleiben aussen vor: momentary, keine Position.
+    if (! isNote)
+    {
+        auto hasAddress = false;
+        for (const auto& b : bindings)
+            hasAddress = hasAddress || (! b.isNote && b.channel == channel && b.cc == number);
+
+        if (hasAddress)
+        {
+            physicalPositions[{ channel, number, false }] = value01;
+            lastActivityTick[{ channel, number, false }]  = tickCounter;
+        }
+    }
+
     if (isNote && ! noteOn)
     {
         // Note-Off geht an die Ebene(n), die das On gewaehlt hat -- nicht an
@@ -287,6 +303,17 @@ void MidiInBindings::applyIncoming (int channel, int number, bool isNote, bool n
     }
 
     auto* binding = bestMatch (channel, number, isNote);
+
+    // M6 Geschwister-Disengage: jedes physische CC-Event widerlegt das
+    // Engagement aller NICHT gewaehlten Ebenen derselben Adresse -- behebt
+    // den Wertsprung beim Shift-Ebenen-Wechsel (engaged blieb frueher stehen).
+    // Nur CCs: ein Note-Toggle muss sein Engagement behalten, sonst
+    // verschluckt der Takeover den naechsten Press (Velocity vs. Zustand).
+    if (! isNote)
+        for (auto& b : bindings)
+            if (&b != binding && ! b.isNote && b.channel == channel && b.cc == number)
+                b.takeover.disengage();
+
     if (binding == nullptr)
         return;
 
@@ -340,7 +367,8 @@ void MidiInBindings::tick (const std::function<float (const MacroControlKey&)>& 
 
         const auto current = currentValueFor != nullptr ? currentValueFor (binding.key) : 0.0f;
 
-        if (! binding.takeover.shouldApply (current, binding.smoothed01))
+        // M6 Sprung-Modus (pickupEnabled == false): Werte greifen sofort.
+        if (pickupEnabled && ! binding.takeover.shouldApply (current, binding.smoothed01))
             continue;   // Pickup noch nicht erreicht -- kein Parametersprung
 
         if (applyValue != nullptr)
@@ -354,6 +382,92 @@ void MidiInBindings::tick (const std::function<float (const MacroControlKey&)>& 
             onFeedbackEcho (binding.channel, binding.cc, binding.isNote,
                             currentValueFor != nullptr ? currentValueFor (binding.key)
                                                        : binding.smoothed01);
+    }
+
+    // M6: Warte-Zustaende ERST nach der pending-Schleife bewerten, damit
+    // Engagements/Echos dieses Ticks sichtbar sind (kein Flackern beim
+    // Uebergang Pickup -> Anzeige).
+    updatePickupStates (currentValueFor);
+}
+
+void MidiInBindings::setPickupEnabled (bool enabled)
+{
+    if (pickupEnabled == enabled)
+        return;
+
+    pickupEnabled = enabled;
+
+    // Rueckkehr zum Pickup-Modus: Engagements aus der Sprung-Zeit sind
+    // bedeutungslos -- alles muss neu aufnehmen.
+    if (enabled)
+        for (auto& binding : bindings)
+            binding.takeover.disengage();
+}
+
+void MidiInBindings::updatePickupStates (const std::function<float (const MacroControlKey&)>& currentValueFor)
+{
+    ++tickCounter;
+
+    if (onPickupStateChanged == nullptr)
+        return;
+
+    // Kandidaten: alle gebundenen CC-Adressen plus die zuletzt als wartend
+    // gemeldeten (Verwaisten-Abbau nach unbind).
+    std::set<InputAddress> candidates;
+
+    for (const auto& binding : bindings)
+        if (! binding.isNote)
+            candidates.insert ({ binding.channel, binding.cc, false });
+
+    for (const auto& entry : pickupStates)
+        candidates.insert (entry.first);
+
+    for (const auto& address : candidates)
+    {
+        PickupState next;
+
+        // waiting := aktive Ebene existiert, ist nicht engaged, und die
+        // BEKANNTE physische Position liegt weiter als kPickupEpsilon vom
+        // Software-Wert entfernt. Unbekannte Position wartet nie (Blink =
+        // belegter Konflikt, kein Weihnachtsbaum nach App-Start).
+        if (pickupEnabled)
+            if (auto* active = bestMatch (address.channel, address.number, address.isNote))
+                if (! active->takeover.engaged)
+                    if (const auto physical = physicalPositions.find (address);
+                        physical != physicalPositions.end())
+                    {
+                        const auto current  = currentValueFor != nullptr
+                                                  ? currentValueFor (active->key) : 0.0f;
+                        const auto distance = std::abs (physical->second - current);
+
+                        if (distance > kPickupEpsilon)
+                        {
+                            next.waiting    = true;
+                            next.distance01 = distance;
+                            next.modifiers  = active->modifiers;
+                        }
+                    }
+
+        if (const auto activity = lastActivityTick.find (address);
+            activity != lastActivityTick.end())
+            next.activeRecently = tickCounter - activity->second <= kActivityHoldTicks;
+
+        const auto known = pickupStates.find (address);
+        const auto prev  = known != pickupStates.end() ? known->second : PickupState{};
+
+        const auto changed = prev.waiting != next.waiting
+                             || (next.waiting
+                                 && (std::abs (prev.distance01 - next.distance01) > kDistanceReportDelta
+                                     || prev.activeRecently != next.activeRecently
+                                     || prev.modifiers != next.modifiers));
+
+        if (changed)
+            onPickupStateChanged (address, next);
+
+        if (next.waiting)
+            pickupStates[address] = next;
+        else
+            pickupStates.erase (address);
     }
 }
 

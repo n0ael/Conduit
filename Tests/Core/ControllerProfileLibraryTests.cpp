@@ -3,6 +3,7 @@
 #include "Core/ControllerProfileLibrary.h"
 
 using conduit::ControllerProfileLibrary;
+namespace midirig = conduit::midirig;
 
 namespace
 {
@@ -34,6 +35,23 @@ TEST_CASE ("ControllerProfileLibrary: Factory-Profil Xone:K1 aus BinaryData", "[
     const auto* k1 = library.find ("Xone:K1");
     REQUIRE (k1 != nullptr);
     REQUIRE_FALSE (k1->controls.empty());
+
+    // M6: Spalten-Status-Controls (Encoder-Reihe-1-Pushes) mit den drei
+    // Status-Farben + Gruppen-Zuordnung der Member (Fader 1 in col1).
+    const auto* statusPush = k1->findBySendAddress (midirig::AddressKind::note, 52);
+    REQUIRE (statusPush != nullptr);
+    CHECK (statusPush->group == "col1");
+    REQUIRE (statusPush->feedback.size() == 3);
+    CHECK (statusPush->feedback[0].meaning == "status_red");
+    CHECK (statusPush->feedback[1].meaning == "status_amber");
+    CHECK (statusPush->feedback[2].meaning == "status_green");
+
+    const auto* fader1 = k1->findBySendAddress (midirig::AddressKind::cc, 16);
+    REQUIRE (fader1 != nullptr);
+    CHECK (fader1->group == "col1");
+    REQUIRE (fader1->feedback.size() == 1);
+    CHECK (fader1->feedback[0].meaning == "led_pickup");
+    CHECK (fader1->feedback[0].number == 36);   // Pad-Reihe A-D (User 15.07.2026)
 
     // Report: eine Factory-Quelle, keine User-Quellen.
     REQUIRE (library.report().size() >= 1);

@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
+#include <map>
+#include <set>
 #include <vector>
 
 #include <juce_core/juce_core.h>
@@ -9,6 +12,10 @@
 
 namespace conduit::grid
 {
+
+/** Pickup-Toleranz (M6): dieselbe Konstante gated den Takeover UND definiert
+    "wartet auf Pickup" -- LED-Aussage und Gate duerfen nie divergieren. */
+inline constexpr float kPickupEpsilon = 0.03f;
 
 //==============================================================================
 /** Soft-Takeover (Block G, Masterplan: "OHNE Parametersprung"): ein externer
@@ -21,7 +28,7 @@ struct SoftTakeover
     /** true, wenn incoming ab jetzt angewendet werden darf. current/incoming
         in [0,1]; merkt sich den letzten Eingangswert fuer die
         Kreuzungs-Erkennung. */
-    bool shouldApply (float current, float incoming, float epsilon = 0.03f) noexcept
+    bool shouldApply (float current, float incoming, float epsilon = kPickupEpsilon) noexcept
     {
         if (! engaged)
         {
@@ -61,6 +68,18 @@ struct ModifierNote
 
 /** Sortiertes, duplikatfreies Modifier-Set (kanonisch — bind() normalisiert). */
 using ModifierSet = std::vector<ModifierNote>;
+
+//==============================================================================
+/** Physische Eingangs-Adresse eines Controller-Controls (M6): ueber alle
+    Shift-Ebenen hinweg gibt es pro Adresse genau EINE Hardware-Position. */
+struct InputAddress
+{
+    int channel = 1;       // 1..16
+    int number  = 0;       // CC- bzw. Notennummer (0..127)
+    bool isNote = false;
+
+    auto operator<=> (const InputAddress&) const = default;
+};
 
 //==============================================================================
 /** Zuordnung externer CC-Eingaenge zu Conduit-Controls (Block G): pro
@@ -169,9 +188,41 @@ public:
         darueber Feedback an das Controller-Rollen-Geraet). */
     std::function<void (int, int, bool, float)> onFeedbackEcho;
 
+    //==========================================================================
+    // Pickup-Status (M6): pro Adresse meldet tick(), ob die aktive Ebene
+    // (Best-Match bei den aktuell gehaltenen Modifiern) auf Pickup wartet --
+    // d. h. Takeover nicht engaged UND die physische Position BEKANNT und
+    // weiter als kPickupEpsilon vom Software-Wert entfernt. Unbekannte
+    // Position (App-Start, nie bewegt) wartet NIE: Blink = belegter Konflikt.
+
+    struct PickupState
+    {
+        bool  waiting    = false;
+        float distance01 = 0.0f;      // |physisch - Software| der aktiven Ebene
+        ModifierSet modifiers;        // Modifier-Set der aktiven Ebene (leer = Basis)
+        bool  activeRecently = false; // Eingangs-Event innerhalb kActivityHoldTicks
+    };
+
+    /** Feuert am Tick-Ende bei jedem Zustandswechsel (waiting-Flanke) sowie
+        waehrend des Wartens bei Distanz-/Aktivitaets-Aenderung (Dedupe).
+        waiting=false ⇒ der Konsument restauriert seine LEDs. */
+    std::function<void (const InputAddress&, const PickupState&)> onPickupStateChanged;
+
+    /** M6 Takeover-Modus des Controller-Geraets: false = "Sprung" (Werte
+        greifen sofort, nie waiting). Idempotent -- laeuft bei jedem
+        Registry-Broadcast. Rueckschalten auf Pickup disengaged alle
+        Bindungen (Engagements nach Spruengen sind bedeutungslos). */
+    void setPickupEnabled (bool enabled);
+    [[nodiscard]] bool isPickupEnabled() const noexcept { return pickupEnabled; }
+
     // Glaettung: Anteil der Restdistanz pro Tick; darunter wird eingerastet.
     static constexpr float kSmoothingPerTick = 0.35f;
     static constexpr float kSmoothingSnap    = 0.004f;
+
+    // Pickup-Status: Aktivitaets-Fenster + Melde-Schwelle der Distanz
+    // (Tick-Basis = 60-Hz-Hub-Drain).
+    static constexpr std::uint64_t kActivityHoldTicks   = 30;   // ~0,5 s
+    static constexpr float         kDistanceReportDelta = 0.005f;
 
 private:
     /** Gemeinsamer Eingangs-Pfad von CC und Note: beste Ebene waehlen
@@ -187,7 +238,20 @@ private:
     void markModifiersUsed (const ModifierSet& modifiers);
     void setBindingTarget (Binding& binding, float value01);
 
+    /** M6: Warte-Zustaende neu bewerten und Transitionen melden -- laeuft am
+        ENDE von tick(), damit Engagements/Echos desselben Ticks sichtbar sind
+        (sonst flackert der Uebergang Pickup -> Anzeige). */
+    void updatePickupStates (const std::function<float (const MacroControlKey&)>& currentValueFor);
+
     std::vector<Binding> bindings;
+
+    // M6: geteilte Physik pro Adresse (transient, roher Eingangswert) +
+    // zuletzt gemeldete Warte-Zustaende (nur wartende Adressen) + Aktivitaet.
+    bool pickupEnabled = true;
+    std::uint64_t tickCounter = 0;
+    std::map<InputAddress, float> physicalPositions;
+    std::map<InputAddress, std::uint64_t> lastActivityTick;
+    std::map<InputAddress, PickupState> pickupStates;
 
     ModifierSet heldNotes;     // aktuell gehaltene Noten (Shift-Kandidaten)
     ModifierSet usedAsShift;   // Noten, die in diesem Halten als Shift dienten

@@ -135,6 +135,7 @@ ControllerProfile parseControllerProfileCsv (const juce::String& text, Controlle
     const auto colId          = columnIndex ("id");
     const auto colType        = columnIndex ("type");
     const auto colSection     = columnIndex ("section");
+    const auto colGroup       = columnIndex ("group");
     const auto colDevice      = columnIndex ("device");
     const auto colSendKind    = columnIndex ("send_kind");
     const auto colSendChannel = columnIndex ("send_channel");
@@ -181,6 +182,7 @@ ControllerProfile parseControllerProfileCsv (const juce::String& text, Controlle
         control.id          = id;
         control.type        = fieldAsString (fields, colType);
         control.section     = fieldAsString (fields, colSection);
+        control.group       = fieldAsString (fields, colGroup);
         control.sendKind    = fieldAsAddressKind (fields, colSendKind);
         control.sendChannel = juce::jlimit (1, 16, fieldAsInt (fields, colSendChannel, 1));
         control.sendNumber  = fieldAsInt (fields, colSendNumber, -1);

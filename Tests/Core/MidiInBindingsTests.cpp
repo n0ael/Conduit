@@ -347,11 +347,17 @@ TEST_CASE ("MidiInBindings: exakteste Ebene gewinnt (Matching nach gehaltenen Pa
     REQUIRE (rig.values[2] == Approx (80.0f / 127.0f).margin (0.01));
     REQUIRE (rig.values[1] == Approx (64.0f / 127.0f).margin (0.01));   // Basis unberuehrt
 
-    // Pad loslassen -> wieder Basis-Ebene.
+    // Pad loslassen -> wieder Basis-Ebene. Die Shift-Fahrt hat die Basis
+    // disengaged (M6 Geschwister-Disengage): erst die Kreuzung ihres
+    // Ist-Werts (~0.504) nimmt wieder auf -- kein Sprung.
     rig.bindings.handleIncomingNote (1, 36, 0, false);
-    rig.bindings.handleIncomingCc (1, 20, 100);
+    rig.bindings.handleIncomingCc (1, 20, 100);   // weit oberhalb -> gated
     rig.ticks (30);
-    REQUIRE (rig.values[1] == Approx (100.0f / 127.0f).margin (0.01));
+    REQUIRE (rig.values[1] == Approx (64.0f / 127.0f).margin (0.01));
+
+    rig.bindings.handleIncomingCc (1, 20, 60);    // ~0.472 kreuzt 0.504
+    rig.ticks (30);
+    REQUIRE (rig.values[1] == Approx (60.0f / 127.0f).margin (0.01));
     REQUIRE (rig.values[2] == Approx (80.0f / 127.0f).margin (0.01));
 }
 
@@ -473,6 +479,249 @@ TEST_CASE ("MidiInBindings: Chord-Learn -- CC mit gehaltenen Pads lernt die Shif
     REQUIRE (binding != nullptr);
     REQUIRE (binding->cc == 20);
     REQUIRE (binding->modifiers.size() == 2);
+}
+
+//==============================================================================
+// M6: geteilte physische Position, Geschwister-Disengage, Pickup-Status
+
+namespace
+{
+    using PickupReport = std::pair<grid::InputAddress, grid::MidiInBindings::PickupState>;
+
+    std::vector<PickupReport>& watchPickup (Rig& rig, std::vector<PickupReport>& reports)
+    {
+        rig.bindings.onPickupStateChanged =
+            [&reports] (const grid::InputAddress& address,
+                        const grid::MidiInBindings::PickupState& state)
+        { reports.emplace_back (address, state); };
+        return reports;
+    }
+}
+
+TEST_CASE ("MidiInBindings: Ebenen-Wechsel springt nicht mehr (Geschwister-Disengage)", "[grid][midiin][midirig]")
+{
+    Rig rig;
+    rig.bindings.bind (keyFor (1), 1, 20);                          // Basis
+    rig.bindings.bind (keyFor (2), 1, 20, false, { { 1, 36 } });    // shift+fader
+    rig.values[1] = 0.5f;
+    rig.values[2] = 0.9f;
+
+    // Basis aufnehmen (nahe 0.5) -> engaged.
+    rig.bindings.handleIncomingCc (1, 20, 64);   // ~0.504
+    rig.ticks (30);
+    REQUIRE (rig.values[1] == Approx (64.0f / 127.0f).margin (0.01));
+
+    // Shift halten und den Fader wegfahren: die Shift-Ebene nimmt bei 0.9
+    // nie auf, aber die BASIS wird durch das physische Event disengaged.
+    rig.bindings.handleIncomingNote (1, 36, 100, true);
+    rig.bindings.handleIncomingCc (1, 20, 25);   // ~0.197
+    rig.ticks (10);
+    REQUIRE (rig.values[2] == Approx (0.9f));    // Shift-Ebene gated
+
+    // Shift loslassen, Fader weit weg weiterbewegen: die Basis darf NICHT
+    // springen (frueher blieb engaged stehen -> harter Sprung).
+    rig.bindings.handleIncomingNote (1, 36, 0, false);
+    rig.applied.clear();
+    rig.bindings.handleIncomingCc (1, 20, 20);   // ~0.157, weit von 0.504
+    rig.ticks (10);
+    REQUIRE (rig.applied.empty());
+    REQUIRE (rig.values[1] == Approx (64.0f / 127.0f).margin (0.01));
+
+    // Erst die Kreuzung des Ist-Werts nimmt wieder auf.
+    rig.bindings.handleIncomingCc (1, 20, 70);   // ~0.551 kreuzt 0.504
+    rig.ticks (30);
+    REQUIRE (rig.values[1] == Approx (70.0f / 127.0f).margin (0.01));
+}
+
+TEST_CASE ("MidiInBindings: Pickup-Status meldet Warten mit Distanz und Modifiern", "[grid][midiin][midirig]")
+{
+    Rig rig;
+    std::vector<PickupReport> reports;
+    watchPickup (rig, reports);
+
+    rig.bindings.bind (keyFor (1), 1, 20);                          // Basis
+    rig.bindings.bind (keyFor (2), 1, 20, false, { { 1, 36 } });    // shift+fader
+    rig.values[1] = 0.5f;
+    rig.values[2] = 0.9f;
+
+    // Unbekannte Position -> nie waiting, egal wie viele Ticks.
+    rig.ticks (20);
+    REQUIRE (reports.empty());
+
+    // Basis nimmt nahe auf -> engaged, weiterhin kein Warten.
+    rig.bindings.handleIncomingCc (1, 20, 64);
+    rig.tick();
+    REQUIRE (reports.empty());
+
+    // Shift halten: aktive Ebene wird die Shift-Ebene (Wert 0.9), der Fader
+    // steht physisch bei ~0.504 -> Warten im naechsten Tick, inkl. Distanz
+    // und Modifier-Set der aktiven Ebene.
+    rig.bindings.handleIncomingNote (1, 36, 100, true);
+    rig.tick();
+    REQUIRE_FALSE (reports.empty());
+
+    const auto& [address, state] = reports.back();
+    REQUIRE (address.channel == 1);
+    REQUIRE (address.number == 20);
+    REQUIRE_FALSE (address.isNote);
+    REQUIRE (state.waiting);
+    REQUIRE (state.distance01 == Approx (0.9f - 64.0f / 127.0f).margin (0.02));
+    REQUIRE (state.modifiers == grid::ModifierSet { { 1, 36 } });
+
+    // Shift loslassen: Basis-Ebene ist engaged -> Warten endet.
+    reports.clear();
+    rig.bindings.handleIncomingNote (1, 36, 0, false);
+    rig.tick();
+    REQUIRE (reports.size() == 1);
+    REQUIRE_FALSE (reports.back().second.waiting);
+}
+
+TEST_CASE ("MidiInBindings: Pickup-Status dedupliziert (nur Flanken + Aktivitaetsfenster)", "[grid][midiin][midirig]")
+{
+    Rig rig;
+    std::vector<PickupReport> reports;
+    watchPickup (rig, reports);
+
+    rig.bindings.bind (keyFor (2), 1, 20, false, { { 1, 36 } });
+    rig.values[2] = 0.9f;
+
+    // Position ueber ein Basis-loses Event bekannt machen: kein bestMatch
+    // ohne gehaltenes Pad -> Wert verpufft, aber die Physik ist gelernt.
+    rig.bindings.handleIncomingCc (1, 20, 64);
+    rig.bindings.handleIncomingNote (1, 36, 100, true);
+
+    rig.ticks (100);
+
+    // Genau zwei Meldungen: Eintritt (aktiv) + Ablauf des
+    // Aktivitaetsfensters (~30 Ticks) -- danach Ruhe.
+    REQUIRE (reports.size() == 2);
+    REQUIRE (reports[0].second.waiting);
+    REQUIRE (reports[0].second.activeRecently);
+    REQUIRE (reports[1].second.waiting);
+    REQUIRE_FALSE (reports[1].second.activeRecently);
+}
+
+TEST_CASE ("MidiInBindings: Warten endet durch Pickup und durch Software-Annaeherung", "[grid][midiin][midirig]")
+{
+    Rig rig;
+    std::vector<PickupReport> reports;
+    watchPickup (rig, reports);
+
+    rig.bindings.bind (keyFor (1), 1, 20);
+    rig.values[1] = 0.9f;
+
+    // Fader weit unten -> gated + wartend.
+    rig.bindings.handleIncomingCc (1, 20, 10);
+    rig.ticks (10);
+    REQUIRE_FALSE (reports.empty());
+    REQUIRE (reports.back().second.waiting);
+
+    SECTION ("Pickup durch Kreuzung beendet das Warten")
+    {
+        reports.clear();
+        rig.bindings.handleIncomingCc (1, 20, 121);   // kreuzt 0.9
+        rig.ticks (20);
+        REQUIRE_FALSE (reports.empty());
+        REQUIRE_FALSE (reports.back().second.waiting);
+        REQUIRE (rig.values[1] == Approx (121.0f / 127.0f).margin (0.01));
+    }
+
+    SECTION ("Software-Wert naehert sich der Position -> Warten endet ohne Event")
+    {
+        reports.clear();
+        rig.values[1] = 10.0f / 127.0f;   // UI zieht den Wert zum Fader
+        rig.tick();
+        REQUIRE_FALSE (reports.empty());
+        REQUIRE_FALSE (reports.back().second.waiting);
+    }
+}
+
+TEST_CASE ("MidiInBindings: lokaler Touch macht die Adresse wartend (Invalidierung)", "[grid][midiin][midirig]")
+{
+    Rig rig;
+    std::vector<PickupReport> reports;
+    watchPickup (rig, reports);
+
+    rig.bindings.bind (keyFor (1), 1, 20);
+    rig.values[1] = 0.5f;
+
+    rig.bindings.handleIncomingCc (1, 20, 64);   // nahe -> engaged
+    rig.tick();
+    REQUIRE (reports.empty());
+
+    // UI-Drag: Wert weit weg + Takeover geloest -> Warten (Position bekannt).
+    rig.values[1] = 0.1f;
+    rig.bindings.notifyLocalTouch (keyFor (1));
+    rig.tick();
+    REQUIRE_FALSE (reports.empty());
+    REQUIRE (reports.back().second.waiting);
+    REQUIRE (reports.back().second.distance01 == Approx (64.0f / 127.0f - 0.1f).margin (0.02));
+}
+
+TEST_CASE ("MidiInBindings: Noten warten nie, unbind beendet das Warten", "[grid][midiin][midirig]")
+{
+    Rig rig;
+    std::vector<PickupReport> reports;
+    watchPickup (rig, reports);
+
+    rig.bindings.bind (keyFor (3), 1, 36, true);   // Pad
+    rig.values[3] = 1.0f;                          // Toggle steht oben
+
+    // Pad-Presses erzeugen nie einen Warte-Zustand (momentary, keine Position).
+    rig.bindings.handleIncomingNote (1, 36, 127, true);
+    rig.bindings.handleIncomingNote (1, 36, 0, false);
+    rig.ticks (10);
+    REQUIRE (reports.empty());
+
+    // CC-Bindung wartend machen, dann unbind -> Warten endet (Verwaisten-Abbau).
+    rig.bindings.bind (keyFor (1), 1, 20);
+    rig.values[1] = 0.9f;
+    rig.bindings.handleIncomingCc (1, 20, 10);
+    rig.tick();
+    REQUIRE (reports.back().second.waiting);
+
+    reports.clear();
+    rig.bindings.unbind (keyFor (1));
+    rig.tick();
+    REQUIRE (reports.size() == 1);
+    REQUIRE_FALSE (reports.back().second.waiting);
+}
+
+TEST_CASE ("MidiInBindings: Sprung-Modus wendet sofort an und wartet nie", "[grid][midiin][midirig]")
+{
+    Rig rig;
+    std::vector<PickupReport> reports;
+    watchPickup (rig, reports);
+
+    rig.bindings.bind (keyFor (1), 1, 20);
+    rig.values[1] = 0.9f;
+
+    // Erst wartend machen (Pickup-Modus) ...
+    rig.bindings.handleIncomingCc (1, 20, 10);
+    rig.tick();
+    REQUIRE (reports.back().second.waiting);
+
+    // ... dann Sprung-Modus: Warten faellt im naechsten Tick, Werte greifen
+    // sofort trotz grosser Distanz.
+    reports.clear();
+    rig.bindings.setPickupEnabled (false);
+    rig.bindings.setPickupEnabled (false);   // idempotent
+    rig.tick();
+    REQUIRE (reports.size() == 1);
+    REQUIRE_FALSE (reports.back().second.waiting);
+
+    rig.bindings.handleIncomingCc (1, 20, 10);
+    rig.ticks (30);
+    REQUIRE (rig.values[1] == Approx (10.0f / 127.0f).margin (0.01));
+
+    // Zurueck zu Pickup: alle Engagements verfallen -- ein weit entferntes
+    // Event greift nicht mehr.
+    rig.bindings.setPickupEnabled (true);
+    rig.values[1] = 0.9f;
+    rig.applied.clear();
+    rig.bindings.handleIncomingCc (1, 20, 15);
+    rig.ticks (10);
+    REQUIRE (rig.applied.empty());
 }
 
 TEST_CASE ("MidiInBindings: Chord-Learn -- Pad-Akkord bindet die letzte Note mit den uebrigen als Modifier", "[grid][midiin][midirig]")

@@ -89,6 +89,7 @@ private:
         juce::ComboBox inBox;
         juce::ComboBox outBox;
         juce::ComboBox profileBox;      // M4: nur sichtbar bei kind == controller
+        juce::ComboBox takeoverBox;     // M6: Pickup/Sprung (nur Controller)
         juce::TextButton gridButton { "Grid" };   // M4b: Grid-Controller-Marker
         juce::TextButton removeButton { "X" };
 

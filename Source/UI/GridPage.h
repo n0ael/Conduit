@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <set>
 
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -22,6 +23,7 @@
 #include "Core/MidiPortHub.h"
 #include "Core/MidiProfileLibrary.h"
 #include "Core/MpeMidiSink.h"
+#include "Core/PickupLedRouter.h"
 #include "EditorDockPanel.h"
 #include "ExpressionRibbon.h"
 #include "GridKeyboardComponent.h"
@@ -328,6 +330,22 @@ private:
     int controllerNoteSubToken = 0;   // M4: Pad-Noten der Controller-Rolle
     int noteSubToken = 0;
     int tickSubToken = 0;
+
+    // M6: Pickup-LED-Router (profilgetriebene Warte-/Status-LEDs) +
+    // Echo-Cache pro Feedback-Adresse {isNote, number} -- der Router
+    // restauriert daraus beim Verlassen eines Blink-Zustands.
+    midirig::PickupLedRouter pickupLedRouter;
+    std::map<std::pair<bool, int>, int> lastFeedbackSent;
+    juce::Uuid pickupRouterDeviceId = juce::Uuid::null();   // Geraete-Wechsel = reset()
+
+    /** Controller-Rolle + Profil live aufgeloest (Echo/Router/Restore) --
+        nullopt, wenn Rolle unbesetzt oder Profil fehlt/nicht geladen. */
+    struct ControllerFeedbackContext
+    {
+        const midirig::ControllerProfile* profile = nullptr;
+        RigDevice device;
+    };
+    [[nodiscard]] std::optional<ControllerFeedbackContext> controllerFeedbackContext() const;
 
     // M4b: letzter externer High/Low-Zustand pro Control-Key -- Toggles
     // schalten nur auf steigender Flanke um (applyExternalValue).

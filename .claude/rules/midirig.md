@@ -32,3 +32,14 @@ paths:
   Note-Off geht an die per On gelatchte Ebene, nie an die aktuell
   passendste. Fan-out auf mehrere Ziele ist Sache der Macros, nie der
   MidiInBindings.
+- Pickup (M6): die physische Position ist PRO ADRESSE geteilt
+  (MidiInBindings::physicalPositions) — jedes CC-Event disengaged die
+  Geschwister-Ebenen derselben Adresse (Note-Toggles NIE, deren Press
+  würde verschluckt). waiting/Blink nur für CCs mit BEKANNTER Position;
+  `kPickupEpsilon` ist die EINE Konstante für Gate und LED-Aussage.
+  LED-Übersetzung lebt ausschließlich im profil-getriebenen
+  `PickupLedRouter` (CSV: `group` + meanings status_red/status_amber/
+  status_green/led_pickup) — der Echo-Pfad überspringt diese meanings,
+  der Router restauriert beim Verlassen aus dem Echo-Cache (nie blind 0
+  senden). `setPickupEnabled` ist idempotent (läuft bei jedem
+  Registry-Broadcast).

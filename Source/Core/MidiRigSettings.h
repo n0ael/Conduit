@@ -8,6 +8,12 @@ namespace conduit
 //==============================================================================
 enum class RigDeviceKind : int { soundGenerator = 0, controller };
 
+/** MIDI-Rig M6: Takeover-Verhalten eines Controllers -- `pickup` = Soft-
+    Takeover (Werte greifen erst bei Naehe/Kreuzung, Pickup-LEDs zeigen den
+    Wartezustand), `jump` = Werte greifen sofort (Motorfader-/Ribbon-Geraete,
+    M7-Vorgriff). */
+enum class TakeoverMode : int { pickup = 0, jump };
+
 /** Ein registriertes MIDI-Rig-Gerät (Klangerzeuger ODER Controller,
     ADR 006 E1/E2). `midiOutName`/`midiInName` sind die zuletzt bekannten
     MIDI-Portnamen (leer = diese Richtung ungenutzt) — das Matching gegen
@@ -31,6 +37,10 @@ struct RigDevice
         explizit über einen Picker gesetzt statt über `label` gematcht
         (überlebt Umbenennung des Geräts). Leer = kein Profil zugewiesen. */
     juce::String controllerProfileName;
+
+    /** MIDI-Rig M6: nur bei kind == controller sinnvoll -- Default pickup
+        (bisheriges Verhalten, XML-Attribut fehlend = pickup). */
+    TakeoverMode takeoverMode = TakeoverMode::pickup;
 };
 
 //==============================================================================
@@ -77,6 +87,10 @@ public:
 
     /** M4b: MIDI-Kanal des Geraets (1..16, geklemmt). */
     void setMidiChannel (const juce::Uuid& id, int channel);
+
+    /** M6: Takeover-Verhalten (Pickup/Sprung) -- nur bei kind == controller
+        sinnvoll. */
+    void setTakeoverMode (const juce::Uuid& id, TakeoverMode mode);
 
     //==========================================================================
     // Grid-Rollen (M1b): die zwei aus den GridPanelSettings migrierten

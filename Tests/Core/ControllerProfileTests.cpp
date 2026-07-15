@@ -105,6 +105,44 @@ TEST_CASE ("ControllerProfile: leerer Text -- kein Crash", "[midirig]")
     CHECK (profile.controls.empty());
 }
 
+TEST_CASE ("ControllerProfile: group-Spalte (M6) -- optional, Status-meanings roundtrippen", "[midirig]")
+{
+    // M6: `group` bindet Controls an eine Status-LED-Gruppe; die neuen
+    // meanings (status_red/status_amber/status_green, led_pickup) sind
+    // freie Strings und muessen den Parser unveraendert ueberstehen.
+    const auto text = juce::String (
+        "id,type,group,send_kind,send_number,"
+        "feedback1_kind,feedback1_number,feedback1_meaning,"
+        "feedback2_kind,feedback2_number,feedback2_meaning,"
+        "feedback3_kind,feedback3_number,feedback3_meaning\n"
+        "enc_r1_1_push,pad,col1,note,52,note,52,status_red,note,88,status_amber,note,124,status_green\n"
+        "fader1,fader,col1,cc,16,note,24,led_pickup,,,,,,\n");
+
+    const auto profile = parseControllerProfileCsv (text);
+    REQUIRE (profile.controls.size() == 2);
+
+    const auto& status = profile.controls[0];
+    CHECK (status.group == "col1");
+    REQUIRE (status.feedback.size() == 3);
+    CHECK (status.feedback[0].meaning == "status_red");
+    CHECK (status.feedback[1].meaning == "status_amber");
+    CHECK (status.feedback[2].meaning == "status_green");
+
+    const auto& fader = profile.controls[1];
+    CHECK (fader.group == "col1");
+    REQUIRE (fader.feedback.size() == 1);
+    CHECK (fader.feedback[0].kind == AddressKind::note);
+    CHECK (fader.feedback[0].number == 24);
+    CHECK (fader.feedback[0].meaning == "led_pickup");
+}
+
+TEST_CASE ("ControllerProfile: CSV ohne group-Spalte parst unveraendert (Bestand)", "[midirig]")
+{
+    const auto profile = parseControllerProfileCsv ("id,send_number\nfader1,16\n");
+    REQUIRE (profile.controls.size() == 1);
+    CHECK (profile.controls[0].group.isEmpty());
+}
+
 //==============================================================================
 TEST_CASE ("ControllerProfile::findBySendAddress: kanal-agnostisch, Kind/Nummer trennen", "[midirig]")
 {

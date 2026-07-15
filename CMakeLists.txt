@@ -138,6 +138,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/MpeMidiSink.cpp
     Source/Core/NodeUiRegistry.cpp
     Source/Core/OscController.cpp
+    Source/Core/PickupLedRouter.cpp
     Source/Core/OscSendService.cpp
     Source/Core/OscSendSettings.cpp
     Source/Core/PadGridLayout.cpp
@@ -662,6 +663,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/OscControllerTests.cpp
         Tests/Core/OscSendServiceTests.cpp
         Tests/Core/PatchingTests.cpp
+        Tests/Core/PickupLedRouterTests.cpp
         Tests/Core/ProcessorChassisTests.cpp
         Tests/Core/RemoteModuleBinderTests.cpp
         Tests/Core/ResponseCurveTests.cpp
@@ -740,6 +742,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/MpeMidiSink.cpp
         Source/Core/NodeUiRegistry.cpp
         Source/Core/OscController.cpp
+        Source/Core/PickupLedRouter.cpp
         Source/Core/OscSendService.cpp
         Source/Core/OscSendSettings.cpp
         Source/Core/PadGridLayout.cpp

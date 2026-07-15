@@ -1,9 +1,38 @@
 # Conduit Alpha — Projektstatus
 
-> Letzte Aktualisierung: 2026-07-14 | wird nach jedem Meilenstein gepflegt
+> Letzte Aktualisierung: 2026-07-15 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (14.07.2026) — UI-Framerate nativ (User-Regel, ersetzt die 30-fps-Regel)
+## Aktueller Meilenstein (15.07.2026) — MIDI-Rig M6 (ADR 006): Pickup-LED + Verhalten
+
+- **Ebenen-Wechsel-Sprung-Fix (MidiInBindings):** physische Position pro
+  Adresse geteilt (`physicalPositions`), jedes CC-Event disengaged die
+  Geschwister-Shift-Ebenen (Note-Toggles bewusst nicht) — vorher blieb
+  `engaged` der inaktiven Ebene stehen und das nächste Event sprang hart.
+- **Pickup-Status-Naht:** `onPickupStateChanged` (waiting + Distanz +
+  Modifier + activeRecently, Transition-Dedupe, am Tick-Ende);
+  `kPickupEpsilon` = eine Konstante für Gate UND LED-Aussage; unbekannte
+  Position wartet nie. `setPickupEnabled(false)` = Sprung-Modus.
+- **`Core/PickupLedRouter` (neu, headless):** profil-getriebene LED-Logik —
+  Spalten-Status-LEDs (CSV `group` + meanings status_red/amber/green;
+  rot = Fader wartet, orange = Knob, grün = alles abgeholt, aus =
+  ungebunden; Dreh-Blink distanz-kodiert 20→4 Ticks Halbperiode),
+  momentary Detail-Modus per Status-Push (led_pickup-Pads: grün solid /
+  rot blinkend / aus), einfache Profile (led_pickup ohne Gruppe blinkt
+  immer), Shift-Pad-Distanzanzeige (gehaltene Modifier-Pads blinken bei
+  Bewegung mit). LED-Restore aus dem Echo-Cache; Echo-Pfad überspringt
+  led_pickup/status_… (exklusiv Router).
+- **TakeoverMode pro Gerät** (`RigDevice::takeoverMode` pickup|jump,
+  Combo „Pickup/Sprung" im MIDI-Menü); K1-CSV: 4 Status-Pushes (Noten
+  52–55/88–91/124–127), `group=col1..4`, led_pickup-Detail-Pads
+  (Fader → Pad-Reihe A–D = User-Wunsch), led_ring entfernt (User-K1 hat
+  keine Ringe). Detail-Pad-Zuordnung der Encoder-Reihen = Vorschlag,
+  Feldtest bestätigt.
+- Suite 870 Cases grün, [midirig] unter ASan grün. **Feldtest am K1 offen.**
+- Nebenbei: CI-Fix b44e958 (Clang -Wshadow-uncaptured-local in
+  SettingsWindow.cpp, master war rot seit a5d341e).
+
+## Davor (14.07.2026) — UI-Framerate nativ (User-Regel, ersetzt die 30-fps-Regel)
 
 - **Anlass:** User-Fund nach M5c — Node-Page-Meter/Mod-Marker wirkten
   stufig (der FxModulePanel-Tick lief sogar nur mit 10 Hz).
