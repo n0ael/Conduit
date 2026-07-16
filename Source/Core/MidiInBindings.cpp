@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "ChannelStripLayers.h"   // M8: decodeSignedDelta (relativeTicks)
+
 namespace conduit::grid
 {
 
@@ -60,8 +62,10 @@ void MidiInBindings::bind (const MacroControlKey& key, int channel, int cc, bool
                            ModifierSet modifiers, bool suppressWhileShift,
                            const juce::String& column, int layer)
 {
+    // M8: der Nummernraum reicht bis 128+16 (Pitch-Bend-Adressen, s.
+    // pitchBendBindingNumber) -- alte Sessions kennen keine Nummer > 127.
     const auto clampedChannel = juce::jlimit (1, 16, channel);
-    const auto clampedCc      = juce::jlimit (0, 127, cc);
+    const auto clampedCc      = juce::jlimit (0, kPitchBendBindingBase + 16, cc);
 
     auto canonical = canonicalize (std::move (modifiers));
 
@@ -174,8 +178,136 @@ void MidiInBindings::handleIncomingCc (int channel, int cc, int value7bit)
             onLearnCompleted (learnKey, channel, cc, false, heldNotes);
     }
 
+    // M8: profil-getriebene Adress-Modi -- Endlos-Encoder (signed Ticks)
+    // und Scrub-Stroeme laufen NICHT durch den Absolut-Pfad/Takeover.
+    switch (addressModeFor (cc, false))
+    {
+        case AddressMode::relativeTicks:
+            applyRelativeTicks (channel, cc, value7bit);
+            return;
+
+        case AddressMode::scrub:
+            applyScrub (channel, cc, (float) juce::jlimit (0, 127, value7bit) / 127.0f);
+            return;
+
+        case AddressMode::absolute:
+        case AddressMode::direct:
+            break;
+    }
+
     applyIncoming (channel, cc, false, false,
                    (float) juce::jlimit (0, 127, value7bit) / 127.0f);
+}
+
+void MidiInBindings::handleIncomingPitchBend (int channel, int value14)
+{
+    const auto number = pitchBendBindingNumber (channel);
+
+    // MIDI-Learn: identisch zum CC-Pfad (M5 Chord-Learn) -- der erste
+    // Pitch Bend bindet sofort mit den gehaltenen Noten als Shift-Ebene.
+    if (learnArmed)
+    {
+        learnArmed = false;
+        hasLearnCandidate = false;
+        bind (learnKey, channel, number, false, heldNotes);
+
+        if (onLearnCompleted != nullptr)
+            onLearnCompleted (learnKey, channel, number, false, heldNotes);
+    }
+
+    const auto value01 = (float) juce::jlimit (0, 16383, value14) / 16383.0f;
+
+    if (addressModeFor (number, false) == AddressMode::scrub)
+    {
+        applyScrub (channel, number, value01);
+        return;
+    }
+
+    applyIncoming (channel, number, false, false, value01);
+}
+
+//==============================================================================
+void MidiInBindings::setAddressMode (int number, bool isNote, AddressMode mode, int relativeSteps)
+{
+    if (mode == AddressMode::absolute && relativeSteps <= 0)
+        addressModes.erase ({ number, isNote });
+    else
+        addressModes[{ number, isNote }] = { mode, juce::jmax (0, relativeSteps) };
+}
+
+void MidiInBindings::clearAddressModes()
+{
+    addressModes.clear();
+    scrubAnchors.clear();
+}
+
+AddressMode MidiInBindings::addressModeFor (int number, bool isNote) const noexcept
+{
+    const auto it = addressModes.find ({ number, isNote });
+    return it != addressModes.end() ? it->second.mode : AddressMode::absolute;
+}
+
+const MidiInBindings::Binding* MidiInBindings::activeBindingForAddress (
+    int number, bool isNote) const noexcept
+{
+    const Binding* best = nullptr;
+
+    for (const auto& binding : bindings)
+    {
+        if (binding.cc != number || binding.isNote != isNote)
+            continue;
+
+        if (! std::includes (heldNotes.begin(), heldNotes.end(),
+                             binding.modifiers.begin(), binding.modifiers.end()))
+            continue;
+
+        if (binding.column.isNotEmpty() && binding.layer != activeLayer (binding.column))
+            continue;
+
+        if (best == nullptr || binding.modifiers.size() >= best->modifiers.size())
+            best = &binding;
+    }
+
+    return best;
+}
+
+void MidiInBindings::applyScrub (int channel, int number, float value01)
+{
+    // Anker-Logik: das erste Event nach einer Pause traegt kein Delta (der
+    // Finger setzt neu auf -- kein Sprung); danach zaehlt die Differenz
+    // aufeinanderfolgender Positionen (voller Strip = voller Regelweg).
+    const InputAddress address { juce::jlimit (1, 16, channel), number, false };
+
+    const auto it = scrubAnchors.find (address);
+    const auto recent = it != scrubAnchors.end()
+                        && tickCounter - it->second.tick <= kScrubGapTicks;
+    const auto previous = recent ? it->second.raw : value01;
+    scrubAnchors[address] = { value01, tickCounter };
+
+    auto* binding = bestMatch (channel, number, false);
+    if (binding == nullptr)
+        return;
+
+    markModifiersUsed (binding->modifiers);
+    binding->pendingDelta01 += value01 - previous;
+}
+
+void MidiInBindings::applyRelativeTicks (int channel, int number, int value7bit)
+{
+    const auto delta = midirig::ChannelStripLayers::decodeSignedDelta (value7bit);
+    if (delta == 0)
+        return;
+
+    auto* binding = bestMatch (channel, number, false);
+    if (binding == nullptr)
+        return;
+
+    markModifiersUsed (binding->modifiers);
+
+    const auto it = addressModes.find ({ number, false });
+    const auto steps = it != addressModes.end() && it->second.steps > 0
+                           ? it->second.steps : kDefaultRelativeSteps;
+    binding->pendingDelta01 += (float) delta / (float) steps;
 }
 
 void MidiInBindings::handleIncomingNote (int channel, int note, int velocity7bit, bool isOn)
@@ -375,6 +507,29 @@ void MidiInBindings::applyIncoming (int channel, int number, bool isNote, bool n
 void MidiInBindings::tick (const std::function<float (const MacroControlKey&)>& currentValueFor,
                            const std::function<void (const MacroControlKey&, float)>& applyValue)
 {
+    // M8: akkumulierte Deltas (scrub/relativeTicks) ZUERST anwenden --
+    // direkt, ohne Glaettung/Takeover (die Stroeme sind selbst weich, ein
+    // Pickup ist fuer relative Eingaben bedeutungslos).
+    for (auto& binding : bindings)
+    {
+        if (juce::exactlyEqual (binding.pendingDelta01, 0.0f))
+            continue;
+
+        const auto current = currentValueFor != nullptr ? currentValueFor (binding.key) : 0.0f;
+        const auto value   = juce::jlimit (0.0f, 1.0f, current + binding.pendingDelta01);
+        binding.pendingDelta01 = 0.0f;
+        binding.target01   = value;
+        binding.smoothed01 = value;
+        binding.pending    = false;
+
+        if (applyValue != nullptr)
+            applyValue (binding.key, value);
+
+        if (onFeedbackEcho != nullptr)
+            onFeedbackEcho (binding.channel, binding.cc, binding.isNote,
+                            currentValueFor != nullptr ? currentValueFor (binding.key) : value);
+    }
+
     for (auto& binding : bindings)
     {
         if (! binding.pending || binding.target01 < 0.0f)
@@ -405,7 +560,10 @@ void MidiInBindings::tick (const std::function<float (const MacroControlKey&)>& 
         const auto current = currentValueFor != nullptr ? currentValueFor (binding.key) : 0.0f;
 
         // M6 Sprung-Modus (pickupEnabled == false): Werte greifen sofort.
-        if (pickupEnabled && ! binding.takeover.shouldApply (current, binding.smoothed01))
+        // M8 direct (Motorfader): der Motor steht per Definition richtig --
+        // die Adresse durchlaeuft NIE den Takeover.
+        const auto direct = addressModeFor (binding.cc, binding.isNote) == AddressMode::direct;
+        if (! direct && pickupEnabled && ! binding.takeover.shouldApply (current, binding.smoothed01))
             continue;   // Pickup noch nicht erreicht -- kein Parametersprung
 
         if (applyValue != nullptr)
@@ -467,7 +625,9 @@ void MidiInBindings::updatePickupStates (const std::function<float (const MacroC
         // BEKANNTE physische Position liegt weiter als kPickupEpsilon vom
         // Software-Wert entfernt. Unbekannte Position wartet nie (Blink =
         // belegter Konflikt, kein Weihnachtsbaum nach App-Start).
-        if (pickupEnabled)
+        // M8: nur ABSOLUTE Adressen warten -- direct (Motor steht richtig)
+        // und scrub/relativeTicks (keine sinnvolle Position) sind exempt.
+        if (pickupEnabled && addressModeFor (address.number, address.isNote) == AddressMode::absolute)
             if (auto* active = bestMatch (address.channel, address.number, address.isNote))
                 if (const auto physical = physicalPositions.find (address);
                     physical != physicalPositions.end())

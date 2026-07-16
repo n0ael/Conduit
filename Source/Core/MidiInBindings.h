@@ -18,6 +18,34 @@ namespace conduit::grid
 inline constexpr float kPickupEpsilon = 0.03f;
 
 //==============================================================================
+/** M8: Pitch-Bend-Eingaenge (Motorfader/Ribbon, AlphaTrack) leben im
+    CC-Nummernraum OBERHALB von 127: Bindungs-Nummer = 128 + PB-Kanal
+    (129..144). Damit bleibt eine Bindung ein (channel, nummer, isNote)-
+    Tripel (Persistenz unveraendert, alte Sessions kennen keine Nummer
+    > 127) und zwei PB-Adressen verschiedener Kanaele (AlphaTrack: Fader
+    ch1, Strip ch10) kollidieren nie im kanal-agnostischen Profil-Matching. */
+inline constexpr int kPitchBendBindingBase = 128;
+
+[[nodiscard]] inline int pitchBendBindingNumber (int channel) noexcept
+{
+    return kPitchBendBindingBase + juce::jlimit (1, 16, channel);
+}
+
+/** M8: EINGANGS-Modus einer Adresse (profil-getrieben, Besitzer GridPage --
+    MidiInBindings bleibt profil-agnostisch, die Tabelle wird via
+    setAddressMode gefuettert):
+    - absolute: Default -- Soft-Takeover/Pickup wie gehabt.
+    - direct:   Motorfader (position-Feedback) -- Werte greifen sofort, die
+                Adresse wartet NIE (der Motor steht per Definition richtig).
+    - scrub:    absoluter Positions-Strom relativ angewendet (Ribbon,
+                User-Entscheidung 16.07.2026): Delta zur letzten Position,
+                nach einer Pause > kScrubGapTicks ankert das naechste Event
+                neu (kein Sprung beim Neuaufsetzen).
+    - relativeTicks: signed Ticks (Endlos-Encoder, Kodierung wie
+                ChannelStripLayers::decodeSignedDelta). */
+enum class AddressMode { absolute, direct, scrub, relativeTicks };
+
+//==============================================================================
 /** Soft-Takeover (Block G, Masterplan: "OHNE Parametersprung"): ein externer
     CC-Wert greift erst, wenn er den aktuellen Control-Wert KREUZT oder ihm
     nahe genug kommt (Pickup). Lokales Anfassen des Controls loest den
@@ -132,6 +160,7 @@ public:
         bool  noteHeld   = false;   // M5: Note-On hat DIESE Ebene gewaehlt (Off-Routing)
         float deferredPress01 = -1.0f;   // M5: aufgeschobener Press (suppressWhileShift)
         bool  pulseRelease    = false;   // M5: nach dem Puls-Press auf 0 zurueck
+        float pendingDelta01  = 0.0f;    // M8: akkumuliertes Delta (scrub/relativeTicks)
     };
 
     /** Sentinel: "Spalte/Ebene aus columnResolver + aktueller aktiver Ebene
@@ -183,6 +212,31 @@ public:
 
     /** Eingehender CC [Message Thread, vom MidiPortHub-Drain gepumpt]. */
     void handleIncomingCc (int channel, int cc, int value7bit);
+
+    /** M8: Eingehender Pitch Bend (Motorfader/Ribbon) [Message Thread] --
+        laeuft als Bindungs-Nummer pitchBendBindingNumber(channel) durch
+        denselben Pfad wie CCs (Learn inklusive), value14 = 0..16383. */
+    void handleIncomingPitchBend (int channel, int value14);
+
+    //==========================================================================
+    // M8: Adress-Modi (profil-getrieben, Besitzer GridPage). Kanal-agnostisch
+    // gekeyt auf (nummer, isNote) -- PB-Adressen tragen ihren Kanal in der
+    // Nummer (s. pitchBendBindingNumber). relativeSteps: Ticks fuer den
+    // vollen Regelweg (nur relativeTicks; 0 = kDefaultRelativeSteps).
+
+    void setAddressMode (int number, bool isNote, AddressMode mode, int relativeSteps = 0);
+    void clearAddressModes();
+    [[nodiscard]] AddressMode addressModeFor (int number, bool isNote) const noexcept;
+
+    /** M8 (PositionFeedbackRouter): aktive Bindung einer Adresse -- KANAL-
+        agnostisch (M4b: der Kanal ist Geraete-Eigenschaft), sonst identische
+        Auswahl wie der Eingangs-Pfad: groesstes vollstaendig gehaltenes
+        Modifier-Set, geebente Bindungen nur auf der aktiven Ebene ihrer
+        Spalte. nullptr = keine aktive Bindung (Motor bleibt stehen). */
+    [[nodiscard]] const Binding* activeBindingForAddress (int number, bool isNote) const noexcept;
+
+    static constexpr int kDefaultRelativeSteps = 127;   // Ticks fuer den vollen Weg
+    static constexpr std::uint64_t kScrubGapTicks = 15; // ~250 ms bei 60 Hz
 
     /** Eingehende Note [Message Thread] (M4: Controller-Pads) --
         Note-On setzt Velocity/127 als Zielwert (Momentary + Velocity,
@@ -281,6 +335,13 @@ private:
     void markModifiersUsed (const ModifierSet& modifiers);
     void setBindingTarget (Binding& binding, float value01);
 
+    /** M8 scrub: Positions-Strom -> Delta auf die aktive Ebene (Anker nach
+        Pause, s. AddressMode). value01 = rohe absolute Position. */
+    void applyScrub (int channel, int number, float value01);
+
+    /** M8 relativeTicks: signed 7-bit-Delta auf die aktive Ebene. */
+    void applyRelativeTicks (int channel, int number, int value7bit);
+
     /** M6: Warte-Zustaende neu bewerten und Transitionen melden -- laeuft am
         ENDE von tick(), damit Engagements/Echos desselben Ticks sichtbar sind
         (sonst flackert der Uebergang Pickup -> Anzeige). */
@@ -300,6 +361,13 @@ private:
     ModifierSet usedAsShift;   // Noten, die in diesem Halten als Shift dienten
 
     std::map<juce::String, int> activeLayerByColumn;   // M7: aktive Bank je Spalte
+
+    // M8: Adress-Modi (Key {nummer, isNote}, kanal-agnostisch) + Scrub-Anker
+    // pro Adresse (letzte rohe Position + Tick des letzten Events).
+    struct AddressModeEntry { AddressMode mode = AddressMode::absolute; int steps = 0; };
+    struct ScrubAnchor      { float raw = 0.0f; std::uint64_t tick = 0; };
+    std::map<std::pair<int, bool>, AddressModeEntry> addressModes;
+    std::map<InputAddress, ScrubAnchor> scrubAnchors;
 
     bool learnArmed = false;
     MacroControlKey learnKey;

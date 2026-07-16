@@ -376,8 +376,13 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
         // Kanal-agnostisch (M4b): Matching nur ueber Kind + Nummer, gesendet
         // wird auf dem GERAETE-Kanal (RigDevice::midiChannel) -- nicht auf
         // den Kanal-Spalten des CSV (das K1 ist frei umkanalisierbar).
+        // M8: Pitch-Bend-Bindungen (Nummer >= 128+1) matchen ueber ihren
+        // KANAL (findBySendAddress-Konvention, AlphaTrack-Fader/-Strip).
+        const auto isPitchBend = ! isNote && number >= grid::kPitchBendBindingBase;
         const auto* control = context->profile->findBySendAddress (
-            isNote ? midirig::AddressKind::note : midirig::AddressKind::cc, number);
+            isPitchBend ? midirig::AddressKind::pitchBend
+                        : (isNote ? midirig::AddressKind::note : midirig::AddressKind::cc),
+            isPitchBend ? number - grid::kPitchBendBindingBase : number);
         if (control == nullptr)
             return;
 
@@ -394,6 +399,13 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
             // normale Wert-Echos wuerden das Blink-/Aggregat-Signal stoeren.
             if (feedback.meaning.equalsIgnoreCase (midirig::PickupLedRouter::kMeaningLedPickup)
                 || feedback.meaning.startsWithIgnoreCase ("status_"))
+                continue;
+
+            // M8: position-/Pitch-Bend-Feedback bedient EXKLUSIV der
+            // PositionFeedbackRouter (wert-getrieben, touch-gated) -- ein
+            // Event-Echo wuerde gegen das Touch-Gate senden.
+            if (feedback.meaning.equalsIgnoreCase (midirig::PositionFeedbackRouter::kMeaningPosition)
+                || feedback.kind == midirig::AddressKind::pitchBend)
                 continue;
 
             const auto isNoteFb = feedback.kind == midirig::AddressKind::note;
@@ -451,6 +463,45 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
                                                   const grid::MidiInBindings::PickupState& state)
     { pickupLedRouter.updatePickupState (address, state); };
 
+    // M8: Positions-Feedback-Seams (Motorfader). send baut die MidiMessage:
+    // Pitch Bend faehrt auf dem KANAL der Feedback-Adresse (der PB-Kanal IST
+    // die Adresse, AlphaTrack-Fader = ch1) -- nicht auf dem Geraete-Kanal.
+    positionRouter.send = [this] (const midirig::FeedbackAddress& address, int value14)
+    {
+        const auto context = controllerFeedbackContext();
+        if (! context.has_value())
+            return;
+
+        auto& target = midiPortHub.gridControllerOutputTarget();
+        const auto clamped = juce::jlimit (0, 16383, value14);
+
+        switch (address.kind)
+        {
+            case midirig::AddressKind::pitchBend:
+                target.send (juce::MidiMessage::pitchWheel (address.channel, clamped));
+                break;
+
+            case midirig::AddressKind::cc:
+                target.send (juce::MidiMessage::controllerEvent (
+                    context->device.midiChannel, address.number, clamped >> 7));
+                break;
+
+            case midirig::AddressKind::note:
+                target.send (juce::MidiMessage::noteOn (
+                    context->device.midiChannel, address.number, (juce::uint8) (clamped >> 7)));
+                break;
+        }
+    };
+
+    // Basiswert der AKTIVEN Ebene (User-Entscheidungen 16.07.2026: Motor
+    // zeigt den Basiswert, nicht den M5c-Effektivwert; Ebenen-/Shift-
+    // Wechsel laesst ihn auf den Wert der neuen Bank fahren).
+    positionRouter.currentBoundValueFor = [this] (int number, bool isNote) -> float
+    {
+        const auto* binding = midiInBindings.activeBindingForAddress (number, isNote);
+        return binding != nullptr ? controlValueFor (binding->key) : -1.0f;
+    };
+
     // M7: Spalten-Resolver -- ordnet eine Eingangs-Adresse ihrer Channelstrip-
     // Spalte zu (Profil-group), damit Live-/Learn-Bindungen die aktive Ebene
     // taggen. Geebent sind nur "normale" Controls einer Spalte: nicht der
@@ -487,6 +538,10 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
         // M6: NACH midiInBindings.tick() -- der Router sieht die Warte-
         // Transitionen desselben Ticks (kein Flackern beim Uebergang).
         pickupLedRouter.tick();
+
+        // M8: Motorfader nachfuehren -- ebenfalls NACH midiInBindings.tick(),
+        // damit gerade angewendete Werte im selben Tick gedifft werden.
+        positionRouter.tick();
     });
 
     systemLayer.onLongPressControl = [this] (int controlId)
@@ -576,6 +631,14 @@ void GridPage::refreshRigSubscriptions()
         midiRigSettings.getGridControllerDeviceId(),
         [this] (const midi::ControllerEvent& event)
         {
+            // M8: Pitch Bend (Motorfader/Ribbon) -- eigener Bindungs-Pfad
+            // (Nummer = 128 + Kanal, Learn inklusive).
+            if (event.kind == midi::ControllerEvent::Kind::pitchBend)
+            {
+                midiInBindings.handleIncomingPitchBend (event.channel, event.value);
+                return;
+            }
+
             if (event.kind != midi::ControllerEvent::Kind::cc)
                 return;
 
@@ -594,6 +657,15 @@ void GridPage::refreshRigSubscriptions()
         midiRigSettings.getGridControllerDeviceId(),
         [this] (const midi::NoteEvent& event)
         {
+            // M8: Touch-Noten (Fader-/Strip-/Encoder-Beruehrung) sind KEINE
+            // Bindungs-Quellen -- der Griff zum Fader wuerde sonst im Learn
+            // die Touch-Note binden. Sie gaten nur das Motor-Feedback.
+            if (positionRouter.isTouchNote (event.note))
+            {
+                positionRouter.handleControllerNote (event.note, event.isOn);
+                return;
+            }
+
             midiInBindings.handleIncomingNote (event.channel, event.note,
                                                event.velocity, event.isOn);
             pickupLedRouter.handleControllerNote (event.note, event.isOn);
@@ -620,6 +692,7 @@ void GridPage::refreshRigSubscriptions()
     if (controllerId != pickupRouterDeviceId)
     {
         pickupLedRouter.reset();
+        positionRouter.reset();   // M8: Dedupe-Stand gilt nur pro Geraet
         pickupRouterDeviceId = controllerId;
     }
 
@@ -632,17 +705,26 @@ void GridPage::refreshRigSubscriptions()
                                   ? controllerProfileLibrary.find (device.controllerProfileName)
                                   : nullptr;
         if (profile != nullptr)
+        {
             pickupLedRouter.setProfile (*profile);
+            positionRouter.setProfile (*profile);
+        }
         else
+        {
             pickupLedRouter.clearProfile();
+            positionRouter.clearProfile();
+        }
 
         rebuildLayerSelectMap (profile);
+        rebuildAddressModes (profile);
     }
     else
     {
         midiInBindings.setPickupEnabled (true);
         pickupLedRouter.clearProfile();
+        positionRouter.clearProfile();
         rebuildLayerSelectMap (nullptr);
+        rebuildAddressModes (nullptr);
     }
 }
 
@@ -684,6 +766,52 @@ void GridPage::rebuildLayerSelectMap (const midirig::ControllerProfile* profile)
         const auto layer = channelStripLayers.layerFor (control.group);
         midiInBindings.setActiveLayer (control.group, layer);
         pickupLedRouter.setColumnLayer (control.group, layer);
+    }
+}
+
+void GridPage::rebuildAddressModes (const midirig::ControllerProfile* profile)
+{
+    // M8: Adress-Modi kanal-agnostisch aus dem Profil (PB-Adressen tragen
+    // ihren Kanal in der Nummer). Setter idempotent -- laeuft bei jedem
+    // Registry-Broadcast; clearAddressModes verwirft auch die Scrub-Anker.
+    midiInBindings.clearAddressModes();
+    if (profile == nullptr)
+        return;
+
+    for (const auto& control : profile->controls)
+    {
+        if (control.sendNumber < 0)
+            continue;
+
+        const auto number = control.sendKind == midirig::AddressKind::pitchBend
+                                ? grid::pitchBendBindingNumber (control.sendChannel)
+                                : control.sendNumber;
+        const auto isNote = control.sendKind == midirig::AddressKind::note;
+
+        if (control.mode.equalsIgnoreCase (midirig::kModeScrub))
+        {
+            midiInBindings.setAddressMode (number, isNote, grid::AddressMode::scrub);
+            continue;
+        }
+
+        if (control.mode.equalsIgnoreCase (midirig::kModeRelative))
+        {
+            midiInBindings.setAddressMode (number, isNote, grid::AddressMode::relativeTicks,
+                                           control.steps);
+            continue;
+        }
+
+        // position-Feedback => Motorfader: Werte greifen sofort (direct),
+        // die Adresse wartet nie -- der Motor steht per Definition richtig.
+        for (const auto& feedback : control.feedback)
+        {
+            if (feedback.meaning.equalsIgnoreCase (
+                    midirig::PositionFeedbackRouter::kMeaningPosition))
+            {
+                midiInBindings.setAddressMode (number, isNote, grid::AddressMode::direct);
+                break;
+            }
+        }
     }
 }
 

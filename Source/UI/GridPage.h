@@ -26,6 +26,7 @@
 #include "Core/MidiProfileLibrary.h"
 #include "Core/MpeMidiSink.h"
 #include "Core/PickupLedRouter.h"
+#include "Core/PositionFeedbackRouter.h"
 #include "EditorDockPanel.h"
 #include "ExpressionRibbon.h"
 #include "GridKeyboardComponent.h"
@@ -342,6 +343,10 @@ private:
     std::map<std::pair<bool, int>, int> lastFeedbackSent;
     juce::Uuid pickupRouterDeviceId = juce::Uuid::null();   // Geraete-Wechsel = reset()
 
+    // M8: wert-getriebenes Positions-Feedback (Motorfader, AlphaTrack) --
+    // profil-getrieben (`position`-Feedback + Touch-Gate), pro Tick gedifft.
+    midirig::PositionFeedbackRouter positionRouter;
+
     // M7: Channelstrip-Ebenen -- Top-Encoder (role=layer_select) waehlen pro
     // Spalte eine von 3 Binding-Baenken. Persistiert pro Session (GridSessionStore).
     midirig::ChannelStripLayers channelStripLayers;
@@ -359,6 +364,11 @@ private:
         leeren). Zusaetzlich fuer jede neue Spalte die aktive Ebene mit der
         aus channelStripLayers gemerkten synchronisieren. */
     void rebuildLayerSelectMap (const midirig::ControllerProfile* profile);
+
+    /** M8: Adress-Modi der MidiInBindings aus dem aktiven Profil neu setzen
+        (nullptr = alles absolut): mode=scrub/relative aus dem CSV, `direct`
+        fuer Controls mit position-Feedback (Motorfader warten nie). */
+    void rebuildAddressModes (const midirig::ControllerProfile* profile);
 
     /** Controller-Rolle + Profil live aufgeloest (Echo/Router/Restore) --
         nullopt, wenn Rolle unbesetzt oder Profil fehlt/nicht geladen. */

@@ -89,6 +89,8 @@ juce_add_binary_data(ConduitAssets
         Assets/DeviceProfiles/Waldorf_Blofeld.csv
         # MIDI-Rig M4: Factory-Controller-Profil (aus User-Chart transkribiert)
         Assets/ControllerProfiles/AllenHeath_XoneK1.csv
+        # MIDI-Rig M8: Frontier AlphaTrack (Native Mode, offizielle Doku v1.0)
+        Assets/ControllerProfiles/Frontier_AlphaTrack.csv
 )
 
 # ---------------------------------------------------------------------------
@@ -140,6 +142,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/NodeUiRegistry.cpp
     Source/Core/OscController.cpp
     Source/Core/PickupLedRouter.cpp
+    Source/Core/PositionFeedbackRouter.cpp
     Source/Core/OscSendService.cpp
     Source/Core/OscSendSettings.cpp
     Source/Core/PadGridLayout.cpp
@@ -666,6 +669,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/OscSendServiceTests.cpp
         Tests/Core/PatchingTests.cpp
         Tests/Core/PickupLedRouterTests.cpp
+        Tests/Core/PositionFeedbackRouterTests.cpp
         Tests/Core/ProcessorChassisTests.cpp
         Tests/Core/RemoteModuleBinderTests.cpp
         Tests/Core/ResponseCurveTests.cpp
@@ -746,6 +750,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/NodeUiRegistry.cpp
         Source/Core/OscController.cpp
         Source/Core/PickupLedRouter.cpp
+        Source/Core/PositionFeedbackRouter.cpp
         Source/Core/OscSendService.cpp
         Source/Core/OscSendSettings.cpp
         Source/Core/PadGridLayout.cpp

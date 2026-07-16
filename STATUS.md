@@ -1,9 +1,40 @@
 # Conduit Alpha — Projektstatus
 
-> Letzte Aktualisierung: 2026-07-15 | wird nach jedem Meilenstein gepflegt
+> Letzte Aktualisierung: 2026-07-16 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (15.07.2026) — MIDI-Rig M6 (ADR 006): Pickup-LED + Verhalten
+## Aktueller Meilenstein (16.07.2026) — MIDI-Rig M8 (ADR 006): Bidirektionale Ribbons/Motorfader
+
+Anlass: Frontier **AlphaTrack** (Motorfader + Touch-Strip + 3 Touch-Encoder);
+Protokoll aus der offiziellen „Native Mode v1.0"-Doku. Details: docs/MidiRig.md M8.
+
+- **Pitch-Bend-Eingänge:** `ControllerEvent::Kind::pitchBend` (14-bit, Adresse =
+  Kanal); Bindungen leben als Nummer `128 + Kanal` im CC-Namensraum
+  (Learn/Persistenz/Shift-Ebenen unverändert), Map-Tab/MacroPanel zeigen
+  „Pitch Bend".
+- **Adress-Modi (profil-getrieben):** `direct` (Motorfader — nie Pickup),
+  `scrub` (Ribbon: Delta-Strom mit Anker nach Pause, User-Entscheidung
+  relativ/Scrub), `relativeTicks` (Endlos-Encoder, CSV-Spalte `steps`).
+- **`PositionFeedbackRouter` (Core, headless):** wert-getriebenes
+  Motor-Feedback @ 60-Hz-Diff — kontinuierlich, touch-gated (Touch-Note),
+  Basiswert (nie M5c-Effektivwert), folgt der aktiven Ebene; Echo-Pfad
+  überspringt position/PB-Feedback. Touch-Noten sind nie Bindungs-Quellen
+  (Learn-Falle gefiltert).
+- **CSV-Schema:** `*_kind=pitchbend`, Spalten `mode`/`steps`/`touch_number`,
+  `type=touch`; Factory-Profil `Frontier_AlphaTrack.csv` (32 Controls).
+- Tests: 895 Cases / 30171 Assertions grün. **Feldtest offen** (Motor,
+  Encoder-`steps`, Scrub-Gap); LCD + Native-Mode-Force-SysEx folgen mit M9.
+
+## Davor (15.07.2026) — MIDI-Rig M6.1 + M7 (ADR 006): Shift-Pad-Richtung + Channelstrip-Ebenen
+
+- **M6.1:** Shift-Pad zeigt die Richtung SOLID (rot=verringern/orange=erhöhen/
+  grün=gefunden) statt zu blinken; `PickupState.physicalAbove/aligned`.
+- **M7:** K1-Top-Encoder (CSV `role=layer_select`) wählen pro Channelstrip
+  eine von 3 Binding-Bänken (`ChannelStripLayers`, 8-Step-Zonen, „aktive
+  Ebene = Lernziel", pro Session persistiert als `stripLayer`); dauerhafte
+  Layer-Farbe als LED-Basis, tempo-synchrone 8tel-/16tel-Blinks. Feldtest offen.
+
+## Davor (15.07.2026) — MIDI-Rig M6 (ADR 006): Pickup-LED + Verhalten
 
 - **Ebenen-Wechsel-Sprung-Fix (MidiInBindings):** physische Position pro
   Adresse geteilt (`physicalPositions`), jedes CC-Event disengaged die

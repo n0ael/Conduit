@@ -48,6 +48,20 @@ paths:
   bleibt die Spalten-Status-LED. `PickupState` trägt `physicalAbove`/
   `aligned`; aligned-Einträge sieht nur Mechanismus 4, `waitingFor()`
   filtert sie für 1–3 aus.
+- Motorfader/Ribbons (M8): Pitch-Bend-Bindungen leben als Nummer
+  `128 + Kanal` (`grid::pitchBendBindingNumber`) im CC-Namensraum — die
+  PB-ADRESSE ist der Kanal (findBySendAddress matcht PB ueber
+  `sendChannel`, kanal-agnostische M4b-Regel gilt dort NICHT). Adress-Modi
+  (absolute/direct/scrub/relativeTicks) sind profil-getrieben
+  (`setAddressMode`, GridPage::rebuildAddressModes): `direct` =
+  position-Feedback (Motor), wartet NIE (Pickup-Exemption); scrub/
+  relativeTicks wenden Deltas OHNE Takeover/Glaettung auf die aktive Ebene
+  an. Positions-Feedback sendet AUSSCHLIESSLICH der wert-getriebene
+  `PositionFeedbackRouter` (60-Hz-Diff, touch-gated, Basiswert — nie der
+  M5c-Effektivwert); der Echo-Pfad ueberspringt `position`-meanings und
+  pitchBend-Feedback. Touch-Noten (`touch_number`, `type=touch`) sind NIE
+  Bindungs-Quellen — GridPage filtert sie vor Learn/Bindungen (Learn-Falle:
+  der Griff zum Fader bindet sonst die Touch-Note).
 - Channelstrip-Ebenen (M7): die 4 Top-Encoder (CSV `role=layer_select`)
   wählen pro Spalte (`group`) eine von 3 Binding-Bänken. 1:1 bleibt — eine
   Adresse pro (Spalte, Ebene); `bestMatch` filtert geebente Bindungen auf

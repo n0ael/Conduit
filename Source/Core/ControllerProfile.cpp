@@ -77,23 +77,32 @@ namespace
 
     AddressKind fieldAsAddressKind (const juce::StringArray& fields, int index)
     {
-        return fieldAsString (fields, index).equalsIgnoreCase ("note")
-                   ? AddressKind::note
-                   : AddressKind::cc;
+        const auto text = fieldAsString (fields, index);
+
+        if (text.equalsIgnoreCase ("note"))
+            return AddressKind::note;
+
+        // M8: Pitch Bend (Motorfader/Ribbon, AlphaTrack) -- Adresse ist der Kanal.
+        if (text.equalsIgnoreCase ("pitchbend") || text.equalsIgnoreCase ("pb"))
+            return AddressKind::pitchBend;
+
+        return AddressKind::cc;
     }
 
     /** Liest Feedback-Slot N (1-basiert) -- nullopt-Ersatz: number bleibt -1
-        wenn die Spalte fehlt/leer ist (kein Feedback an dieser Stelle). */
+        wenn die Spalte fehlt/leer ist (kein Feedback an dieser Stelle).
+        pitchBend-Feedback (M8) braucht keine number (Adresse = Kanal). */
     bool readFeedbackSlot (const juce::StringArray& fields, int kindCol, int channelCol,
                           int numberCol, int meaningCol, FeedbackAddress& out)
     {
+        const auto kind   = fieldAsAddressKind (fields, kindCol);
         const auto number = fieldAsInt (fields, numberCol, -1);
-        if (number < 0)
+        if (number < 0 && kind != AddressKind::pitchBend)
             return false;
 
-        out.kind    = fieldAsAddressKind (fields, kindCol);
+        out.kind    = kind;
         out.channel = juce::jlimit (1, 16, fieldAsInt (fields, channelCol, 1));
-        out.number  = number;
+        out.number  = juce::jmax (0, number);
         out.meaning = fieldAsString (fields, meaningCol);
         return true;
     }
@@ -103,8 +112,16 @@ const ControllerControl* ControllerProfile::findBySendAddress (
     AddressKind kind, int number) const noexcept
 {
     for (const auto& control : controls)
-        if (control.sendKind == kind && control.sendNumber == number)
+    {
+        if (control.sendKind != kind)
+            continue;
+
+        // M8 pitchBend: die Adresse ist der KANAL (number-Param traegt ihn).
+        const auto address = kind == AddressKind::pitchBend ? control.sendChannel
+                                                            : control.sendNumber;
+        if (address == number)
             return &control;
+    }
 
     return nullptr;
 }
@@ -137,6 +154,9 @@ ControllerProfile parseControllerProfileCsv (const juce::String& text, Controlle
     const auto colSection     = columnIndex ("section");
     const auto colGroup       = columnIndex ("group");
     const auto colRole        = columnIndex ("role");
+    const auto colMode        = columnIndex ("mode");
+    const auto colSteps       = columnIndex ("steps");
+    const auto colTouchNumber = columnIndex ("touch_number");
     const auto colDevice      = columnIndex ("device");
     const auto colSendKind    = columnIndex ("send_kind");
     const auto colSendChannel = columnIndex ("send_channel");
@@ -185,9 +205,16 @@ ControllerProfile parseControllerProfileCsv (const juce::String& text, Controlle
         control.section     = fieldAsString (fields, colSection);
         control.group       = fieldAsString (fields, colGroup);
         control.role        = fieldAsString (fields, colRole);
+        control.mode        = fieldAsString (fields, colMode);
+        control.steps       = juce::jmax (0, fieldAsInt (fields, colSteps, 0));
+        control.touchNumber = fieldAsInt (fields, colTouchNumber, -1);
         control.sendKind    = fieldAsAddressKind (fields, colSendKind);
         control.sendChannel = juce::jlimit (1, 16, fieldAsInt (fields, colSendChannel, 1));
         control.sendNumber  = fieldAsInt (fields, colSendNumber, -1);
+
+        // M8 pitchBend: die Adresse ist der Kanal -- send_number darf fehlen.
+        if (control.sendNumber < 0 && control.sendKind == AddressKind::pitchBend)
+            control.sendNumber = 0;
 
         if (control.sendNumber < 0)
         {

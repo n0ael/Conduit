@@ -609,6 +609,84 @@ NICHT die vom User genannte „Shift-Pad = immer 8tel Layer-Farbe"-Variante
 (offen: würde die Richtungs-Hilfe ersetzen, bewusst zunächst als Override
 belassen). **Feldtest offen.**
 
+## M8 — Bidirektionale Ribbons/Motorfader (07/2026)
+
+Anlass: User-Fund Frontier **AlphaTrack** (Motorfader + Touch-Strip +
+3 Touch-Encoder, USB). Protokoll-Quelle: offizielle Doku
+„AlphaTrack Native Mode MIDI Interface Description v1.0" (frontierdesign.com,
+Kopie gesichtet 16.07.2026): Fader = **Pitch Bend ch1 in BEIDE Richtungen**
+(Motor faehrt auf zurueckgesendetes `e0 yy zz`, 10-bit), Fader-Touch =
+Note 0x68; Strip = Pitch Bend **ch10** (absolute Position 0..31, `nn<<7`),
+Touch-Noten 0x74/0x7b; Encoder = CC 16..18 **relativ** (1..63 = +,
+65..127 = − — exakt die `decodeSignedDelta`-Kodierung aus M7); Buttons =
+Noten, LEDs teilen die Notennummer (Echo-Pfad ab Werk kompatibel); LCD =
+SysEx (**M9**, ebenso das Native-Mode-Force-SysEx `f0 00 01 40 20 01 00 f7`
+— bis dahin Native Mode im AlphaTrack-Treiber-Applet einstellen).
+
+User-Entscheidungen (16.07.2026): Motor spiegelt **kontinuierlich,
+touch-gated** (Finger gewinnt; Loslassen faehrt nach); Motor zeigt den
+**Basiswert**, nie den M5c-Effektivwert (kein Motor-Tanzen/Verschleiss);
+Motor folgt der **aktiven Ebene** (Shift-/Channelstrip-Wechsel = Sprung auf
+den Wert der neuen Bank); Ribbon arbeitet **relativ/Scrub** (voller Strip =
+voller Regelweg, Neuaufsetzen ankert ohne Sprung).
+
+- **Transport:** `ControllerEvent::Kind::pitchBend` (14-bit, `is14Bit`,
+  number = 0 — die Adresse IST der Kanal); MidiPortHub reicht
+  `isPitchWheel()` durch (Latest-Pending-Packing traegt genau 4 Kinds).
+- **Bindungs-Adressraum:** PB-Bindungen leben als Nummer
+  `128 + Kanal` (129..144, `grid::pitchBendBindingNumber`) im CC-Namensraum —
+  Persistenz unveraendert (alte Sessions kennen keine Nummer > 127), zwei
+  PB-Kanaele (Fader ch1 / Strip ch10) kollidieren nie im kanal-agnostischen
+  Matching. Learn bindet PB wie CCs (`handleIncomingPitchBend`).
+  Map-Tab/MacroPanel zeigen „Pitch Bend" statt „CC 129"; das
+  `midiInCcField` klemmt bis 144 (sonst korrumpierte ein Feld-Commit die
+  Bindung auf CC 127).
+- **Adress-Modi (`MidiInBindings::AddressMode`,** profil-getrieben ueber
+  `setAddressMode`, Besitzer GridPage/`rebuildAddressModes`): `absolute`
+  (Default, Takeover wie gehabt) · `direct` (Motorfader: Werte greifen
+  sofort, Adresse wartet NIE — Pickup-Exemption auch in
+  `updatePickupStates`) · `scrub` (absoluter Positions-Strom relativ:
+  Delta aufeinanderfolgender Positionen, Anker nach Pause >
+  `kScrubGapTicks` ≈ 250 ms) · `relativeTicks` (signed Ticks via
+  `ChannelStripLayers::decodeSignedDelta`, Skala CSV-Spalte `steps`,
+  Default 127). Deltas akkumulieren in `Binding::pendingDelta01` und
+  werden im tick() DIREKT (ohne Glaettung/Takeover) auf
+  `clamp(current + delta)` angewendet — sie folgen `bestMatch`, treffen
+  also die aktive Shift-/Channelstrip-Ebene.
+- **`PositionFeedbackRouter` (Source/Core, headless):** wert-getriebenes
+  Gegenstueck zum Echo-Pfad — pro Tick den Basiswert der AKTIVEN Bindung
+  jedes `position`-Feedback-Controls diffen (Dedupe 14-bit) und senden;
+  Touch-Gate ueber die Touch-Noten. Seams (GridPage): `send`
+  (pitchBend → `MidiMessage::pitchWheel(feedback.channel, value14)` — der
+  PB-Kanal kommt aus dem CSV, NICHT vom Geraete-Kanal; cc/note → Geraete-
+  Kanal, value14 >> 7) und `currentBoundValueFor`
+  (= `activeBindingForAddress` + `controlValueFor`). Der Echo-Pfad
+  ueberspringt `position`-meanings UND pitchBend-Feedback komplett
+  (exklusiv Router — ein Event-Echo wuerde gegen das Touch-Gate senden).
+- **CSV-Schema v1 erweitert:** `*_kind` kennt `pitchbend`/`pb`
+  (send_number darf dann fehlen → 0; `findBySendAddress` matcht PB ueber
+  den KANAL); neue optionale Spalten `mode` (leer/`scrub`/`relative`),
+  `steps`, `touch_number`; neuer `type=touch` fuer reine Touch-Sensoren
+  ohne Eigenfunktion (Send-Note wird nur gefiltert).
+- **Touch-Noten-Filter (Learn-Falle):** GridPage leitet Touch-Noten
+  (`positionRouter.isTouchNote`) NUR an den Router — sonst wuerde der
+  Griff zum Fader im MIDI-Learn die Touch-Note statt des Fader-PB binden
+  (AlphaTrack sendet Touch VOR der ersten Bewegung).
+- **Factory-CSV `Assets/ControllerProfiles/Frontier_AlphaTrack.csv`:**
+  32 Controls aus der Native-Mode-Doku (Fader mit position-Feedback +
+  Touch 104; Strip scrub + Touch 116 + type=touch 123; 3 Encoder relativ
+  mit Touch 120..122 + Pushes 32..34; 22 Buttons inkl. LED-Echo, wo die
+  Hardware eine LED hat). Output-only-LEDs ohne Send-Adresse (ANY-Solo
+  0x73, AUTO WRITE/READ 0x4b/0x4e) sind bewusst nicht abgebildet (kein
+  Konsument). Library referenziert das BinaryData-Symbol direkt
+  (M4-Lektion `originalFilenames`).
+
+**Grenzen/offen:** Feldtest AlphaTrack (Motor-Verhalten, Encoder-`steps`-
+Gefuehl, Scrub-Gap); LCD + Native-Mode-Force-SysEx = M9; Strip sendet nur
+32 Stufen (Scrub glaettet das inhaerent); ein `position`-Feedback als
+CC ist vorgesehen, aber ungetestet an echter Hardware (kein Motor-CC-
+Geraet im Rig).
+
 ## Lektionen
 
 - **MSVC + verschachtelte Brace-Init:**
@@ -687,8 +765,8 @@ belassen). **Feldtest offen.**
   M5  Map-Modus + Tab + Chord-Learn — M5a Shift-Ebenen/Chord-Learn · M5b app-weites Dock + Map-Tab + Overlay · M5c Conduit-Macro-Ziele mit Modulation — komplett erledigt 07/2026
   M6  Pickup-LED + Verhalten — Soft-Takeover-Feedback über Controller-Profile-LEDs (PickupLedRouter: Spalten-Status/Detail-Modus/Shift-Pad-Anzeige, TakeoverMode pro Gerät, Ebenen-Wechsel-Sprung-Fix) — erledigt 07/2026 (Feldtest offen); M6.1 (15.07.2026): Shift-Pad zeigt die RICHTUNG solid (rot/orange/grün, kein Blinken) statt zu blinken — Näherungswert bleibt die Spalten-Status-LED
   M7  Channelstrip-Ebenen — Top-Encoder (role=layer_select) wählen pro Spalte eine von 3 Binding-Bänken (ChannelStripLayers, 8-Step-Zonen, Ebenen-Blink, „aktive Ebene = Lernziel", pro Session persistiert) — erledigt 07/2026 (Feldtest offen)
-  M8  Bidirektional Ribbons — Motorfader-/Ribbon-Feedback in beide Richtungen — offen
-  M9  SysEx-Snippets — Sende-only Hex-Snippets mit optionalem `{v}`-Platzhalterbyte — offen
+  M8  Bidirektional Ribbons — Motorfader-/Ribbon-Feedback in beide Richtungen (PitchBend-Adressen 128+Kanal, AddressModes direct/scrub/relativeTicks, PositionFeedbackRouter, AlphaTrack-Factory-CSV) — erledigt 07/2026 (Feldtest offen)
+  M9  SysEx-Snippets — Sende-only Hex-Snippets mit optionalem `{v}`-Platzhalterbyte + AlphaTrack-LCD/Native-Mode-Force — offen
 
 ## Referenzen
 

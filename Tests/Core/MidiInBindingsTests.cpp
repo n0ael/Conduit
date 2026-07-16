@@ -788,3 +788,183 @@ TEST_CASE ("MidiInBindings: Chord-Learn -- Pad-Akkord bindet die letzte Note mit
     REQUIRE (binding->cc == 40);
     REQUIRE (binding->modifiers == grid::ModifierSet { { 1, 36 } });
 }
+
+//==============================================================================
+// MIDI-Rig M8: Pitch-Bend-Bindungen + Adress-Modi (direct/scrub/relativeTicks)
+
+TEST_CASE ("M8: Pitch Bend bindet per Learn als Nummer 128+Kanal und wendet 14-bit an", "[grid][midiin][m8]")
+{
+    Rig rig;
+    rig.values[1] = 0.98f;
+
+    int learnedNumber = -1;
+    rig.bindings.onLearnCompleted = [&] (const grid::MacroControlKey&, int, int number,
+                                         bool isNote, const grid::ModifierSet&)
+    {
+        REQUIRE_FALSE (isNote);
+        learnedNumber = number;
+    };
+
+    rig.bindings.armLearn (keyFor (1));
+    rig.bindings.handleIncomingPitchBend (1, 16383);
+    REQUIRE (learnedNumber == grid::pitchBendBindingNumber (1));
+    REQUIRE (learnedNumber == 129);
+
+    const auto* binding = rig.bindings.bindingFor (keyFor (1));
+    REQUIRE (binding != nullptr);
+    REQUIRE (binding->cc == 129);
+
+    // Nahe am Ist-Wert -> Pickup nimmt sofort auf, Glaettung faehrt auf 1.0.
+    rig.ticks (30);
+    REQUIRE (rig.values[1] == Approx (1.0f).margin (0.01));
+}
+
+TEST_CASE ("M8: zwei PB-Kanaele kollidieren nicht (Fader ch1 vs. Strip ch10)", "[grid][midiin][m8]")
+{
+    grid::MidiInBindings bindings;
+    bindings.bind (keyFor (1), 1, grid::pitchBendBindingNumber (1));
+    bindings.bind (keyFor (2), 10, grid::pitchBendBindingNumber (10));
+    REQUIRE (bindings.count() == 2);
+    REQUIRE (bindings.bindingFor (keyFor (1))->cc == 129);
+    REQUIRE (bindings.bindingFor (keyFor (2))->cc == 138);
+}
+
+TEST_CASE ("M8: direct-Modus wendet sofort an (kein Pickup), absolute wartet", "[grid][midiin][m8]")
+{
+    Rig rig;
+    rig.bindings.bind (keyFor (1), 1, 20);
+    rig.values[1] = 0.9f;
+
+    // Absolut (Default): weit entfernter Wert wird vom Takeover gehalten.
+    rig.bindings.handleIncomingCc (1, 20, 10);
+    rig.ticks (10);
+    REQUIRE (rig.applied.empty());
+
+    // direct: derselbe Wert greift sofort.
+    rig.bindings.setAddressMode (20, false, grid::AddressMode::direct);
+    rig.bindings.handleIncomingCc (1, 20, 10);
+    rig.ticks (10);
+    REQUIRE_FALSE (rig.applied.empty());
+    REQUIRE (rig.values[1] == Approx (10.0f / 127.0f).margin (0.01));
+}
+
+TEST_CASE ("M8: direct-Adresse meldet nie waiting (Pickup-Exemption)", "[grid][midiin][m8]")
+{
+    Rig rig;
+    rig.bindings.bind (keyFor (1), 1, 20);
+    rig.values[1] = 0.9f;
+
+    int waitingReports = 0;
+    rig.bindings.onPickupStateChanged = [&] (const grid::InputAddress&,
+                                             const grid::MidiInBindings::PickupState& state)
+    {
+        if (state.waiting)
+            ++waitingReports;
+    };
+
+    // Absolut: ein weit entfernter Wert erzeugt einen Warte-Zustand ...
+    rig.bindings.handleIncomingCc (1, 20, 10);
+    rig.ticks (2);
+    REQUIRE (waitingReports > 0);
+
+    // ... direct: derselbe Ablauf wartet nie.
+    waitingReports = 0;
+    rig.bindings.setAddressMode (20, false, grid::AddressMode::direct);
+    rig.bindings.handleIncomingCc (1, 20, 120);
+    rig.ticks (2);
+    REQUIRE (waitingReports == 0);
+}
+
+TEST_CASE ("M8: scrub ankert beim Aufsetzen und wendet Deltas relativ an", "[grid][midiin][m8]")
+{
+    Rig rig;
+    const auto number = grid::pitchBendBindingNumber (10);   // Strip = PB ch10
+    rig.bindings.bind (keyFor (1), 10, number);
+    rig.bindings.setAddressMode (number, false, grid::AddressMode::scrub);
+    rig.values[1] = 0.5f;
+
+    // Erstes Event nach Pause = Anker: kein Sprung, egal wo der Finger aufsetzt.
+    rig.bindings.handleIncomingPitchBend (10, 3277);   // ~0.2
+    rig.tick();
+    REQUIRE (rig.values[1] == Approx (0.5f));
+
+    // Folge-Event: Delta +0.1 -> 0.6.
+    rig.bindings.handleIncomingPitchBend (10, 4915);   // ~0.3
+    rig.tick();
+    REQUIRE (rig.values[1] == Approx (0.6f).margin (0.005));
+
+    // Pause > kScrubGapTicks -> naechstes Event ankert neu (kein Sprung).
+    rig.ticks (20);
+    rig.bindings.handleIncomingPitchBend (10, 14746);   // ~0.9
+    rig.tick();
+    REQUIRE (rig.values[1] == Approx (0.6f).margin (0.005));
+
+    // ... und ab dort geht es wieder relativ weiter (abwaerts).
+    rig.bindings.handleIncomingPitchBend (10, 13107);   // ~0.8 -> Delta -0.1
+    rig.tick();
+    REQUIRE (rig.values[1] == Approx (0.5f).margin (0.01));
+}
+
+TEST_CASE ("M8: scrub klemmt an den Regelweg-Enden", "[grid][midiin][m8]")
+{
+    Rig rig;
+    const auto number = grid::pitchBendBindingNumber (10);
+    rig.bindings.bind (keyFor (1), 10, number);
+    rig.bindings.setAddressMode (number, false, grid::AddressMode::scrub);
+    rig.values[1] = 0.95f;
+
+    rig.bindings.handleIncomingPitchBend (10, 0);       // Anker unten
+    rig.bindings.handleIncomingPitchBend (10, 16383);   // volles Delta +1.0
+    rig.tick();
+    REQUIRE (rig.values[1] == Approx (1.0f));
+}
+
+TEST_CASE ("M8: relativeTicks dekodiert signed und skaliert ueber steps", "[grid][midiin][m8]")
+{
+    Rig rig;
+    rig.bindings.bind (keyFor (1), 1, 16);
+    rig.bindings.setAddressMode (16, false, grid::AddressMode::relativeTicks, 100);
+    rig.values[1] = 0.5f;
+
+    rig.bindings.handleIncomingCc (1, 16, 4);    // +4 Ticks -> +0.04
+    rig.tick();
+    REQUIRE (rig.values[1] == Approx (0.54f).margin (0.001));
+
+    rig.bindings.handleIncomingCc (1, 16, 124);   // -(128-124) = -4 -> -0.04
+    rig.tick();
+    REQUIRE (rig.values[1] == Approx (0.5f).margin (0.001));
+
+    // Default-Steps (0 -> 127): +4 Ticks = +4/127.
+    rig.bindings.setAddressMode (16, false, grid::AddressMode::relativeTicks);
+    rig.bindings.handleIncomingCc (1, 16, 4);
+    rig.tick();
+    REQUIRE (rig.values[1] == Approx (0.5f + 4.0f / 127.0f).margin (0.001));
+}
+
+TEST_CASE ("M8: relative Deltas gehen an die aktive Shift-Ebene", "[grid][midiin][m8]")
+{
+    Rig rig;
+    rig.bindings.bind (keyFor (1), 1, 16);                                // Basis
+    rig.bindings.bind (keyFor (2), 1, 16, false, { { 1, 36 } });          // Shift-Ebene
+    rig.bindings.setAddressMode (16, false, grid::AddressMode::relativeTicks, 100);
+    rig.values[1] = 0.2f;
+    rig.values[2] = 0.8f;
+
+    // Modifier halten -> Delta trifft die Shift-Ebene, Basis unveraendert.
+    rig.bindings.handleIncomingNote (1, 36, 100, true);
+    rig.bindings.handleIncomingCc (1, 16, 10);   // +0.1
+    rig.tick();
+    REQUIRE (rig.values[2] == Approx (0.9f).margin (0.001));
+    REQUIRE (rig.values[1] == Approx (0.2f).margin (0.001));
+}
+
+TEST_CASE ("M8: clearAddressModes stellt Absolut-Verhalten wieder her", "[grid][midiin][m8]")
+{
+    Rig rig;
+    rig.bindings.bind (keyFor (1), 1, 16);
+    rig.bindings.setAddressMode (16, false, grid::AddressMode::relativeTicks);
+    REQUIRE (rig.bindings.addressModeFor (16, false) == grid::AddressMode::relativeTicks);
+
+    rig.bindings.clearAddressModes();
+    REQUIRE (rig.bindings.addressModeFor (16, false) == grid::AddressMode::absolute);
+}

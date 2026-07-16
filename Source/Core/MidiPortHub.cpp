@@ -168,6 +168,18 @@ void MidiPortHub::InputConnection::handleIncomingMidiMessage (juce::MidiInput*,
             }
         }
     }
+    else if (message.isPitchWheel())
+    {
+        // M8: Motorfader/Ribbons (AlphaTrack) senden Pitch Bend -- die
+        // Adresse ist der KANAL (Fader ch1, Strip ch10), number bleibt 0.
+        midi::ControllerEvent event;
+        event.kind    = midi::ControllerEvent::Kind::pitchBend;
+        event.channel = message.getChannel();
+        event.number  = 0;
+        event.value   = message.getPitchWheelValue();
+        event.is14Bit = true;
+        pushController (event);
+    }
     else if (message.isProgramChange())
     {
         midi::ControllerEvent event;

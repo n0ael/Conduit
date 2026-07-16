@@ -226,8 +226,10 @@ private:
     // Takeover). Toggle an/aus + Learn (naechster CC bindet) + Kanal/CC.
     push::TextTile midiInTile { "MIDI In" };
     push::TextTile learnTile  { "Learn", push::colours::ledOrange };
+    // M8: Nummern >= 128+1 sind Pitch-Bend-Adressen (128 + Kanal, per Learn
+    // gebunden) -- das Feld darf sie nicht auf CC 127 zurueckklemmen.
     NumberFieldBracket midiInChannelField { NumberFieldBracket::Config { 1.0, 16.0, 1.0, 1.0, 0, 0.1, "Ch" } };
-    NumberFieldBracket midiInCcField      { NumberFieldBracket::Config { 0.0, 127.0, 20.0, 1.0, 0, 0.5, "CC" } };
+    NumberFieldBracket midiInCcField      { NumberFieldBracket::Config { 0.0, 144.0, 20.0, 1.0, 0, 0.5, "CC" } };
 
     juce::Viewport viewport;
     juce::Component rowHost;

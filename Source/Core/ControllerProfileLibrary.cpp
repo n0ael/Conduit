@@ -40,6 +40,27 @@ void ControllerProfileLibrary::reload()
         addProfile (std::move (profile), false);
     }
 
+    // MIDI-Rig M8: Frontier AlphaTrack (Native Mode) -- gleiche Direkt-
+    // Referenz-Begruendung wie oben.
+    {
+        const juce::String sourceName ("Frontier_AlphaTrack.csv");
+        SourceReport sourceReport;
+        sourceReport.sourceName = sourceName;
+        sourceReport.fromUserFolder = false;
+
+        auto profile = midirig::parseControllerProfileCsv (
+            juce::String::fromUTF8 (BinaryData::Frontier_AlphaTrack_csv,
+                                    BinaryData::Frontier_AlphaTrack_csvSize),
+            &sourceReport.parse);
+
+        if (profile.device.isEmpty())
+            profile.device = "AlphaTrack";
+
+        sourceReport.controls = static_cast<int> (profile.controls.size());
+        sourceReports.push_back (sourceReport);
+        addProfile (std::move (profile), false);
+    }
+
     // User-Ordner Conduit/Controllers/*.csv (FLACH, ADR E2 -- eine Datei =
     // ein Geraet, keine {Hersteller}/-Unterordner).
     if (userProfileFolder != juce::File() && userProfileFolder.isDirectory())

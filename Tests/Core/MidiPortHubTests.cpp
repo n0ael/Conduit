@@ -447,3 +447,39 @@ TEST_CASE ("MidiPortHub: Program Change kommt als programChange-Event an", "[mid
     REQUIRE (events[0].channel == 2);
     REQUIRE (events[0].number == 42);
 }
+
+TEST_CASE ("MidiPortHub: Pitch Bend wird als 14-bit-ControllerEvent gereicht (M8)", "[midirig]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettings temp;
+    MidiRigSettings settings { temp.options() };
+    FakePortRig rig;
+    rig.inputs = { juce::MidiDeviceInfo ("AlphaTrack", "id-at") };
+
+    const auto device = settings.addDevice ("AT", RigDeviceKind::controller);
+    settings.setMidiInName (device, "AlphaTrack");
+
+    MidiPortHub hub { settings, rig.inputProvider(), rig.outputProvider(),
+                      rig.inputOpener(), rig.outputOpener() };
+    hub.syncFromRegistry();
+    REQUIRE (hub.isInputConnected (device));
+
+    std::vector<conduit::midi::ControllerEvent> events;
+    hub.subscribeController (device, [&events] (const conduit::midi::ControllerEvent& e)
+                             { events.push_back (e); });
+
+    // Fader (PB ch1) + Strip (PB ch10, AlphaTrack-Kodierung nn<<7).
+    rig.openInputCallbacks["id-at"]->handleIncomingMidiMessage (
+        nullptr, juce::MidiMessage::pitchWheel (1, 16383));
+    rig.openInputCallbacks["id-at"]->handleIncomingMidiMessage (
+        nullptr, juce::MidiMessage::pitchWheel (10, 124 << 7));
+    hub.drainNow();
+
+    REQUIRE (events.size() == 2);
+    CHECK (events[0].kind == conduit::midi::ControllerEvent::Kind::pitchBend);
+    CHECK (events[0].channel == 1);
+    CHECK (events[0].value == 16383);
+    CHECK (events[0].is14Bit);
+    CHECK (events[1].channel == 10);
+    CHECK (events[1].value == 124 << 7);
+}

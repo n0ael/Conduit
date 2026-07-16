@@ -756,7 +756,13 @@ MacroPanel::MacroPanel (grid::MacroBindings& bindingsToUse, grid::IMidiOutputTar
     };
     midiInChannelField.onValueCommitted = [this] (double) { if (midiInTile.isActive()) commitMidiInBinding(); };
     // Block L: Tooltip zeigt den Funktionsnamen live beim Swipe.
-    midiInCcField.onValueChanged   = [this] (double v) { midiInCcField.setTooltip (CcNames::displayName ((int) v)); };
+    // M8: Nummern >= 128+1 sind Pitch-Bend-Adressen (128 + Kanal).
+    midiInCcField.onValueChanged   = [this] (double v)
+    {
+        midiInCcField.setTooltip ((int) v >= grid::kPitchBendBindingBase
+                                      ? juce::String ("Pitch Bend")
+                                      : CcNames::displayName ((int) v));
+    };
     midiInCcField.onValueCommitted = [this] (double)   { if (midiInTile.isActive()) commitMidiInBinding(); };
 
     // MIDI-Learn (User-Wunsch 11.07.): scharfschalten, der naechste
@@ -869,10 +875,13 @@ void MacroPanel::refreshMidiInRow()
         midiInChannelField.setValue (binding->channel, juce::dontSendNotification);
         midiInCcField.setValue (binding->cc, juce::dontSendNotification);
 
-        // Block L / M4: Funktions- bzw. Notenname; M5: Shift-Ebene anhaengen.
+        // Block L / M4: Funktions- bzw. Notenname; M5: Shift-Ebene anhaengen;
+        // M8: Pitch-Bend-Adressen (Nummer >= 128+1) beim Namen nennen.
         auto tooltip = binding->isNote
                            ? juce::MidiMessage::getMidiNoteName (binding->cc, true, true, 4)
-                           : CcNames::displayName (binding->cc);
+                           : (binding->cc >= grid::kPitchBendBindingBase
+                                  ? juce::String ("Pitch Bend")
+                                  : CcNames::displayName (binding->cc));
         if (! binding->modifiers.empty())
         {
             juce::StringArray names;

@@ -123,9 +123,13 @@ void MappingsListComponent::refresh()
 
 juce::String MappingsListComponent::describeBinding (const grid::MidiInBindings::Binding& binding)
 {
+    // M8: Pitch-Bend-Bindungen (Motorfader/Ribbon) tragen ihren Kanal in
+    // der Nummer (>= 128+1) -- als "Pitch Bend" anzeigen, nicht als CC.
     auto text = binding.isNote
                     ? "Note " + juce::MidiMessage::getMidiNoteName (binding.cc, true, true, 4)
-                    : "CC " + juce::String (binding.cc);
+                    : (binding.cc >= grid::kPitchBendBindingBase
+                           ? juce::String ("Pitch Bend")
+                           : "CC " + juce::String (binding.cc));
     text << juce::String::fromUTF8 (" \xc2\xb7 Ch ") << juce::String (binding.channel);
 
     if (! binding.modifiers.empty())

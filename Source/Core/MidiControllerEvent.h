@@ -11,12 +11,15 @@ namespace conduit::midi
     vollständig angelegt, damit der Event-Typ dann nicht migriert werden muss. */
 struct ControllerEvent
 {
-    enum class Kind : int { cc = 0, nrpn, programChange };
+    // pitchBend (M8): Motorfader/Ribbons senden Pitch Bend (AlphaTrack-Muster);
+    // number bleibt 0 (die Adresse IST der Kanal), value = 14-bit, is14Bit=true.
+    // Genau 4 Kinds -- das Latest-Pending-Packing (MidiPortHub) traegt 2 Bits.
+    enum class Kind : int { cc = 0, nrpn, programChange, pitchBend };
 
     Kind kind      = Kind::cc;
     int  channel   = 1;      // 1..16
-    int  number    = 0;      // CC-Nummer | NRPN-Parameter | Program-Nummer
-    int  value     = 0;      // 7-bit (cc/pc) oder 14-bit (nrpn, is14Bit)
+    int  number    = 0;      // CC-Nummer | NRPN-Parameter | Program-Nummer | 0 (pitchBend)
+    int  value     = 0;      // 7-bit (cc/pc) oder 14-bit (nrpn/pitchBend, is14Bit)
     bool is14Bit   = false;
     bool isRelative = false; // Relative-Encoder-Modi (M2+)
 };

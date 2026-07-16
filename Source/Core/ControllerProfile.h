@@ -9,9 +9,12 @@ namespace conduit::midirig
 
 //==============================================================================
 /** Send-/Feedback-Adressen eines Controller-Profils (ADR 006 E2) koennen
-    CC ODER Note sein -- anders als die Klangerzeuger-Profile (MidiDeviceProfile.h),
-    die praktisch immer CC/NRPN sind, senden Pads/Taster meist Noten. */
-enum class AddressKind { cc, note };
+    CC, Note ODER Pitch Bend sein -- anders als die Klangerzeuger-Profile
+    (MidiDeviceProfile.h), die praktisch immer CC/NRPN sind, senden Pads/
+    Taster meist Noten; Motorfader/Ribbons (M8, AlphaTrack) senden Pitch
+    Bend. Bei pitchBend ist der KANAL die Adresse (kein number) -- der
+    Fader des AlphaTrack lebt auf ch1, der Touch-Strip auf ch10. */
+enum class AddressKind { cc, note, pitchBend };
 
 /** Eine Feedback-Adresse ("was schickt Conduit zur Rueckmeldung an dieses
     physische Control zurueck"): LED-Ring, Motorfader-Position, Display-
@@ -50,13 +53,39 @@ struct ControllerControl
 
     AddressKind sendKind = AddressKind::cc;
     int sendChannel = 1;
-    int sendNumber  = -1;   // -1 = nicht belegt
+    int sendNumber  = -1;   // -1 = nicht belegt (pitchBend: immer 0)
+
+    /** M8: EINGANGS-Modus des Controls. Leer = absolut (Default, Soft-
+        Takeover greift). `scrub` = absoluter Positions-Strom wird RELATIV
+        angewendet (Delta zur letzten Position, Ribbon/Touch-Strip --
+        User-Entscheidung 16.07.2026); `relative` = signed Ticks
+        (Endlos-Encoder, Kodierung 1..63 = +, 65..127 = -). */
+    juce::String mode;
+
+    /** M8: nur mode=relative -- Ticks fuer den vollen Regelweg (0 = Default,
+        siehe MidiInBindings::kDefaultRelativeSteps). */
+    int steps = 0;
+
+    /** M8: Touch-Note dieses Controls (AlphaTrack: Fader 0x68, Strip 0x74,
+        Encoder 0x78..0x7a), -1 = keine. Touch-Noten sind KEINE Bindungs-
+        Quellen (Learn-Falle: der Griff zum Fader wuerde sonst die Note
+        binden) -- GridPage filtert sie und nutzt sie als Motor-Gate. */
+    int touchNumber = -1;
 
     std::vector<FeedbackAddress> feedback;   // 0..3 Eintraege
 };
 
 /** M7: `role`-Wert des Channelstrip-Ebenen-Selektors. */
 inline constexpr const char* kRoleLayerSelect = "layer_select";
+
+/** M8: `mode`-Werte (Spalte `mode`, s. ControllerControl::mode). */
+inline constexpr const char* kModeScrub    = "scrub";
+inline constexpr const char* kModeRelative = "relative";
+
+/** M8: `type`-Wert fuer reine Touch-Sensoren ohne Eigenfunktion (z. B. die
+    2-Finger-Note des AlphaTrack-Strips): die Send-Note wird wie eine
+    Touch-Note gefiltert, das Control traegt nie eine Bindung. */
+inline constexpr const char* kTypeTouch = "touch";
 
 //==============================================================================
 /** Controller-Profil (ADR 006 E2) -- EIN Geraet, im Gegensatz zu den
@@ -74,7 +103,9 @@ struct ControllerProfile
         kanal-agnostisch (M4b, User-Entscheidung 14.07.2026): der Kanal ist
         Geraete-Eigenschaft (`RigDevice::midiChannel`), nicht Profil-
         Eigenschaft -- die Kanal-Spalten im CSV werden geparst, aber beim
-        Matching ignoriert. Pure, nullptr bei keinem Treffer. */
+        Matching ignoriert. AUSNAHME pitchBend (M8): dort IST der Kanal die
+        Adresse -- `number` traegt dann den Send-KANAL (1..16), gematcht
+        wird gegen `sendChannel`. Pure, nullptr bei keinem Treffer. */
     [[nodiscard]] const ControllerControl* findBySendAddress (
         AddressKind kind, int number) const noexcept;
 };
@@ -94,14 +125,17 @@ struct ControllerParseReport
     getrieben, Spalten ueber ihre Namen (case-insensitiv), unbekannte
     Spalten ignoriert, RFC-4180-Quoting unterstuetzt.
 
-    Spalten: id, type, section, group, role, send_kind, send_channel, send_number,
+    Spalten: id, type, section, group, role, mode, steps, touch_number,
+    send_kind, send_channel, send_number,
     feedback1_kind, feedback1_channel, feedback1_number, feedback1_meaning,
     feedback2_kind, feedback2_channel, feedback2_number, feedback2_meaning,
     feedback3_kind, feedback3_channel, feedback3_number, feedback3_meaning.
-    `group` ist optional (M6) -- CSVs ohne die Spalte parsen unveraendert.
-    `*_kind`-Spalten: "note" fuer Noten-Adressen, alles andere (auch leer)
-    = CC (Default). Zeilen ohne `id` ODER ohne `send_number` werden
-    uebersprungen + gezaehlt. `device` kommt aus einer eigenen Spalte
+    `group` (M6) und `mode`/`steps`/`touch_number` (M8) sind optional --
+    CSVs ohne die Spalten parsen unveraendert.
+    `*_kind`-Spalten: "note" fuer Noten-Adressen, "pitchbend" (auch "pb")
+    fuer Pitch Bend (M8), alles andere (auch leer) = CC (Default). Zeilen
+    ohne `id` ODER ohne `send_number` werden uebersprungen + gezaehlt
+    (Ausnahme: pitchBend braucht keine send_number -- sie wird 0). `device` kommt aus einer eigenen Spalte
     "device" (erste nicht-leere Zeile gewinnt) -- fehlt sie, bleibt
     `ControllerProfile::device` leer (die Library setzt dann den
     Dateinamen als Fallback, siehe ControllerProfileLibrary). */
