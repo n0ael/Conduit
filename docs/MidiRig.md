@@ -828,7 +828,33 @@ Bausteine:
   M7  Channelstrip-Ebenen — Top-Encoder (role=layer_select) wählen pro Spalte eine von 3 Binding-Bänken (ChannelStripLayers, 8-Step-Zonen, Ebenen-Blink, „aktive Ebene = Lernziel", pro Session persistiert) — erledigt 07/2026 (Feldtest offen)
   M8  Bidirektional Ribbons — Motorfader-/Ribbon-Feedback in beide Richtungen (PitchBend-Adressen 128+Kanal, AddressModes direct/scrub/relativeTicks, PositionFeedbackRouter, AlphaTrack-Factory-CSV) — erledigt 07/2026, **Feldtest AlphaTrack bestanden** (17.07.2026); M8.1: Relativ-Kodierung profil-getrieben (`rel_encoding`, RelativeEncoding.h — AlphaTrack ist sign-magnitude, nicht Zweierkomplement)
   M9  SysEx-Empfang + Hardware-Preset-Browser (ADR 007, User-Entscheidung 17.07.2026) — M9a SysEx-Empfangsinfra (armed-gated Chunk-Transport im Hub, `Source/Core/Sysex/DsiSysex`-Codec: Packed-MS-Bit, Program-Dump/Inquiry-Parser, Name-Extraktion) erledigt 07/2026 · M9b Scanner+Inquiry+Preset-Cache (HardwarePresetScanner/-Library, EngineProcessor-Member) erledigt 07/2026 — Hardware-Verifikation (Name-Offset!) steht aus · M9c Preset-UI (HW-Presets im HardwareTargetPicker) + MidiPresetLoadTarget erledigt 07/2026 — **Mopho-Feldtest BESTANDEN (17.07.2026): 3 Bänke gelesen + per Push-Button auswählbar, Name-Offset 184 bestätigt**
-  M10 SysEx-Sende-Snippets — Sende-only Hex-Snippets mit optionalem `{v}`-Platzhalterbyte + AlphaTrack-LCD/Native-Mode-Force generisch (aus dem alten M9 abgespalten, unabhängig vom Empfangspfad) — offen
+  M10 SysEx-Sende-Snippets — Hex-Snippets mit `{v}`-Platzhalterbyte als CSV-Feedback-Typ (`feedbackN_sysex`) erledigt 07/2026 · AlphaTrack-LCD-Generik/`display`-Feedback im Grid ZURÜCKGESTELLT (User 17.07.2026: AlphaTrack läuft als Live-Remote — bei Bedarf wiederaufnehmen)
+
+## M10: SysEx-Sende-Snippets (ADR 006 E6)
+
+Sende-only Hex-Snippets als vierter Feedback-Typ der Controller-Profile
+(für Geräte mit SysEx-gesteuerten LEDs/Ringen — datengetrieben, kein
+Geräte-Code):
+
+- CSV-Spalten `feedbackN_sysex` (N=1..3, optional): Hex-Bytes der
+  KOMPLETTEN Wire-Nachricht inkl. F0/F7 (Leerzeichen optional,
+  case-insensitiv, kompakte Schreibweise erlaubt), mit optional GENAU
+  EINEM `{v}` = 7-bit-Laufzeitwert. Beispiel `F0 00 20 29 01 {v} F7`.
+  Nicht leer → der Slot ist ein SysEx-Feedback; kind/channel/number des
+  Slots entfallen, `meaning` gilt weiter (Router-Exklusiv-Regeln!).
+- Validierung im Parser (E1b, kein stilles Scheitern): kein F0/F7-Rahmen,
+  Datenbyte > 7F, Nicht-Hex, mehr als ein `{v}`, `{v}` auf F0/F7 →
+  Slot verworfen + Warnung im Report.
+- Laufzeit: `FeedbackAddress.sysexBytes`/`sysexValueIndex` +
+  `makeSysexFeedbackMessage(feedback, value7bit)` (pure; klemmt 0..127,
+  statische Snippets ignorieren den Wert). Der Echo-Pfad
+  (GridPage::onFeedbackEcho) sendet SysEx-Slots NACH allen
+  meaning-Skips, aber OHNE Echo-Cache-Eintrag (der Cache ist
+  CC/Note-keyed; Router restaurieren SysEx nie).
+- **Zurückgestellt (User 17.07.2026):** `display`-Feedback im
+  Grid-Kontext (AlphaTrack-LCD generisch) — der Echo-Pfad überspringt
+  `meaning == "display"` weiterhin bewusst still; das LCD lebt in der
+  Live-Remote-Bridge (docs/TouchLive.md §10l).
 
 ## M9: SysEx-Empfang + Hardware-Preset-Browser (ADR 007)
 

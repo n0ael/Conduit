@@ -195,3 +195,86 @@ TEST_CASE ("M8: CSV ohne rel_encoding-Spalte bleibt Zweierkomplement (M7-Kompati
     const auto profile = parseControllerProfileCsv (csv);
     CHECK (profile.findBySendAddress (AddressKind::cc, 0)->relEncoding == RelativeEncoding::twosComplement);
 }
+
+//==============================================================================
+// M10 (ADR 006 E6): SysEx-Sende-Snippets mit {v}-Platzhalter
+
+TEST_CASE ("M10: feedbackN_sysex parst Hex-Snippet mit {v}, meaning gilt weiter", "[midirig][sysex]")
+{
+    const auto csv = juce::String (
+        "device,id,type,send_kind,send_channel,send_number,"
+        "feedback1_kind,feedback1_channel,feedback1_number,feedback1_meaning,feedback1_sysex\n"
+        "T,ring,encoder,cc,1,16,,,,led_ring,F0 00 20 29 01 {v} F7\n"
+        "T,logo,pad,note,1,40,,,,,f0007f{v}f7\n"          // kompakt + case
+        "T,fix,pad,note,1,41,,,,,F0 7D 05 F7\n");         // statisch ohne {v}
+
+    ControllerParseReport report;
+    const auto profile = parseControllerProfileCsv (csv, &report);
+    REQUIRE (report.accepted == 3);
+    CHECK (report.warnings.isEmpty());
+
+    const auto* ring = profile.findBySendAddress (AddressKind::cc, 16);
+    REQUIRE (ring != nullptr);
+    REQUIRE (ring->feedback.size() == 1);
+    const auto& fb = ring->feedback[0];
+    CHECK (fb.isSysex());
+    CHECK (fb.meaning == "led_ring");
+    REQUIRE (fb.sysexBytes.size() == 7);
+    CHECK (fb.sysexBytes[0] == 0xf0);
+    CHECK (fb.sysexBytes[3] == 0x29);
+    CHECK (fb.sysexValueIndex == 5);
+    CHECK (fb.sysexBytes[6] == 0xf7);
+
+    const auto* logo = profile.findBySendAddress (AddressKind::note, 40);
+    REQUIRE (logo != nullptr);
+    REQUIRE (logo->feedback.size() == 1);
+    CHECK (logo->feedback[0].sysexValueIndex == 3);
+    CHECK (logo->feedback[0].sysexBytes.size() == 5);
+
+    const auto* fix = profile.findBySendAddress (AddressKind::note, 41);
+    REQUIRE (fix != nullptr);
+    REQUIRE (fix->feedback.size() == 1);
+    CHECK (fix->feedback[0].isSysex());
+    CHECK (fix->feedback[0].sysexValueIndex == -1);   // statisch
+}
+
+TEST_CASE ("M10: ungueltige Snippets werden verworfen + gewarnt", "[midirig][sysex]")
+{
+    const auto header = juce::String (
+        "device,id,type,send_kind,send_channel,send_number,feedback1_sysex\n");
+
+    const auto expectRejected = [&header] (const juce::String& snippet)
+    {
+        ControllerParseReport report;
+        const auto profile = parseControllerProfileCsv (header + "T,x,pad,cc,1,20," + snippet + "\n",
+                                                        &report);
+        REQUIRE (report.accepted == 1);   // das Control selbst bleibt
+        CHECK (profile.findBySendAddress (AddressKind::cc, 20)->feedback.empty());
+        CHECK (report.warnings.size() == 1);
+    };
+
+    expectRejected ("F0 01 {v} {v} F7");   // zwei Platzhalter
+    expectRejected ("01 02 03");           // kein F0/F7-Rahmen
+    expectRejected ("F0 80 F7");           // Datenbyte > 7F
+    expectRejected ("F0 XY F7");           // kein Hex
+    expectRejected ("F0 {v}");             // {v} am Ende / kein F7
+}
+
+TEST_CASE ("M10: makeSysexFeedbackMessage ersetzt {v} und klemmt auf 0..127", "[midirig][sysex]")
+{
+    FeedbackAddress fb;
+    fb.sysexBytes = { 0xf0, 0x7d, 0x00, 0xf7 };
+    fb.sysexValueIndex = 2;
+
+    const auto message = makeSysexFeedbackMessage (fb, 100);
+    REQUIRE (message.getRawDataSize() == 4);
+    CHECK (message.getRawData()[2] == 100);
+    CHECK (message.isSysEx());
+
+    CHECK (makeSysexFeedbackMessage (fb, 999).getRawData()[2] == 127);   // Klemme
+    CHECK (makeSysexFeedbackMessage (fb, -5).getRawData()[2] == 0);
+
+    // Statisches Snippet ignoriert den Wert.
+    fb.sysexValueIndex = -1;
+    CHECK (makeSysexFeedbackMessage (fb, 100).getRawData()[2] == 0x00);
+}

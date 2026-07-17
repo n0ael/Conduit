@@ -35,6 +35,12 @@ paths:
   puren Namespaces (`Source/Core/Sysex/DsiSysex`), kein Dialekt-Interface
   vor dem 3. Hersteller. WEITER VERBOTEN: Patch-Editing, Checksummen,
   unaufgefordertes Feedback, SysEx als Bindungs-Quelle.
+- SysEx-SENDE-Snippets (M10): CSV `feedbackN_sysex` = komplette
+  Wire-Nachricht inkl. F0/F7 mit optional GENAU EINEM `{v}` (7-bit-Wert);
+  ungueltige Snippets verwirft der Parser MIT Report-Warnung (E1b).
+  Der Echo-Pfad sendet sie via `makeSysexFeedbackMessage` NACH allen
+  meaning-Skips und OHNE Echo-Cache-Eintrag (Cache ist CC/Note-keyed).
+  `display`-Feedback im Grid bleibt zurueckgestellt (User 17.07.2026).
 - Shift-Ebenen (M5a): 1:1 bleibt — eine Adresse pro Ebene, Ebenen
   unterscheiden sich NUR über das kanonische Modifier-Set (gehaltene
   Noten). Matching: exakteste Ebene gewinnt (größtes gehaltenes Set);

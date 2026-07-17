@@ -393,7 +393,7 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
         for (const auto& feedback : control->feedback)
         {
             if (feedback.meaning == "display")
-                continue;   // Sende-Weg fehlt noch (M8, SysEx-Snippets) -- bewusst stumm
+                continue;   // zurueckgestellt (User 17.07.2026) -- bewusst stumm
 
             // M6: Pickup-/Status-Adressen gehoeren EXKLUSIV dem Router --
             // normale Wert-Echos wuerden das Blink-/Aggregat-Signal stoeren.
@@ -407,6 +407,15 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
             if (feedback.meaning.equalsIgnoreCase (midirig::PositionFeedbackRouter::kMeaningPosition)
                 || feedback.kind == midirig::AddressKind::pitchBend)
                 continue;
+
+            // M10 (ADR 006 E6): SysEx-Snippet-Feedback -- datengetrieben,
+            // {v}-Byte = aktueller 7-bit-Wert. Kein Echo-Cache (der ist
+            // CC/Note-keyed, Router restaurieren SysEx nie).
+            if (feedback.isSysex())
+            {
+                target.send (midirig::makeSysexFeedbackMessage (feedback, (int) value7bit));
+                continue;
+            }
 
             const auto isNoteFb = feedback.kind == midirig::AddressKind::note;
 

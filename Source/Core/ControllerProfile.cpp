@@ -89,12 +89,89 @@ namespace
         return AddressKind::cc;
     }
 
+    /** M10 (ADR 006 E6): Hex-Snippet-Text -> Wire-Bytes + {v}-Index.
+        Erwartet die KOMPLETTE Nachricht inkl. F0/F7; genau 0 oder 1 `{v}`.
+        false + Fehlertext bei ungueltigem Snippet (der Slot wird dann
+        verworfen -- kein stilles Scheitern, E1b). */
+    bool parseSysexSnippet (const juce::String& text, std::vector<juce::uint8>& bytes,
+                            int& valueIndex, juce::String& error)
+    {
+        bytes.clear();
+        valueIndex = -1;
+
+        juce::StringArray tokens;
+        // "{v}" als eigenes Token freistellen, dann an Whitespace trennen --
+        // erlaubt sowohl "F0 01 {v} F7" als auch kompaktes "F001{v}F7".
+        tokens.addTokens (text.replace ("{v}", " {v} ", true), " \t", {});
+        tokens.removeEmptyStrings();
+
+        for (const auto& token : tokens)
+        {
+            if (token.equalsIgnoreCase ("{v}"))
+            {
+                if (valueIndex >= 0)
+                {
+                    error = "mehr als ein {v}-Platzhalter";
+                    return false;
+                }
+                valueIndex = (int) bytes.size();
+                bytes.push_back (0);   // Platzhalter, zur Sendezeit ersetzt
+                continue;
+            }
+
+            // Token = 1..n Hex-Byte-Paare (kompakte Schreibweise erlaubt).
+            if (token.length() % 2 != 0
+                || ! token.containsOnly ("0123456789abcdefABCDEF"))
+            {
+                error = "kein Hex-Byte: '" + token + "'";
+                return false;
+            }
+
+            for (int i = 0; i < token.length(); i += 2)
+                bytes.push_back ((juce::uint8) token.substring (i, i + 2).getHexValue32());
+        }
+
+        if (bytes.size() < 2 || bytes.front() != 0xf0 || bytes.back() != 0xf7)
+        {
+            error = "Snippet muss mit F0 beginnen und F7 enden";
+            return false;
+        }
+
+        for (size_t i = 1; i + 1 < bytes.size(); ++i)
+        {
+            if ((int) i == valueIndex)
+                continue;
+            if (bytes[i] > 0x7f)
+            {
+                error = "Datenbyte > 7F an Position " + juce::String ((int) i);
+                return false;
+            }
+        }
+
+        if (valueIndex == 0 || valueIndex == (int) bytes.size() - 1)
+        {
+            error = "{v} darf nicht F0/F7 ersetzen";
+            return false;
+        }
+
+        return true;
+    }
+
     /** Liest Feedback-Slot N (1-basiert) -- nullopt-Ersatz: number bleibt -1
         wenn die Spalte fehlt/leer ist (kein Feedback an dieser Stelle).
-        pitchBend-Feedback (M8) braucht keine number (Adresse = Kanal). */
+        pitchBend-Feedback (M8) braucht keine number (Adresse = Kanal);
+        SysEx-Slots (M10) brauchen weder kind noch number. */
     bool readFeedbackSlot (const juce::StringArray& fields, int kindCol, int channelCol,
-                          int numberCol, int meaningCol, FeedbackAddress& out)
+                          int numberCol, int meaningCol, int sysexCol,
+                          FeedbackAddress& out, juce::String& sysexError)
     {
+        out.meaning = fieldAsString (fields, meaningCol);
+
+        // M10: SysEx-Snippet hat Vorrang -- der Slot traegt dann keine
+        // CC/Note-Adresse (kind/channel/number bleiben Defaults).
+        if (const auto snippet = fieldAsString (fields, sysexCol); snippet.isNotEmpty())
+            return parseSysexSnippet (snippet, out.sysexBytes, out.sysexValueIndex, sysexError);
+
         const auto kind   = fieldAsAddressKind (fields, kindCol);
         const auto number = fieldAsInt (fields, numberCol, -1);
         if (number < 0 && kind != AddressKind::pitchBend)
@@ -103,9 +180,20 @@ namespace
         out.kind    = kind;
         out.channel = juce::jlimit (1, 16, fieldAsInt (fields, channelCol, 1));
         out.number  = juce::jmax (0, number);
-        out.meaning = fieldAsString (fields, meaningCol);
         return true;
     }
+}
+
+juce::MidiMessage makeSysexFeedbackMessage (const FeedbackAddress& feedback, int value7bit)
+{
+    jassert (feedback.isSysex());
+
+    auto bytes = feedback.sysexBytes;
+    if (feedback.sysexValueIndex >= 0 && feedback.sysexValueIndex < (int) bytes.size())
+        bytes[(size_t) feedback.sysexValueIndex] =
+            (juce::uint8) juce::jlimit (0, 127, value7bit);
+
+    return juce::MidiMessage (bytes.data(), (int) bytes.size());
 }
 
 const ControllerControl* ControllerProfile::findBySendAddress (
@@ -164,14 +252,17 @@ ControllerProfile parseControllerProfileCsv (const juce::String& text, Controlle
     const auto colSendChannel = columnIndex ("send_channel");
     const auto colSendNumber  = columnIndex ("send_number");
 
-    struct FeedbackColumns { int kind, channel, number, meaning; };
+    struct FeedbackColumns { int kind, channel, number, meaning, sysex; };
     const FeedbackColumns feedbackCols[3] = {
         { columnIndex ("feedback1_kind"), columnIndex ("feedback1_channel"),
-          columnIndex ("feedback1_number"), columnIndex ("feedback1_meaning") },
+          columnIndex ("feedback1_number"), columnIndex ("feedback1_meaning"),
+          columnIndex ("feedback1_sysex") },
         { columnIndex ("feedback2_kind"), columnIndex ("feedback2_channel"),
-          columnIndex ("feedback2_number"), columnIndex ("feedback2_meaning") },
+          columnIndex ("feedback2_number"), columnIndex ("feedback2_meaning"),
+          columnIndex ("feedback2_sysex") },
         { columnIndex ("feedback3_kind"), columnIndex ("feedback3_channel"),
-          columnIndex ("feedback3_number"), columnIndex ("feedback3_meaning") },
+          columnIndex ("feedback3_number"), columnIndex ("feedback3_meaning"),
+          columnIndex ("feedback3_sysex") },
     };
 
     if (colId < 0 || colSendNumber < 0)
@@ -237,8 +328,13 @@ ControllerProfile parseControllerProfileCsv (const juce::String& text, Controlle
         for (const auto& fbCol : feedbackCols)
         {
             FeedbackAddress fb;
-            if (readFeedbackSlot (fields, fbCol.kind, fbCol.channel, fbCol.number, fbCol.meaning, fb))
+            juce::String sysexError;
+            if (readFeedbackSlot (fields, fbCol.kind, fbCol.channel, fbCol.number,
+                                  fbCol.meaning, fbCol.sysex, fb, sysexError))
                 control.feedback.push_back (fb);
+            else if (sysexError.isNotEmpty())
+                out.warnings.add ("Zeile " + juce::String (lineIndex + 1) + " ('" + id
+                                  + "'): SysEx-Snippet verworfen -- " + sysexError);
         }
 
         profile.controls.push_back (std::move (control));

@@ -28,6 +28,11 @@ docs/MidiRig.md (M9) + docs/adr/007. Alter M9 (Sende-Snippets) = M10.
   per Push-Button auswählbar; **Name-Offset 184 bestätigt** (Namen
   korrekt). Geräte-Macke: der Mopho sendete SysEx-Out erst nach einem
   Power-Cycle (kein Conduit-Fund).
+- **M10 (17.07.2026):** SysEx-SENDE-Snippets als CSV-Feedback-Typ
+  (`feedbackN_sysex`, Hex inkl. F0/F7 + optional EIN `{v}` =
+  7-bit-Laufzeitwert; Parser validiert mit Report-Warnungen;
+  Echo-Pfad sendet via `makeSysexFeedbackMessage`). AlphaTrack-LCD-
+  Generik im Grid ZURÜCKGESTELLT (User: AlphaTrack bleibt Live-Remote).
 - Notierte Zukunfts-Vision (nicht geplant): Grid-Page-Split MPE-Grid +
   „DIY-Grid" (Fader/Pads frei zu einem Controller zusammenbaubar).
 

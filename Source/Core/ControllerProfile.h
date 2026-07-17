@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include <juce_core/juce_core.h>
+#include <juce_audio_basics/juce_audio_basics.h>
 
 #include "RelativeEncoding.h"
 
@@ -19,16 +19,34 @@ namespace conduit::midirig
 enum class AddressKind { cc, note, pitchBend };
 
 /** Eine Feedback-Adresse ("was schickt Conduit zur Rueckmeldung an dieses
-    physische Control zurueck"): LED-Ring, Motorfader-Position, Display-
-    Text (Sende-Weg fuer Display-Text existiert erst mit M8/SysEx-Snippets --
-    die Laufzeit ueberspringt `meaning == "display"` bewusst still, ADR E6). */
+    physische Control zurueck"): LED-Ring, Motorfader-Position, SysEx-
+    Snippet (M10). Display-Text-Feedback (`meaning == "display"`) bleibt
+    zurueckgestellt -- die Laufzeit ueberspringt es bewusst still
+    (User-Entscheidung 17.07.2026: AlphaTrack laeuft als Live-Remote). */
 struct FeedbackAddress
 {
     AddressKind kind = AddressKind::cc;
     int channel = 1;      // 1..16
     int number  = -1;     // CC-Nummer bzw. Notennummer, -1 = nicht belegt
     juce::String meaning;  // z. B. "led_ring", "motor_fader", "display", frei
+
+    /** M10 (ADR 006 E6): Sende-only SysEx-Snippet -- die KOMPLETTE
+        Wire-Nachricht (inkl. F0/F7) aus der CSV-Spalte `feedbackN_sysex`,
+        mit optional GENAU EINEM `{v}`-Platzhalterbyte (7-bit-Wert zur
+        Sendezeit). Nicht leer = dieser Slot ist ein SysEx-Feedback;
+        kind/channel/number sind dann bedeutungslos (meaning gilt weiter,
+        z. B. fuer die Router-Exklusiv-Regeln). */
+    std::vector<juce::uint8> sysexBytes;
+    int sysexValueIndex = -1;   // Byte-Index des {v}, -1 = statisches Snippet
+
+    [[nodiscard]] bool isSysex() const noexcept { return ! sysexBytes.empty(); }
 };
+
+/** M10: Snippet + Laufzeitwert -> fertige MidiMessage ({v}-Byte ersetzt,
+    Wert auf 0..127 geklemmt; statische Snippets ignorieren den Wert).
+    Pure -- Voraussetzung: feedback.isSysex(). */
+[[nodiscard]] juce::MidiMessage makeSysexFeedbackMessage (const FeedbackAddress& feedback,
+                                                          int value7bit);
 
 /** Ein physisches Control eines Controller-Profils (ADR 006 E2): id +
     Typ (frei, ueblich knob|fader|pad|encoder) + die Adresse, die es beim
@@ -143,10 +161,18 @@ struct ControllerParseReport
     Spalten: id, type, section, group, role, mode, steps, rel_encoding,
     touch_number, send_kind, send_channel, send_number,
     feedback1_kind, feedback1_channel, feedback1_number, feedback1_meaning,
-    feedback2_kind, feedback2_channel, feedback2_number, feedback2_meaning,
-    feedback3_kind, feedback3_channel, feedback3_number, feedback3_meaning.
-    `group` (M6) und `mode`/`steps`/`rel_encoding`/`touch_number` (M8) sind
-    optional -- CSVs ohne die Spalten parsen unveraendert.
+    feedback1_sysex, ... (analog fuer feedback2 und feedback3).
+    `group` (M6), `mode`/`steps`/`rel_encoding`/`touch_number` (M8) und
+    `feedbackN_sysex` (M10) sind optional -- CSVs ohne die Spalten parsen
+    unveraendert.
+
+    `feedbackN_sysex` (M10, ADR 006 E6): Hex-Bytes der KOMPLETTEN
+    SysEx-Nachricht inkl. F0/F7 (Leerzeichen optional, case-insensitiv),
+    mit optional GENAU EINEM `{v}`-Platzhalter fuer den 7-bit-Laufzeitwert,
+    z. B. "F0 00 20 29 01 {v} F7". Nicht leer -> der Slot ist ein
+    SysEx-Feedback (kind/channel/number-Spalten des Slots duerfen leer
+    bleiben). Ungueltige Snippets (kein F0/F7-Rahmen, Datenbyte > 7F,
+    Nicht-Hex, mehr als ein {v}) -> Slot verworfen + Warnung im Report.
     `*_kind`-Spalten: "note" fuer Noten-Adressen, "pitchbend" (auch "pb")
     fuer Pitch Bend (M8), alles andere (auch leer) = CC (Default). Zeilen
     ohne `id` ODER ohne `send_number` werden uebersprungen + gezaehlt
