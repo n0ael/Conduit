@@ -24,8 +24,17 @@ paths:
 - Profil-Dateien (`Conduit/Devices/*.csv`, `Conduit/Controllers/*.csv`,
   `userHardwareDevices.txt`) sind User-Hoheit — nie ungefragt
   überschreiben, nur ergänzen/mergen (Muster HardwareCcDatabase-Merge).
-- SysEx bleibt Sende-only (E6) — kein Parsing, kein Feedback, keine
-  Checksummen, kein Patch-Editing.
+- SysEx (E6, eingeschraenkt durch ADR 007/M9): Empfang + Parsing NUR als
+  Antwort auf selbst gesendete, User-angestossene Requests (Preset-Scan,
+  Device-Inquiry) und NUR solange der Port armed ist
+  (`MidiPortHub::setSysExCaptureEnabled`) — Normalbetrieb verwirft SysEx
+  am Producer. Transport: `midi::SysExChunk`-SpscQueue pro Port (POD 64 B,
+  Cap `kMaxSysExBytes` 1024), Producer pusht NUR komplette Nachrichten
+  (getNumFree-Vorabpruefung, nie halbe Dumps), Reassembly im 60-Hz-Drain;
+  Arming ueberlebt Re-Syncs (`sysexArmedDevices`). Protokollwissen in
+  puren Namespaces (`Source/Core/Sysex/DsiSysex`), kein Dialekt-Interface
+  vor dem 3. Hersteller. WEITER VERBOTEN: Patch-Editing, Checksummen,
+  unaufgefordertes Feedback, SysEx als Bindungs-Quelle.
 - Shift-Ebenen (M5a): 1:1 bleibt — eine Adresse pro Ebene, Ebenen
   unterscheiden sich NUR über das kanonische Modifier-Set (gehaltene
   Noten). Matching: exakteste Ebene gewinnt (größtes gehaltenes Set);

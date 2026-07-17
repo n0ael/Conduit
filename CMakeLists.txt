@@ -133,6 +133,7 @@ set(CONDUIT_CPP_SOURCES
     Source/Core/MidiDeviceProfile.cpp
     Source/Core/MidiInBindings.cpp
     Source/Core/MidiPortHub.cpp
+    Source/Core/Sysex/DsiSysex.cpp
     Source/Core/MidiProfileLibrary.cpp
     Source/Core/MidiRigSettings.cpp
     Source/Core/MidiTargetBrowserModel.cpp
@@ -665,6 +666,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/MidiInBindingsTests.cpp
         Tests/Core/ParamModulationTests.cpp
         Tests/Core/MidiPortHubTests.cpp
+        Tests/Core/DsiSysexTests.cpp
         Tests/Core/MidiProfileLibraryTests.cpp
         Tests/Core/MidiRigSettingsTests.cpp
         Tests/Core/MidiTargetBrowserModelTests.cpp
@@ -747,6 +749,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/Core/MidiDeviceProfile.cpp
         Source/Core/MidiInBindings.cpp
         Source/Core/MidiPortHub.cpp
+        Source/Core/Sysex/DsiSysex.cpp
         Source/Core/MidiProfileLibrary.cpp
         Source/Core/MidiRigSettings.cpp
         Source/Core/MidiTargetBrowserModel.cpp

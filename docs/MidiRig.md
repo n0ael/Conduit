@@ -827,12 +827,53 @@ Bausteine:
   M6  Pickup-LED + Verhalten — Soft-Takeover-Feedback über Controller-Profile-LEDs (PickupLedRouter: Spalten-Status/Detail-Modus/Shift-Pad-Anzeige, TakeoverMode pro Gerät, Ebenen-Wechsel-Sprung-Fix) — erledigt 07/2026 (Feldtest offen); M6.1 (15.07.2026): Shift-Pad zeigt die RICHTUNG solid (rot/orange/grün, kein Blinken) statt zu blinken — Näherungswert bleibt die Spalten-Status-LED
   M7  Channelstrip-Ebenen — Top-Encoder (role=layer_select) wählen pro Spalte eine von 3 Binding-Bänken (ChannelStripLayers, 8-Step-Zonen, Ebenen-Blink, „aktive Ebene = Lernziel", pro Session persistiert) — erledigt 07/2026 (Feldtest offen)
   M8  Bidirektional Ribbons — Motorfader-/Ribbon-Feedback in beide Richtungen (PitchBend-Adressen 128+Kanal, AddressModes direct/scrub/relativeTicks, PositionFeedbackRouter, AlphaTrack-Factory-CSV) — erledigt 07/2026, **Feldtest AlphaTrack bestanden** (17.07.2026); M8.1: Relativ-Kodierung profil-getrieben (`rel_encoding`, RelativeEncoding.h — AlphaTrack ist sign-magnitude, nicht Zweierkomplement)
-  M9  SysEx-Snippets — Sende-only Hex-Snippets mit optionalem `{v}`-Platzhalterbyte + AlphaTrack-LCD/Native-Mode-Force — offen
+  M9  SysEx-Empfang + Hardware-Preset-Browser (ADR 007, User-Entscheidung 17.07.2026) — M9a SysEx-Empfangsinfra (armed-gated Chunk-Transport im Hub, `Source/Core/Sysex/DsiSysex`-Codec: Packed-MS-Bit, Program-Dump/Inquiry-Parser, Name-Extraktion) erledigt 07/2026 · M9b Scanner+Inquiry+Preset-Cache — offen · M9c Preset-UI (HW-Presets im HardwareTargetPicker) + MidiPresetLoadTarget — offen
+  M10 SysEx-Sende-Snippets — Sende-only Hex-Snippets mit optionalem `{v}`-Platzhalterbyte + AlphaTrack-LCD/Native-Mode-Force generisch (aus dem alten M9 abgespalten, unabhängig vom Empfangspfad) — offen
+
+## M9: SysEx-Empfang + Hardware-Preset-Browser (ADR 007)
+
+Ziel (User 17.07.2026): Presets eines Klangerzeugers (DSI Mopho, Desktop
+= Device-ID 0x25) per Push-Button laden, mit NAMEN auf den Buttons. Das
+LADEN ist der bestehende E5-Pfad (MidiProgramChangeTarget bzw. das neue
+MidiPresetLoadTarget in M9c) — die NAMEN existieren nur im
+SysEx-Program-Dump, deshalb erweitert ADR 007 das E6-Sende-only um einen
+eng umrissenen Empfangspfad (Details/Verbote: docs/adr/007).
+
+**M9a (erledigt 07/2026):**
+- `midi::SysExChunk` (MidiSysexEvent.h): POD 64 Bytes (totalSize/offset/
+  size/bytes[56]), `kMaxSysExBytes` = 1024 (Mopho-Dump = 299 Wire-Bytes).
+- MidiPortHub: `SpscQueue<SysExChunk>{256}` PRO PORT + atomarer
+  `sysexArmed`-Gate; Producer chunkt NUR komplette Nachrichten
+  (getNumFree-Vorabprüfung — nie halbe Dumps, Verlust heilt der Scanner
+  per Re-Request); Reassembly offset-basiert im 60-Hz-Drain →
+  `dispatchSysEx`. API `subscribeSysEx(deviceId, fn)` /
+  `setSysExCaptureEnabled(deviceId, bool)`; der Arming-Zustand lebt
+  zusätzlich in `sysexArmedDevices` [MT] und überlebt Registry-Re-Syncs/
+  USB-Reconnects (Verbindungen werden dort neu erzeugt).
+  `handlePartialSysexMessage` bewusst unbenutzt, solange kein Treiber
+  Partial-Delivery zeigt — der offset-basierte Reassembler ist der
+  Erweiterungspunkt.
+- `Source/Core/Sysex/DsiSysex` (pur, hardwarefrei): `packMsBit`/
+  `unpackMsBit` (DSI-Gruppen 1 MS-Byte + 7 Datenbytes; 256 ↔ 293),
+  `makeProgramDumpRequest` (F0 01 dev 05 bank prog F7),
+  `makeDeviceInquiry`, `parseProgramDump` (filtert die Device-ID NICHT —
+  das entscheidet der Scanner), `extractName` (16 ASCII @ Offset 184,
+  Nicht-Druckbares → '?', trimEnd — **Offset am Gerät verifizieren,
+  M9b-Schritt 1**), `parseDeviceInquiryReply`/`deviceIdFromInquiry`
+  (DSI: familyLsb = Device-ID-Byte).
+
+**M9b/M9c (geplant, Plan 17.07.2026):** HardwarePresetScanner
+(Message-Thread-Zustandsautomat: arm → Inquiry 200 ms/Fallback 0x25 →
+sequentielle Dumps mit 300 ms Timeout + 2 Retries → disarm; ~2 min für
+3×128 mit Progress/Cancel, nie parallelisieren) · HardwarePresetLibrary
+(XML-Cache `Conduit/Devices/Presets/<uuid>.xml`, Rescan nur manuell) ·
+MidiTargetBrowserModel/-Picker: „HW Presets"-Drill-down · 
+MidiPresetLoadTarget (Druckflanke → Bank-Select + PC, festes Programm).
 
 ## Referenzen
 
 - ADR 006 (Entscheidungen E1–E7: Profile-Formate, Registry, Transport,
-  Threading).
+  Threading) · ADR 007 (SysEx-Empfang, Amendment zu E6).
 - Rule `midirig` (.claude/rules/midirig.md) — mechanische Invarianten,
   lädt bei Arbeit an `Source/Core/Midi*` / `Source/Core/HardwareCcDatabase*`.
 - docs/Grid.md Block G/H4/L2 — bestehender Code-Vorläufer

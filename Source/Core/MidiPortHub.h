@@ -10,6 +10,7 @@
 #include "Interfaces/IMidiOutputTarget.h"
 #include "MidiControllerEvent.h"
 #include "MidiRigSettings.h"
+#include "MidiSysexEvent.h"
 #include "NrpnAssembler.h"
 #include "Util/SpscQueue.h"
 
@@ -89,6 +90,7 @@ public:
     using ControllerCallback = std::function<void (const midi::ControllerEvent&)>;
     using NoteCallback       = std::function<void (const midi::NoteEvent&)>;
     using TickCallback       = std::function<void()>;
+    using SysExCallback      = std::function<void (const juce::MidiMessage&)>;
 
     explicit MidiPortHub (MidiRigSettings& settingsToUse,
                           DeviceListProvider inputProviderToUse = &juce::MidiInput::getAvailableDevices,
@@ -140,7 +142,17 @@ public:
         nachgelagerte Glättung (Soft-Takeover/One-Pole, Grid Block G). */
     int subscribeTick (TickCallback callback);
 
+    /** ADR 007: komplette SysEx-Nachrichten eines Geraets (inkl. F0/F7).
+        Liefert NUR waehrend setSysExCaptureEnabled (deviceId, true) — im
+        Normalbetrieb wird SysEx weiterhin am Producer verworfen. */
+    int subscribeSysEx (const juce::Uuid& deviceId, SysExCallback callback);
+
     void unsubscribe (int token);
+
+    /** SysEx-Capture pro Geraet scharf-/entschaerfen [Message Thread] —
+        gedacht fuer explizit angestossene Dump-Sequenzen (Preset-Scan);
+        der Zustand ueberlebt Registry-Re-Syncs/USB-Reconnects. */
+    void setSysExCaptureEnabled (const juce::Uuid& deviceId, bool enabled);
 
     //==========================================================================
     // Senden [Message Thread]
@@ -184,6 +196,14 @@ private:
         SpscQueue<midi::ControllerEvent> controllerQueue { 512 };
         SpscQueue<midi::NoteEvent> noteQueue { 512 };
 
+        // ADR 007: SysEx-Chunks (nur wenn armed); der Producer pusht eine
+        // Nachricht NUR komplett (getNumFree-Vorabpruefung, nie halbe Dumps).
+        SpscQueue<midi::SysExChunk> sysexQueue { 256 };
+        std::atomic<bool> sysexArmed { false };
+
+        // Reassembly-Zustand — NUR Message Thread (Drain).
+        std::vector<juce::uint8> sysexAssembly;
+
         // NRPN-Assembler PRO PORT (ADR E4, M2): setzt MSB/LSB-Paare auf
         // dem MIDI-System-Thread VOR dem Queue-Push zusammen — NUR im
         // MIDI-Callback berührt (Producer-Zustand).
@@ -199,6 +219,7 @@ private:
 
     private:
         void pushController (const midi::ControllerEvent& event);
+        void pushSysEx (const juce::MidiMessage& message);
     };
 
     struct OutputConnection
@@ -250,6 +271,7 @@ private:
     struct ControllerSubscription { int token; juce::Uuid deviceId; ControllerCallback callback; };
     struct NoteSubscription       { int token; juce::Uuid deviceId; NoteCallback callback; };
     struct TickSubscription       { int token; TickCallback callback; };
+    struct SysExSubscription      { int token; juce::Uuid deviceId; SysExCallback callback; };
 
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
@@ -263,6 +285,8 @@ private:
 
     void dispatchController (const juce::Uuid& deviceId, const midi::ControllerEvent& event);
     void dispatchNote (const juce::Uuid& deviceId, const midi::NoteEvent& event);
+    void dispatchSysEx (const juce::Uuid& deviceId, const juce::MidiMessage& message);
+    void drainSysEx (InputConnection& connection);
 
     MidiRigSettings& settings;
     DeviceListProvider inputProvider;
@@ -282,7 +306,12 @@ private:
     std::vector<ControllerSubscription> controllerSubscriptions;
     std::vector<NoteSubscription> noteSubscriptions;
     std::vector<TickSubscription> tickSubscriptions;
+    std::vector<SysExSubscription> sysexSubscriptions;
     int nextToken = 1;
+
+    // ADR 007: pro Geraet gemerkter Capture-Zustand — ueberlebt Re-Syncs
+    // (Verbindungen werden bei USB-Reconnects neu erzeugt). [Message Thread]
+    std::vector<juce::Uuid> sysexArmedDevices;
 
     // USB-Reconnect: System meldet Geräte-Änderungen → Re-Sync [MT].
     juce::MidiDeviceListConnection deviceListConnection;

@@ -1,4 +1,6 @@
+#include <cstring>
 #include <map>
+#include <memory>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -482,4 +484,152 @@ TEST_CASE ("MidiPortHub: Pitch Bend wird als 14-bit-ControllerEvent gereicht (M8
     CHECK (events[0].is14Bit);
     CHECK (events[1].channel == 10);
     CHECK (events[1].value == 124 << 7);
+}
+
+//==============================================================================
+// ADR 007: SysEx-Empfang (armed-gated Chunk-Transport)
+
+namespace
+{
+    /** Test-SysEx gegebener Groesse (inkl. F0/F7) mit Muster-Payload. */
+    [[nodiscard]] juce::MidiMessage makeTestSysEx (int payloadBytes)
+    {
+        std::vector<juce::uint8> payload ((size_t) payloadBytes);
+        for (int i = 0; i < payloadBytes; ++i)
+            payload[(size_t) i] = (juce::uint8) (i & 0x7f);
+        return juce::MidiMessage::createSysExMessage (payload.data(), payloadBytes);
+    }
+
+    struct SysexHubRig
+    {
+        juce::ScopedJuceInitialiser_GUI juceRuntime;
+        TempSettings temp;
+        MidiRigSettings settings { temp.options() };
+        FakePortRig rig;
+        juce::Uuid device;
+        std::unique_ptr<MidiPortHub> hub;
+        std::vector<juce::MidiMessage> received;
+
+        SysexHubRig()
+        {
+            rig.inputs = { juce::MidiDeviceInfo ("Mopho", "id-mopho") };
+            device = settings.addDevice ("Mopho", RigDeviceKind::soundGenerator);
+            settings.setMidiInName (device, "Mopho");
+
+            hub = std::make_unique<MidiPortHub> (settings, rig.inputProvider(),
+                                                 rig.outputProvider(), rig.inputOpener(),
+                                                 rig.outputOpener());
+            hub->syncFromRegistry();
+            REQUIRE (hub->isInputConnected (device));
+
+            hub->subscribeSysEx (device, [this] (const juce::MidiMessage& m)
+                                 { received.push_back (m); });
+        }
+
+        void feed (const juce::MidiMessage& message)
+        {
+            REQUIRE (rig.openInputCallbacks.count ("id-mopho") == 1);
+            rig.openInputCallbacks["id-mopho"]->handleIncomingMidiMessage (nullptr, message);
+        }
+    };
+}
+
+TEST_CASE ("MidiPortHub SysEx: ohne Arming wird verworfen, armed liefert identische Bytes", "[midirig][sysex]")
+{
+    SysexHubRig t;
+
+    // Nicht armed (Default, E6-Grundsatz): nichts kommt an.
+    t.feed (makeTestSysEx (293));
+    t.hub->drainNow();
+    CHECK (t.received.empty());
+
+    // Armed: identische Wire-Bytes nach dem Drain.
+    t.hub->setSysExCaptureEnabled (t.device, true);
+    const auto sent = makeTestSysEx (293);
+    t.feed (sent);
+    t.hub->drainNow();
+
+    REQUIRE (t.received.size() == 1);
+    REQUIRE (t.received[0].getRawDataSize() == sent.getRawDataSize());
+    CHECK (std::memcmp (t.received[0].getRawData(), sent.getRawData(),
+                        (size_t) sent.getRawDataSize()) == 0);
+
+    // Entschaerfen: wieder Stille.
+    t.hub->setSysExCaptureEnabled (t.device, false);
+    t.feed (makeTestSysEx (64));
+    t.hub->drainNow();
+    CHECK (t.received.size() == 1);
+}
+
+TEST_CASE ("MidiPortHub SysEx: mehrere Nachrichten pro Drain in Reihenfolge", "[midirig][sysex]")
+{
+    SysexHubRig t;
+    t.hub->setSysExCaptureEnabled (t.device, true);
+
+    t.feed (makeTestSysEx (10));
+    t.feed (makeTestSysEx (200));
+    t.feed (makeTestSysEx (57));   // genau 1 Chunk + 1 Byte
+    t.hub->drainNow();
+
+    REQUIRE (t.received.size() == 3);
+    CHECK (t.received[0].getRawDataSize() == 12);    // Payload + F0/F7
+    CHECK (t.received[1].getRawDataSize() == 202);
+    CHECK (t.received[2].getRawDataSize() == 59);
+}
+
+TEST_CASE ("MidiPortHub SysEx: Oversize und Queue-Ueberlauf verwerfen KOMPLETT", "[midirig][sysex]")
+{
+    SysexHubRig t;
+    t.hub->setSysExCaptureEnabled (t.device, true);
+
+    // Groesser als kMaxSysExBytes -> verworfen.
+    t.feed (makeTestSysEx (conduit::midi::kMaxSysExBytes + 10));
+    t.hub->drainNow();
+    CHECK (t.received.empty());
+
+    // Queue-Flut: mehr Nachrichten als die Chunk-Queue traegt — es kommen
+    // nur KOMPLETTE Nachrichten an (keine ist verstuemmelt).
+    for (int i = 0; i < 100; ++i)
+        t.feed (makeTestSysEx (293));   // je 6 Chunks, Queue = 256
+    t.hub->drainNow();
+
+    CHECK (! t.received.empty());
+    CHECK (t.received.size() < 100);
+    for (const auto& m : t.received)
+        CHECK (m.getRawDataSize() == 295);
+}
+
+TEST_CASE ("MidiPortHub SysEx: Arming ueberlebt den Registry-Re-Sync", "[midirig][sysex]")
+{
+    SysexHubRig t;
+    t.hub->setSysExCaptureEnabled (t.device, true);
+
+    // USB-Reconnect: Port unter Suffix-Namen neu gebunden (Prefix-Match).
+    t.rig.inputs = { juce::MidiDeviceInfo ("Mopho (2)", "id-mopho-2") };
+    t.hub->syncFromRegistry();
+
+    REQUIRE (t.rig.openInputCallbacks.count ("id-mopho-2") == 1);
+    t.rig.openInputCallbacks["id-mopho-2"]->handleIncomingMidiMessage (
+        nullptr, makeTestSysEx (100));
+    t.hub->drainNow();
+
+    REQUIRE (t.received.size() == 1);
+    CHECK (t.received[0].getRawDataSize() == 102);
+}
+
+TEST_CASE ("MidiPortHub SysEx: unsubscribe beendet die Zustellung", "[midirig][sysex]")
+{
+    SysexHubRig t;
+    t.hub->setSysExCaptureEnabled (t.device, true);
+
+    std::vector<juce::MidiMessage> second;
+    const auto token = t.hub->subscribeSysEx (t.device, [&second] (const juce::MidiMessage& m)
+                                              { second.push_back (m); });
+    t.hub->unsubscribe (token);
+
+    t.feed (makeTestSysEx (20));
+    t.hub->drainNow();
+
+    CHECK (t.received.size() == 1);
+    CHECK (second.empty());
 }

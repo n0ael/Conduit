@@ -1,6 +1,7 @@
 #include "MidiPortHub.h"
 
 #include <algorithm>
+#include <cstring>
 
 #include "MidiDeviceTarget.h"
 
@@ -200,6 +201,39 @@ void MidiPortHub::InputConnection::handleIncomingMidiMessage (juce::MidiInput*,
     {
         noteQueue.push ({ message.getChannel(), message.getNoteNumber(), 0, false });
     }
+    else if (message.isSysEx())
+    {
+        // ADR 007: NUR gepuffert, wenn der Port explizit armed ist (Preset-
+        // Scan) — im Normalbetrieb bleibt SysEx verworfen (E6-Grundsatz).
+        if (sysexArmed.load (std::memory_order_acquire))
+            pushSysEx (message);
+    }
+}
+
+void MidiPortHub::InputConnection::pushSysEx (const juce::MidiMessage& message)
+{
+    // Producer-Thread. Komplette Wire-Nachricht (inkl. F0/F7) in Chunks;
+    // eine Nachricht wird NUR komplett gepusht — reicht der Platz nicht,
+    // faellt sie ganz weg (nie halbe Dumps, der Scanner re-requested).
+    const auto* raw = message.getRawData();
+    const auto size = message.getRawDataSize();
+
+    if (raw == nullptr || size <= 0 || size > midi::kMaxSysExBytes)
+        return;
+
+    if (sysexQueue.getNumFree() < midi::SysExChunk::chunksFor (size))
+        return;
+
+    for (int offset = 0; offset < size; offset += midi::SysExChunk::kPayloadBytes)
+    {
+        midi::SysExChunk chunk;
+        chunk.totalSize = static_cast<juce::uint16> (size);
+        chunk.offset = static_cast<juce::uint16> (offset);
+        chunk.size = static_cast<juce::uint8> (juce::jmin ((int) midi::SysExChunk::kPayloadBytes,
+                                                           size - offset));
+        std::memcpy (chunk.bytes, raw + offset, chunk.size);
+        sysexQueue.push (chunk);   // Platz vorab geprueft
+    }
 }
 
 void MidiPortHub::InputConnection::pushController (const midi::ControllerEvent& event)
@@ -345,6 +379,14 @@ void MidiPortHub::syncInputs()
         auto connection = std::make_unique<InputConnection>();
         connection->deviceId = deviceId;
         connection->openName = portName;
+
+        // ADR 007: gemerkter Capture-Zustand ueberlebt Re-Syncs — VOR dem
+        // Oeffnen setzen (der Producer-Thread startet mit dem Handle).
+        connection->sysexArmed.store (std::find (sysexArmedDevices.begin(),
+                                                 sysexArmedDevices.end(), deviceId)
+                                          != sysexArmedDevices.end(),
+                                      std::memory_order_release);
+
         connection->handle = inputOpener (identifier, *connection);
 
         if (connection->handle != nullptr)
@@ -459,6 +501,30 @@ int MidiPortHub::subscribeTick (TickCallback callback)
     return token;
 }
 
+int MidiPortHub::subscribeSysEx (const juce::Uuid& deviceId, SysExCallback callback)
+{
+    const auto token = nextToken++;
+    sysexSubscriptions.push_back ({ token, deviceId, std::move (callback) });
+    return token;
+}
+
+void MidiPortHub::setSysExCaptureEnabled (const juce::Uuid& deviceId, bool enabled)
+{
+    const auto it = std::find (sysexArmedDevices.begin(), sysexArmedDevices.end(), deviceId);
+
+    if (enabled && it == sysexArmedDevices.end())
+        sysexArmedDevices.push_back (deviceId);
+    else if (! enabled && it != sysexArmedDevices.end())
+        sysexArmedDevices.erase (it);
+
+    if (auto* connection = findInput (deviceId); connection != nullptr)
+    {
+        connection->sysexArmed.store (enabled, std::memory_order_release);
+        if (! enabled)
+            connection->sysexAssembly.clear();   // angefangene Nachricht verwerfen
+    }
+}
+
 void MidiPortHub::unsubscribe (int token)
 {
     const auto matchesToken = [token] (const auto& subscription)
@@ -473,6 +539,9 @@ void MidiPortHub::unsubscribe (int token)
     tickSubscriptions.erase (std::remove_if (tickSubscriptions.begin(),
                                              tickSubscriptions.end(), matchesToken),
                              tickSubscriptions.end());
+    sysexSubscriptions.erase (std::remove_if (sysexSubscriptions.begin(),
+                                              sysexSubscriptions.end(), matchesToken),
+                              sysexSubscriptions.end());
 }
 
 void MidiPortHub::dispatchController (const juce::Uuid& deviceId, const midi::ControllerEvent& event)
@@ -487,6 +556,42 @@ void MidiPortHub::dispatchNote (const juce::Uuid& deviceId, const midi::NoteEven
     for (std::size_t i = 0; i < noteSubscriptions.size(); ++i)
         if (noteSubscriptions[i].deviceId == deviceId && noteSubscriptions[i].callback != nullptr)
             noteSubscriptions[i].callback (event);
+}
+
+void MidiPortHub::dispatchSysEx (const juce::Uuid& deviceId, const juce::MidiMessage& message)
+{
+    for (std::size_t i = 0; i < sysexSubscriptions.size(); ++i)
+        if (sysexSubscriptions[i].deviceId == deviceId && sysexSubscriptions[i].callback != nullptr)
+            sysexSubscriptions[i].callback (message);
+}
+
+void MidiPortHub::drainSysEx (InputConnection& connection)
+{
+    // Message Thread. Chunks kommen in FIFO-Reihenfolge; offset 0 beginnt
+    // eine neue Nachricht, ein Offset-Sprung verwirft defensiv (der
+    // Producer pusht nur komplette Nachrichten — Sprünge hiesse Bug/Reset).
+    midi::SysExChunk chunk;
+    while (connection.sysexQueue.pop (chunk))
+    {
+        if (chunk.offset == 0)
+            connection.sysexAssembly.clear();
+        else if ((int) connection.sysexAssembly.size() != (int) chunk.offset)
+        {
+            connection.sysexAssembly.clear();
+            continue;
+        }
+
+        connection.sysexAssembly.insert (connection.sysexAssembly.end(),
+                                         chunk.bytes, chunk.bytes + chunk.size);
+
+        if ((int) connection.sysexAssembly.size() == (int) chunk.totalSize)
+        {
+            dispatchSysEx (connection.deviceId,
+                           juce::MidiMessage (connection.sysexAssembly.data(),
+                                              (int) connection.sysexAssembly.size()));
+            connection.sysexAssembly.clear();
+        }
+    }
 }
 
 void MidiPortHub::drainNow()
@@ -506,6 +611,8 @@ void MidiPortHub::drainNow()
         midi::NoteEvent noteEvent;
         while (connection->noteQueue.pop (noteEvent))
             dispatchNote (connection->deviceId, noteEvent);
+
+        drainSysEx (*connection);
     }
 
     for (std::size_t i = 0; i < tickSubscriptions.size(); ++i)
