@@ -452,4 +452,4 @@ Index:
 
 ---
 
-*Conduit Alpha v3 — Claude Code Instructions v5.3  |  Juli 2026*
+*Conduit Alpha v3 — Claude Code Instructions v5.4  |  Juli 2026*

@@ -31,6 +31,8 @@ GraphManager.
 - Delete-Armierung: Doppel-Tap global; Output-Module mit Connections
   zeigen inline Warnzustand (Details ADR 008).
 - Migration: Reserved-Id-Subtrees werden in reguläre Modul-Subtrees
-  gewandelt; gemeinsamer stateVersion-Bump mit ADR 008 (M1).
+  gewandelt; eigener stateVersion-Bump in M2 (Sequenz-Korrektur
+  18.07.2026, siehe ADR 008 Datenmodell — die Wandlung setzt die in
+  M2 entstehenden Modul-Typen voraus).
 - Die Graph-I/O-Prozessoren des EngineProcessor existieren
   unverändert weiter; nur die sichtbare Modul-Schicht ändert sich.

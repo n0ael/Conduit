@@ -32,8 +32,11 @@ Seite. Der Audio-Thread kennt keine Seiten.
   Seitenzugehörigkeit ist reine Render-Frage).
 - Seiten-Löschen nur wenn leer (Regel a). Kein Bulk-Delete-Pfad.
 - Migration: stateVersion-Bump am RootTree; Bestandspatches erhalten
-  eine Seite (0,0), alle Nodes deren pageUuid. Gemeinsamer
-  Migrationsschritt mit ADR 009.
+  eine Seite (0,0), alle Nodes deren pageUuid. Migrations-Sequenz
+  korrigiert 18.07.2026: M1 bumpt für Pages, M2 bumpt separat für
+  die I/O-Wandlung — ein gemeinsamer Bump würde zwischen M1 und M2
+  Subtrees erzeugen, die auf noch nicht existierende Modul-Typen
+  zeigen.
 
 ## Gesten-Leiter (Fingerzahl = Ebene; vorbehaltlich Inventur M0)
 | Finger | Aktion | Ebene |
@@ -47,19 +50,33 @@ Seite. Der Audio-Thread kennt keine Seiten.
 - Arbeits-Zoom und Birdeye-Zoom sind als PEGEL im Menü einstellbar —
   keine Verhaltens-Schalter (Quasimode-Prinzip: Gesten bleiben
   deterministisch, nur Stufen sind justierbar).
-- 3-Finger-Birdeye: Tap (Toggle) vs. Hold (transient, Loslassen =
-  zurück) entscheidet die M0-Inventur (3-Finger-Tap ist global
-  belegt; Hold-Variante kollisionsfrei bevorzugt).
+- 3-Finger-Birdeye: HOLD (transient — Finger halten = Übersicht,
+  Karte bewegt sich unter fixem Mittel-Target, Loslassen = Zoom auf
+  Viewport der Zielseite). Entschieden per M0-Inventur 18.07.2026:
+  auf der Node-Page existiert kein 3-Finger-Code; der in Rule
+  `ui-design` dokumentierte "globale 3-Finger-Tap" hat app-weit
+  KEINE Implementierung (Phantom-Eintrag; Rule-Bereinigung =
+  separater späterer Mini-Auftrag). Die lokalen 3-Finger-Gesten
+  anderer Pages (MpeShapingView 2s-Hold, TouchLiveEq8 Drag) sind
+  durch die Seitenspezifik (§10.0) unberührt.
 - 4-Finger-Swipe: Nachbarseite peekt live mit, Schwelle entscheidet
   Commit/Snap-back; Wisch ins Leere legt eine neue Seite an.
 - 5-Finger-Selektion: Zoom-out-Animation auf Kachel-Grid der
   Seiten-Koordinaten, leere Seiten GEDIMMT (nicht ausgeblendet),
   Tap auf Kachel = Zoom-in auf deren gespeicherten Viewport
   (Fallback: Arbeits-Zoom).
-- Doppel-Tap auf Modul = Delete-Armierung (global, alle Module);
-  Output-Module mit >=1 Connection zeigen inline non-modalen
-  Warnzustand (JUCE_MODAL_LOOPS_PERMITTED=0 — kein blockierender
-  Dialog), Timeout ~3 s.
+- Doppel-Tap auf Modul = Delete-Armierung (global, alle Module,
+  gesamte Kachelfläche inkl. Titel-Label); Output-Module mit >=1
+  Connection zeigen inline non-modalen Warnzustand
+  (JUCE_MODAL_LOOPS_PERMITTED=0 — kein blockierender Dialog),
+  Timeout ~3 s. Kollisionsauflösung (M0-Befund 18.07.2026): das
+  bestehende editOnDoubleClick des Titel-Labels
+  (NodeComponent.cpp, titleLabel.setEditable) wird in M3b/M4
+  ENTFERNT — Rename läuft ausschließlich über das bestehende
+  NodeAttributePanel (Long-Press Farbpunkt); keine Zone innerhalb
+  einer Kachel, in der dieselbe Geste anderes tut. Der bestehende
+  Canvas-Doppel-Tap (Attenuator-Provisorium "bis zur Modul-Palette")
+  bleibt vorerst und kollidiert nicht.
 - Übersichts-Rendering: gecachte Proxy-Miniaturen pro Seite
   (juce::Image), Invalidierung via ValueTree-Listener, Neuaufbau
   VBlank-gesteuert max. eine Miniatur pro Frame, NIE in paint().
@@ -117,8 +134,18 @@ Seite. Der Audio-Thread kennt keine Seiten.
 - M1: Pages-Datenmodell + Migration (inkl. ADR-009-Wandlung, EIN
   stateVersion-Bump) + Catch2-Tests. Keine UI.
 - M2: I/O als Browser-Module (ADR 009).
-- M3: Seiten-Navigation (4-Finger-Swipe, Seitenerzeugung,
-  Viewport-Persistenz, Regel a, Modifier-/Tastatur-Pfade).
+- M3a: Canvas-Viewport-NEUBAU (M0-Befund: es existiert kein
+  Zoom/Pan/Viewport/Transform, kein mouseMagnify/mouseWheelMove
+  app-weit): Transform-Infrastruktur (Zoom+Offset), kontinuierlicher
+  2-Finger-Pinch/Pan, unendlicher Canvas, mouseMagnify+Scroll-Pfad
+  (Trackpad/Maus), zentraler wiederverwendbarer Gesten-Recognizer
+  (Muster MouseInputSource::getIndex() der bestehenden Subsysteme —
+  es existiert KEIN zentrales Gesture-Framework). Architektur-
+  sensibel.
+- M3b: Seiten-Navigation (4-Finger-Swipe Peek/Commit,
+  Seitenerzeugung, Viewport-Persistenz-Anbindung, Regel a,
+  Modifier-/Tastatur-Pfade) + Entfernung editOnDoubleClick
+  Titel-Label.
 - M4: Birdeye + Seiten-Selektion (Miniatur-Cache, 3-/5-Finger,
   Menü-Pegel, Dev-Tuning) + Performance-Modus-Grundlagen.
 - M5: Portal-Badges. Bewusst zuletzt — Bedarf nach M2–M4 neu
