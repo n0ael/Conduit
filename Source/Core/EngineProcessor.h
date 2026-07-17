@@ -17,6 +17,8 @@
 #include "GridVoiceEngine.h"
 #include "MidiPortHub.h"
 #include "ControllerProfileLibrary.h"
+#include "HardwarePresetLibrary.h"
+#include "HardwarePresetScanner.h"
 #include "MidiProfileLibrary.h"
 #include "MidiRigSettings.h"
 #include "TouchLive/LiveRemoteBridge.h"
@@ -467,6 +469,13 @@ private:
     // Controller-Profile (M4) -- gleiches Muster, eigener Nachbar-Ordner
     // Conduit/Controllers (ADR 006 E2, flach statt {Hersteller}/-verschachtelt).
     ControllerProfileLibrary controllerProfileLibrary { midiRigSettings.settingsFile().getSiblingFile ("Controllers") };
+
+    // Hardware-Preset-Namen (M9b, ADR 007): Cache Conduit/Devices/Presets/
+    // <uuid>.xml + SysEx-Scan-Automat (Trigger kommt aus dem Picker, M9c).
+    HardwarePresetLibrary hardwarePresetLibrary { midiRigSettings.settingsFile()
+                                                      .getSiblingFile ("Devices")
+                                                      .getChildFile ("Presets") };
+    HardwarePresetScanner hardwarePresetScanner { midiPortHub, hardwarePresetLibrary };
 
     // Link-synchroner Click — läuft nach dem GraphFader auf die Anker-Kanäle
     Metronome metronome;

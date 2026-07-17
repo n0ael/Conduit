@@ -827,7 +827,7 @@ Bausteine:
   M6  Pickup-LED + Verhalten — Soft-Takeover-Feedback über Controller-Profile-LEDs (PickupLedRouter: Spalten-Status/Detail-Modus/Shift-Pad-Anzeige, TakeoverMode pro Gerät, Ebenen-Wechsel-Sprung-Fix) — erledigt 07/2026 (Feldtest offen); M6.1 (15.07.2026): Shift-Pad zeigt die RICHTUNG solid (rot/orange/grün, kein Blinken) statt zu blinken — Näherungswert bleibt die Spalten-Status-LED
   M7  Channelstrip-Ebenen — Top-Encoder (role=layer_select) wählen pro Spalte eine von 3 Binding-Bänken (ChannelStripLayers, 8-Step-Zonen, Ebenen-Blink, „aktive Ebene = Lernziel", pro Session persistiert) — erledigt 07/2026 (Feldtest offen)
   M8  Bidirektional Ribbons — Motorfader-/Ribbon-Feedback in beide Richtungen (PitchBend-Adressen 128+Kanal, AddressModes direct/scrub/relativeTicks, PositionFeedbackRouter, AlphaTrack-Factory-CSV) — erledigt 07/2026, **Feldtest AlphaTrack bestanden** (17.07.2026); M8.1: Relativ-Kodierung profil-getrieben (`rel_encoding`, RelativeEncoding.h — AlphaTrack ist sign-magnitude, nicht Zweierkomplement)
-  M9  SysEx-Empfang + Hardware-Preset-Browser (ADR 007, User-Entscheidung 17.07.2026) — M9a SysEx-Empfangsinfra (armed-gated Chunk-Transport im Hub, `Source/Core/Sysex/DsiSysex`-Codec: Packed-MS-Bit, Program-Dump/Inquiry-Parser, Name-Extraktion) erledigt 07/2026 · M9b Scanner+Inquiry+Preset-Cache — offen · M9c Preset-UI (HW-Presets im HardwareTargetPicker) + MidiPresetLoadTarget — offen
+  M9  SysEx-Empfang + Hardware-Preset-Browser (ADR 007, User-Entscheidung 17.07.2026) — M9a SysEx-Empfangsinfra (armed-gated Chunk-Transport im Hub, `Source/Core/Sysex/DsiSysex`-Codec: Packed-MS-Bit, Program-Dump/Inquiry-Parser, Name-Extraktion) erledigt 07/2026 · M9b Scanner+Inquiry+Preset-Cache (HardwarePresetScanner/-Library, EngineProcessor-Member) erledigt 07/2026 — Hardware-Verifikation (Name-Offset!) steht aus · M9c Preset-UI (HW-Presets im HardwareTargetPicker) + MidiPresetLoadTarget — offen
   M10 SysEx-Sende-Snippets — Sende-only Hex-Snippets mit optionalem `{v}`-Platzhalterbyte + AlphaTrack-LCD/Native-Mode-Force generisch (aus dem alten M9 abgespalten, unabhängig vom Empfangspfad) — offen
 
 ## M9: SysEx-Empfang + Hardware-Preset-Browser (ADR 007)
@@ -862,12 +862,26 @@ eng umrissenen Empfangspfad (Details/Verbote: docs/adr/007).
   M9b-Schritt 1**), `parseDeviceInquiryReply`/`deviceIdFromInquiry`
   (DSI: familyLsb = Device-ID-Byte).
 
-**M9b/M9c (geplant, Plan 17.07.2026):** HardwarePresetScanner
-(Message-Thread-Zustandsautomat: arm → Inquiry 200 ms/Fallback 0x25 →
-sequentielle Dumps mit 300 ms Timeout + 2 Retries → disarm; ~2 min für
-3×128 mit Progress/Cancel, nie parallelisieren) · HardwarePresetLibrary
-(XML-Cache `Conduit/Devices/Presets/<uuid>.xml`, Rescan nur manuell) ·
-MidiTargetBrowserModel/-Picker: „HW Presets"-Drill-down · 
+**M9b (erledigt 07/2026):**
+- `HardwarePresetScanner` (Message-Thread-Zustandsautomat, getaktet über
+  `hub.subscribeTick` statt eigenem Timer — Subsystem-Konvention): start →
+  arm → Inquiry (200 ms Timeout, Fallback `fallbackDeviceIdByte` = 0x25) →
+  sequentielle Ping-Pong-Dumps (300 ms Timeout, 2 Retries, dann „?" und
+  weiter — NIE parallel) → Library-Schreiben + disarm. Antworten fremder
+  Bank/Programm-Position werden ignoriert (Timeout-Rennen); die Device-ID
+  der Antwort wird NICHT gefiltert. `nowMs`-Seam für Tests. **Destruktor
+  nullt die Callbacks VOR cancel()** — deren Capture-Ziele können schon
+  zerstört sein (Member-Reihenfolge des Besitzers; ASan-Fund im Test).
+- `HardwarePresetLibrary`: XML-Cache `Conduit/Devices/Presets/<uuid>.xml`
+  (ValueTree→XML; korrupte Datei = kein Cache, kein Crash),
+  ChangeBroadcaster; Rescan nur manuell. EngineProcessor-Member neben den
+  Profil-Bibliotheken.
+- **Hardware-Verifikation steht aus (mit M9c-Feldtest):** Name-Offset 184
+  am echten Mopho prüfen — bei Zeichensalat Offset in `DsiSysex.h`
+  (`kNameOffset`) korrigieren.
+
+**M9c (geplant):** MidiTargetBrowserModel/-Picker: „HW Presets"-Drill-down
+(Gerät → Bank → Preset, Scan-Aktion mit Progress) ·
 MidiPresetLoadTarget (Druckflanke → Bank-Select + PC, festes Programm).
 
 ## Referenzen
