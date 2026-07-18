@@ -8,8 +8,11 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "Core/CanvasGestureRecognizer.h"
+#include "Core/CanvasViewport.h"
 #include "Core/GraphManager.h"
 #include "Core/NodeUiRegistry.h"
+#include "UI/NodeCanvasContent.h"
 #include "UI/NodeComponent.h"
 #include "UI/PortComponent.h"
 
@@ -40,6 +43,17 @@ namespace conduit
     Descriptions "conduit.module:{factoryKey}" — Drop legt das Modul an
     der Drop-Position an (derselbe undo-fähige addModuleNode-Pfad wie der
     Tap); während des Hovers zeigt ein Akzent-Rahmen die Drop-Fläche.
+
+    Viewport (ADR 008 M3a): Alle NodeComponents leben in der
+    NodeCanvasContent-Zwischenschicht, deren AffineTransform Zoom + Pan
+    trägt (canvas_view::ViewState, Clamps 0.1–2.0). Eingabepfade Ebene 2:
+    2-Finger-Pinch/Pan (CanvasGestureRecognizer, Leerraum-Regel — nur
+    Touches, die auf dem Canvas-Hintergrund beginnen), mouseMagnify
+    (Trackpad-Pinch), Scroll = Pan / Cmd+Scroll = Zoom, mittlere
+    Maustaste = Pan. Viewport persistiert in den Page-Properties der
+    aktiven Seite (M1: Pages[0]); Zoom < UiSettings::interactionMinZoom
+    sperrt die Modul-Interaktion (Module = reine Navigationsziele).
+    Ebenen 3/4/5 werden erkannt, ihre Aktionen folgen in M3b/M4.
 */
 class NodeCanvas final : public juce::Component,
                          public juce::DragAndDropTarget,
@@ -86,9 +100,22 @@ public:
     void itemDragExit (const SourceDetails& details) override;
 
     //==========================================================================
+    // Viewport (ADR 008 M3a) — public für Tests und die M4-Menü-Pegel
+    [[nodiscard]] canvas_view::ViewState getViewState() const noexcept { return view; }
+    void setViewState (canvas_view::ViewState newView);
+
+    /** true, wenn die Modul-Interaktion gesperrt ist (Zoom < Schwelle). */
+    [[nodiscard]] bool isInteractionLocked() const noexcept;
+
+    //==========================================================================
     void paint (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& event) override;
+    void mouseDrag (const juce::MouseEvent& event) override;
+    void mouseUp (const juce::MouseEvent& event) override;
     void mouseDoubleClick (const juce::MouseEvent& event) override;
+    void mouseWheelMove (const juce::MouseEvent& event,
+                         const juce::MouseWheelDetails& wheel) override;
+    void mouseMagnify (const juce::MouseEvent& event, float scaleFactor) override;
 
 private:
     //==========================================================================
@@ -142,6 +169,35 @@ private:
     void addComponentFor (juce::ValueTree nodeTree);
     void removeComponentFor (const juce::String& nodeUuid);
 
+    //==========================================================================
+    // Viewport (ADR 008 M3a)
+
+    /** Kabel + Drag-Vorschau — läuft im Content-Kontext (Content-Koordinaten
+        == Node-Koordinaten des Trees; Clip-Culling bleibt identisch). */
+    void paintCables (juce::Graphics& g);
+
+    /** view → Content-Transform + Interaktions-Sperre + repaint. */
+    void applyViewTransform();
+
+    /** view in die Page-Properties der aktiven Seite schreiben (ohne Undo —
+        View-State, Muster Node-Drag). Am Gesten-Ende bzw. nach diskreten
+        Events (Wheel/Magnify). */
+    void persistViewState();
+
+    /** view aus den Page-Properties der aktiven Seite laden (Ctor,
+        Preset-Load/Container-Austausch). */
+    void restoreViewState();
+
+    /** Aktive Seite — M3a: Pages[0] (M1-Default); M3b bindet die Auswahl an. */
+    [[nodiscard]] juce::ValueTree activePageTree() const;
+
+    /** Canvas-Punkt → Content-Koordinaten (durch den Transform). */
+    [[nodiscard]] juce::Point<int> toContentPosition (juce::Point<int> canvasPosition) const;
+
+    /** Pinch-Schwelle aus den UiSettings in den Recognizer speisen
+        (Ctor + jeder Settings-Broadcast). */
+    void applyRecognizerTuning();
+
     [[nodiscard]] std::optional<juce::Point<int>> getPortCentreInCanvas (const juce::String& nodeUuid,
                                                                          bool isInput, int channel) const;
     [[nodiscard]] static juce::Path makeCablePath (juce::Point<float> start, juce::Point<float> end);
@@ -156,6 +212,10 @@ private:
     InputLinkSend* inputSend;    // Send-LED-Status audio_in (nullptr in Tests)
     UiSettings* uiSettings;      // gatet die DEV-Toggles (nullptr in Tests)
 
+    // Transform-Träger (ADR 008 M3a) — VOR nodeComponents deklariert: die
+    // Node-Components (Kinder des content) werden zuerst zerstört
+    NodeCanvasContent content;
+
     std::vector<std::unique_ptr<NodeComponent>> nodeComponents;
 
     // Effektive (ggf. geerbte) Farbe pro Node — abgeleitet, kein Patch-Zustand
@@ -168,9 +228,15 @@ private:
         bool forceMono = false;  // Dwell-Geste: Einzel-Kabel trotz Stereo-Quelle
     };
 
-    std::optional<CableDrag> activeCableDrag;
+    std::optional<CableDrag> activeCableDrag;   // Positionen in Content-Koordinaten
 
     bool dropHighlight = false;   // Browser-Drag schwebt über der Fläche
+
+    //==========================================================================
+    // Viewport (ADR 008 M3a)
+    CanvasGestureRecognizer recognizer;      // Ebene 2 aktiv, 3/4/5 Hooks
+    canvas_view::ViewState view;
+    std::optional<juce::Point<float>> panDragLast;   // mittlere Maustaste
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NodeCanvas)
 };

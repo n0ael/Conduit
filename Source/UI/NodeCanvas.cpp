@@ -1,6 +1,7 @@
 #include "NodeCanvas.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "Modules/AttenuatorModule.h"
 #include "PushLookAndFeel.h"
@@ -33,11 +34,35 @@ NodeCanvas::NodeCanvas (juce::ValueTree rootTree,
     if (channelNames != nullptr)
         channelNames->addChangeListener (this);
 
+    // Interaktions-Sperr-Schwelle folgt dem Dev-Tuning-Wert live
+    if (uiSettings != nullptr)
+        uiSettings->addChangeListener (this);
+
+    // Transform-Träger (ADR 008 M3a): einzige direkte Kind-Component, alle
+    // NodeComponents leben darin; Kabel zeichnet der Canvas in ihrem Kontext
+    addAndMakeVisible (content);
+    content.onPaintCables = [this] (juce::Graphics& g) { paintCables (g); };
+
+    // Ebene 2: Pinch/Pan kontinuierlich; Gesten-Ende persistiert den Viewport.
+    // Ebenen 3/4/5 (onLevelBegin/End) bleiben in M3a bewusst ungesetzt.
+    recognizer.onPinchPan = [this] (double scaleFactor, juce::Point<double> panDelta,
+                                    juce::Point<double> anchor)
+    {
+        view = canvas_view::applyPinch (view, scaleFactor, panDelta, anchor);
+        applyViewTransform();
+    };
+    recognizer.onGestureEnd = [this] { persistViewState(); };
+    applyRecognizerTuning();
+
     rebuildAll();  // Tree kann schon Nodes tragen (Session-Restore)
+    restoreViewState();
 }
 
 NodeCanvas::~NodeCanvas()
 {
+    if (uiSettings != nullptr)
+        uiSettings->removeChangeListener (this);
+
     if (channelNames != nullptr)
         channelNames->removeChangeListener (this);
 
@@ -94,7 +119,7 @@ void NodeCanvas::addComponentFor (juce::ValueTree nodeTree)
         removeComponentFor (finished.getNodeUuid());  // zerstört die Component
     };
 
-    addAndMakeVisible (*component);
+    content.addAndMakeVisible (*component);   // Kinder leben im Transform-Träger
     nodeComponents.push_back (std::move (component));
 }
 
@@ -144,6 +169,8 @@ void NodeCanvas::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& 
     }
     else if (child.hasType (id::nodes))
         rebuildAll();  // Container-Austausch (Preset-Load)
+    else if (child.hasType (id::pages))
+        restoreViewState();  // Preset-Load/Migration bringt den Pages-Zweig
     else if (parent.hasType (id::connections) || child.hasType (id::connections))
         refreshFlowColours();  // neues Kabel → Vererbung neu
 }
@@ -167,10 +194,19 @@ void NodeCanvas::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree
 void NodeCanvas::valueTreeRedirected (juce::ValueTree&)
 {
     rebuildAll();
+    restoreViewState();
 }
 
-void NodeCanvas::changeListenerCallback (juce::ChangeBroadcaster*)
+void NodeCanvas::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
+    // Dev-Tuning (ADR 008 M3a): Sperr-Schwelle + Pinch-Schwelle
+    if (uiSettings != nullptr && source == uiSettings)
+    {
+        applyRecognizerTuning();
+        applyViewTransform();
+        return;
+    }
+
     // ChannelNames-Farbe/Pairing geändert → Vererbung + Input-Kabel neu
     refreshFlowColours();
 }
@@ -178,7 +214,9 @@ void NodeCanvas::changeListenerCallback (juce::ChangeBroadcaster*)
 //==============================================================================
 void NodeCanvas::beginCableDrag (const PortInfo& fromPort, juce::Point<int> position)
 {
-    activeCableDrag = CableDrag { fromPort, position };
+    // API nimmt Canvas-Koordinaten (PortComponent-Konvention); die Vorschau
+    // zeichnet im Content → intern Content-Koordinaten (M3a)
+    activeCableDrag = CableDrag { fromPort, toContentPosition (position) };
     repaint();
 }
 
@@ -186,7 +224,7 @@ void NodeCanvas::updateCableDrag (juce::Point<int> position)
 {
     if (activeCableDrag)
     {
-        activeCableDrag->currentPosition = position;
+        activeCableDrag->currentPosition = toContentPosition (position);
         repaint();
     }
 }
@@ -207,10 +245,17 @@ void NodeCanvas::endCableDrag (juce::Point<int> position)
     activeCableDrag.reset();
     repaint();
 
+    const auto contentPosition = toContentPosition (position);
+
+    // Drop-Toleranz screen-konstant halten: Content-Einheiten skalieren
+    // invers zum Zoom (bei Zoom 1.0 unverändert touchTarget)
+    const auto tolerance = (int) std::ceil ((double) NodeComponent::touchTarget
+                                            / juce::jmax (0.1, view.zoom));
+
     for (const auto& component : nodeComponents)
     {
-        const auto* port = component->findPortNear (position - component->getPosition(),
-                                                    NodeComponent::touchTarget);
+        const auto* port = component->findPortNear (contentPosition - component->getPosition(),
+                                                    tolerance);
 
         if (port == nullptr || port->getInfo().isInput == from.isInput)
             continue;  // nur Output ↔ Input ergibt ein Kabel
@@ -236,7 +281,11 @@ void NodeCanvas::endCableDrag (juce::Point<int> position)
 juce::ValueTree NodeCanvas::findConnectionAt (juce::Point<int> position) const
 {
     const auto connectionsTree = rootState.getChildWithName (id::connections);
-    const auto target = position.toFloat();
+
+    // API nimmt Canvas-Koordinaten; Kabel-Pfade leben in Content-Koordinaten.
+    // Toleranz screen-konstant: 8 px / Zoom (bei Identität unverändert 8).
+    const auto target = toContentPosition (position).toFloat();
+    const auto tolerance = (float) (8.0 / juce::jmax (0.1, view.zoom));
 
     for (int i = 0; i < connectionsTree.getNumChildren(); ++i)
     {
@@ -253,7 +302,7 @@ juce::ValueTree NodeCanvas::findConnectionAt (juce::Point<int> position) const
         juce::Point<float> nearestOnPath;
         makeCablePath (start->toFloat(), end->toFloat()).getNearestPoint (target, nearestOnPath);
 
-        if (nearestOnPath.getDistanceFrom (target) <= 8.0f)
+        if (nearestOnPath.getDistanceFrom (target) <= tolerance)
             return connection;
     }
 
@@ -283,17 +332,22 @@ juce::Path NodeCanvas::makeCablePath (juce::Point<float> start, juce::Point<floa
 //==============================================================================
 void NodeCanvas::paint (juce::Graphics& g)
 {
+    // Hintergrund + Drop-Rahmen bleiben UNTRANSFORMIERT am Canvas — die
+    // Kabel zeichnet paintCables() im Content-Kontext (Transform, M3a)
     g.fillAll (push::colours::background);
 
-    // Browser-Drag schwebt über der Fläche: Akzent-Rahmen als Drop-Hinweis
     if (dropHighlight)
     {
         g.setColour (push::colours::ledOrange.withAlpha (0.6f));
         g.drawRect (getLocalBounds(), 2);
     }
+}
 
+void NodeCanvas::paintCables (juce::Graphics& g)
+{
     // Kabel aus Connections[] (Schema 6.2) — unter den Node-Kacheln, jedes
-    // in der Farbe seiner Quelle (M-B)
+    // in der Farbe seiner Quelle (M-B); Koordinaten == Node-Positionen
+    // (Content-lokal), der Content-Transform übernimmt Zoom/Pan
     const juce::PathStrokeType cableStroke (3.0f, juce::PathStrokeType::curved,
                                             juce::PathStrokeType::rounded);
     const auto connectionsTree = rootState.getChildWithName (id::connections);
@@ -534,6 +588,29 @@ void NodeCanvas::refreshFlowColours()
 
 void NodeCanvas::mouseDown (const juce::MouseEvent& event)
 {
+    // Touch auf dem Canvas-Hintergrund → Gesten-Leiter (Leerraum-Regel:
+    // Touches auf Modulen kommen hier nie an, JUCE-Hit-Testing)
+    if (event.source.isTouch())
+    {
+        recognizer.touchDown (event.source.getIndex(), event.position);
+
+        // Ab dem zweiten Finger keine Klick-Semantik mehr (Pinch-Absicht)
+        if (recognizer.getActiveFingerCount() > 1)
+            return;
+    }
+
+    // Mittlere Maustaste = Pan (Gesten-Parität, ADR 008)
+    if (event.mods.isMiddleButtonDown())
+    {
+        panDragLast = event.position;
+        return;
+    }
+
+    // Interaktions-Sperre (User-Feedback 18.07.2026): unterhalb der
+    // Zoom-Schwelle ist der Patch nur Navigation — auch Kabel-Trennen aus
+    if (isInteractionLocked())
+        return;
+
     // Klick auf ein Kabel trennt es (undo-fähig) — Klicks auf Kacheln/Ports
     // kommen hier nie an (Child-Components fangen sie ab)
     const auto connection = findConnectionAt (event.getPosition());
@@ -562,12 +639,172 @@ void NodeCanvas::mouseDown (const juce::MouseEvent& event)
     graphManager.removeConnection (sourceUuid, sourceChannel, destUuid, destChannel);
 }
 
+void NodeCanvas::mouseDrag (const juce::MouseEvent& event)
+{
+    if (event.source.isTouch())
+    {
+        recognizer.touchMove (event.source.getIndex(), event.position);
+        return;
+    }
+
+    if (panDragLast)
+    {
+        view.offsetX += (double) (event.position.x - panDragLast->x);
+        view.offsetY += (double) (event.position.y - panDragLast->y);
+        panDragLast = event.position;
+        applyViewTransform();
+    }
+}
+
+void NodeCanvas::mouseUp (const juce::MouseEvent& event)
+{
+    if (event.source.isTouch())
+    {
+        recognizer.touchUp (event.source.getIndex());
+        return;
+    }
+
+    if (panDragLast)
+    {
+        panDragLast.reset();
+        persistViewState();
+    }
+}
+
 void NodeCanvas::mouseDoubleClick (const juce::MouseEvent& event)
 {
+    // Gesperrt = nur Navigation — auch kein Modul-Anlegen (18.07.2026)
+    if (isInteractionLocked())
+        return;
+
     // Bis zur Modul-Palette: Doppelklick/Doppel-Tap legt einen Attenuator an
+    // (Position im Content-/Tree-Koordinatenraum, M3a)
     const auto created = graphManager.addModuleNode (AttenuatorModule::staticModuleId,
-                                                     event.getPosition());
+                                                     toContentPosition (event.getPosition()));
     jassertquiet (created.isValid());
+}
+
+void NodeCanvas::mouseWheelMove (const juce::MouseEvent& event,
+                                 const juce::MouseWheelDetails& wheel)
+{
+    // Cmd/Ctrl+Scroll = Zoom um den Zeiger; sonst Pan (Trackpad-2-Finger-
+    // Scroll und Mausrad — Gesten-Parität Ebene 2, ADR 008)
+    if (event.mods.isCommandDown())
+    {
+        const auto factor = std::exp ((double) wheel.deltaY * 1.2);
+        view = canvas_view::zoomAbout (view, event.position.toDouble(),
+                                       view.zoom * factor);
+    }
+    else
+    {
+        constexpr auto pixelsPerWheelUnit = 160.0;
+        view.offsetX += (double) wheel.deltaX * pixelsPerWheelUnit;
+        view.offsetY += (double) wheel.deltaY * pixelsPerWheelUnit;
+    }
+
+    applyViewTransform();
+    persistViewState();   // diskrete Events → direkt schreiben
+}
+
+void NodeCanvas::mouseMagnify (const juce::MouseEvent& event, float scaleFactor)
+{
+    // Trackpad-Pinch (macOS Magnify / Windows Precision Touchpad)
+    view = canvas_view::zoomAbout (view, event.position.toDouble(),
+                                   view.zoom * (double) scaleFactor);
+    applyViewTransform();
+    persistViewState();
+}
+
+//==============================================================================
+void NodeCanvas::setViewState (canvas_view::ViewState newView)
+{
+    newView.zoom = canvas_view::clampZoom (newView.zoom);
+    view = newView;
+    applyViewTransform();
+    persistViewState();
+}
+
+bool NodeCanvas::isInteractionLocked() const noexcept
+{
+    const auto threshold = uiSettings != nullptr
+        ? uiSettings->getInteractionMinZoom()
+        : UiSettings::defaultInteractionMinZoom;
+
+    return view.zoom < (double) threshold - 1.0e-9;
+}
+
+void NodeCanvas::applyViewTransform()
+{
+    // Translation auf ganze Screen-Pixel gerundet ANWENDEN — view selbst
+    // bleibt double-genau (sonst verschluckt die Rundung kleine Deltas).
+    // Sub-Pixel-Offsets ließen Kacheln/Text beim Pannen zwischen Pixeln
+    // zittern (Smoke-Feedback 18.07.2026).
+    content.setTransform (juce::AffineTransform::scale ((float) view.zoom)
+                              .translated ((float) std::round (view.offsetX),
+                                           (float) std::round (view.offsetY)));
+
+    // Interaktions-Sperre (User-Entscheidung 18.07.2026): unterhalb der
+    // Schwelle sind Module reine Navigationsziele
+    content.setChildInteraction (! isInteractionLocked());
+    repaint();
+}
+
+void NodeCanvas::persistViewState()
+{
+    auto page = activePageTree();
+
+    if (! page.isValid())
+        return;   // Tests ohne Pages-Zweig — Viewport bleibt transient
+
+    // Ohne Undo — View-State (Muster Node-Drag: kein Undo-Spam)
+    page.setProperty (id::viewOffsetX, view.offsetX, nullptr);
+    page.setProperty (id::viewOffsetY, view.offsetY, nullptr);
+    page.setProperty (id::viewZoom,    view.zoom,    nullptr);
+}
+
+void NodeCanvas::restoreViewState()
+{
+    const auto page = activePageTree();
+
+    if (page.isValid())
+    {
+        view.offsetX = (double) page.getProperty (id::viewOffsetX, 0.0);
+        view.offsetY = (double) page.getProperty (id::viewOffsetY, 0.0);
+        view.zoom    = canvas_view::clampZoom ((double) page.getProperty (id::viewZoom, 1.0));
+    }
+    else
+    {
+        view = {};
+    }
+
+    applyViewTransform();
+}
+
+juce::ValueTree NodeCanvas::activePageTree() const
+{
+    const auto pages = rootState.getChildWithName (id::pages);
+    return pages.getNumChildren() > 0 ? pages.getChild (0) : juce::ValueTree();
+}
+
+juce::Point<int> NodeCanvas::toContentPosition (juce::Point<int> canvasPosition) const
+{
+    return canvas_view::toContent (view, canvasPosition.toDouble()).roundToInt();
+}
+
+void NodeCanvas::applyRecognizerTuning()
+{
+    // Pinch-Schwelle (Dev-Tuning, User-Feedback 18.07.2026): Prozent
+    // Spread-Änderung → Log-Einheiten (log1p hält kleine Werte äquivalent)
+    const auto fraction = uiSettings != nullptr ? uiSettings->getPinchDeadZone()
+                                                : UiSettings::defaultPinchDeadZone;
+    recognizer.setZoomDeadZone (std::log1p ((double) fraction));
+
+    // Zoom-Antwort: Gesamt-Stärke + progressive Kurve (Dev-Tuning)
+    const auto gain = uiSettings != nullptr ? uiSettings->getZoomStrength()
+                                            : UiSettings::defaultZoomStrength;
+    const auto curve = uiSettings != nullptr ? uiSettings->getZoomCurve()
+                                             : UiSettings::defaultZoomCurve;
+    recognizer.setZoomResponse ((double) gain, (double) curve);
 }
 
 //==============================================================================
@@ -583,9 +820,10 @@ void NodeCanvas::itemDropped (const SourceDetails& details)
 
     const auto factoryKey = browser_drag::extractFactoryKey (details.description.toString());
 
-    // localPosition ist bereits Canvas-lokal — derselbe undo-fähige Pfad
-    // wie Tap-to-Load ("Modul hinzufügen"-Transaktion)
-    const auto created = graphManager.addModuleNode (factoryKey, details.localPosition);
+    // localPosition ist Canvas-lokal → in den Content-/Tree-Koordinatenraum
+    // (M3a); derselbe undo-fähige Pfad wie Tap-to-Load
+    const auto created = graphManager.addModuleNode (factoryKey,
+                                                     toContentPosition (details.localPosition));
     jassertquiet (created.isValid());
 }
 

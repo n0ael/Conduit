@@ -696,3 +696,144 @@ TEST_CASE ("NodeCanvas: fremde Drag-Descriptions werden ignoriert", "[ui][browse
     REQUIRE (conduit::browser_drag::extractFactoryKey (payload) == "lfo");
     REQUIRE (conduit::browser_drag::extractFactoryKey ("lfo").isEmpty());
 }
+
+//==============================================================================
+// Viewport (ADR 008 M3a): Transform, Persistenz, Interaktions-Sperre
+
+TEST_CASE ("NodeCanvas: Viewport-Transform — Interaktionen bleiben unter Zoom korrekt", "[ui][canvas]")
+{
+    UiTestRig rig;
+    rig.canvas.setSize (800, 600);
+
+    const auto node = rig.manager.addModuleNode (attenuatorId, { 100, 80 });
+    auto* component = rig.canvas.findNodeComponent (UiTestRig::uuidOf (node));
+    REQUIRE (component != nullptr);
+
+    // Default: Identität — Content-Position == Canvas-Position (Alt-Verhalten)
+    REQUIRE (juce::exactlyEqual (rig.canvas.getViewState().zoom, 1.0));
+    REQUIRE (rig.canvas.findConnectionAt ({ 5, 5 }).isValid() == false);
+
+    // Zoom 0.5 + Offset: JUCE rechnet die Component-Koordinaten durch den
+    // Content-Transform — die Kachel erscheint am erwarteten Screen-Punkt
+    rig.canvas.setViewState ({ 40.0, 20.0, 0.5 });
+
+    const auto screenTopLeft = rig.canvas.getLocalPoint (component, juce::Point<int> (0, 0));
+    REQUIRE (screenTopLeft == juce::Point<int> (40 + 50, 20 + 40));
+
+    // Sub-Pixel-Offsets werden beim ANWENDEN auf ganze Pixel gerundet
+    // (Anti-Zitter, 18.07.2026) — der View-State selbst bleibt genau
+    rig.canvas.setViewState ({ 40.7, 20.3, 0.5 });
+    REQUIRE (juce::exactlyEqual (rig.canvas.getViewState().offsetX, 40.7));
+    REQUIRE (rig.canvas.getLocalPoint (component, juce::Point<int> (0, 0))
+             == juce::Point<int> (41 + 50, 20 + 40));
+
+    rig.canvas.setViewState ({ 40.0, 20.0, 0.5 });   // zurück für den Drop-Check
+
+    // Drop unter Zoom: Canvas-Position (300, 200) → Tree-Position im
+    // Content-Raum ((300-40)/0.5, (200-20)/0.5)
+    juce::DragAndDropTarget::SourceDetails details (
+        conduit::browser_drag::makeModulePayload (attenuatorId), &rig.canvas, { 300, 200 });
+    rig.canvas.itemDropped (details);
+
+    const auto dropped = rig.nodes().getChild (rig.nodes().getNumChildren() - 1);
+    REQUIRE ((int) dropped.getProperty (conduit::id::positionX) == 520);
+    REQUIRE ((int) dropped.getProperty (conduit::id::positionY) == 360);
+}
+
+TEST_CASE ("NodeCanvas: Viewport persistiert in den Page-Properties und restauriert", "[ui][canvas]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    // Root MIT Pages-Zweig (M1-Schema) — der Canvas bindet an Pages[0]
+    auto root = makeRootTree();
+    juce::ValueTree pages (conduit::id::pages);
+    juce::ValueTree page (conduit::id::page);
+    page.setProperty (conduit::id::pageUuid, juce::Uuid().toString(), nullptr);
+    page.setProperty (conduit::id::pageGridX, 0, nullptr);
+    page.setProperty (conduit::id::pageGridY, 0, nullptr);
+    page.setProperty (conduit::id::viewOffsetX, 12.5, nullptr);
+    page.setProperty (conduit::id::viewOffsetY, -30.0, nullptr);
+    page.setProperty (conduit::id::viewZoom, 1.5, nullptr);
+    pages.appendChild (page, nullptr);
+    root.appendChild (pages, nullptr);
+
+    juce::AudioProcessorGraph graph;
+    conduit::GraphFader fader;
+    conduit::ModuleFactory factory;
+    juce::UndoManager undoManager;
+    conduit::NodeUiRegistry uiRegistry;
+    conduit::GraphManager manager { root, graph, fader, factory, undoManager, uiRegistry };
+
+    conduit::NodeCanvas canvas { root, manager, uiRegistry };
+
+    // Ctor restauriert den gespeicherten Viewport der aktiven Seite
+    REQUIRE (juce::exactlyEqual (canvas.getViewState().zoom, 1.5));
+    REQUIRE (juce::exactlyEqual (canvas.getViewState().offsetX, 12.5));
+    REQUIRE (juce::exactlyEqual (canvas.getViewState().offsetY, -30.0));
+
+    // setViewState schreibt zurück (ohne Undo — View-State)
+    canvas.setViewState ({ 100.0, 50.0, 0.8 });
+    REQUIRE (juce::exactlyEqual ((double) page.getProperty (conduit::id::viewZoom), 0.8));
+    REQUIRE (juce::exactlyEqual ((double) page.getProperty (conduit::id::viewOffsetX), 100.0));
+    REQUIRE_FALSE (undoManager.canUndo());
+
+    // Clamp: überhöhter Zoom wird auf die Range geklemmt
+    canvas.setViewState ({ 0.0, 0.0, 99.0 });
+    REQUIRE (juce::exactlyEqual (canvas.getViewState().zoom, 2.0));
+}
+
+TEST_CASE ("NodeCanvas: Interaktions-Sperre unter der Zoom-Schwelle", "[ui][canvas]")
+{
+    UiTestRig rig;
+
+    // Ohne UiSettings gilt die Default-Schwelle (0.5)
+    rig.canvas.setViewState ({ 0.0, 0.0, 1.0 });
+    REQUIRE_FALSE (rig.canvas.isInteractionLocked());
+
+    rig.canvas.setViewState ({ 0.0, 0.0, 0.5 });
+    REQUIRE_FALSE (rig.canvas.isInteractionLocked());   // Schwelle inklusiv
+
+    rig.canvas.setViewState ({ 0.0, 0.0, 0.49 });
+    REQUIRE (rig.canvas.isInteractionLocked());
+
+    rig.canvas.setViewState ({ 0.0, 0.0, 0.51 });
+    REQUIRE_FALSE (rig.canvas.isInteractionLocked());
+}
+
+TEST_CASE ("NodeCanvas: Sperre blockiert auch Kabel-Trennen und Doppel-Tap", "[ui][canvas]")
+{
+    UiTestRig rig;
+    rig.canvas.setSize (800, 600);
+
+    const auto a = rig.manager.addModuleNode (attenuatorId, { 50, 50 });
+    const auto b = rig.manager.addModuleNode (attenuatorId, { 400, 50 });
+    REQUIRE (rig.manager.addConnection (UiTestRig::uuidOf (a), 0, UiTestRig::uuidOf (b), 0));
+
+    const auto connections = rig.root.getChildWithName (conduit::id::connections);
+    REQUIRE (connections.getNumChildren() == 1);
+
+    // Kabel-Startpunkt (Output-Port von a) — liegt exakt auf dem Kabelpfad
+    auto* compA = rig.canvas.findNodeComponent (UiTestRig::uuidOf (a));
+    REQUIRE (compA != nullptr);
+    const auto cableStart = compA->getPosition() + compA->getPortCentre (false, 0);
+
+    // Gesperrt (Zoom 0.3): Klick auf das Kabel trennt NICHT (18.07.2026)
+    rig.canvas.setViewState ({ 0.0, 0.0, 0.3 });
+    REQUIRE (rig.canvas.isInteractionLocked());
+
+    const auto lockedClick = cableStart.toFloat() * 0.3f;   // Screen-Position
+    rig.canvas.mouseDown (makeDragEvent (rig.canvas, lockedClick, lockedClick, false));
+    REQUIRE (connections.getNumChildren() == 1);
+
+    // ... und Doppel-Tap legt KEIN Modul an
+    const auto nodeCount = rig.canvas.getNumNodeComponents();
+    rig.canvas.mouseDoubleClick (makeDragEvent (rig.canvas, { 300.0f, 300.0f },
+                                                { 300.0f, 300.0f }, false));
+    REQUIRE (rig.canvas.getNumNodeComponents() == nodeCount);
+
+    // Entsperrt (Identität): derselbe Klick trennt das Kabel
+    rig.canvas.setViewState ({ 0.0, 0.0, 1.0 });
+    rig.canvas.mouseDown (makeDragEvent (rig.canvas, cableStart.toFloat(),
+                                         cableStart.toFloat(), false));
+    REQUIRE (connections.getNumChildren() == 0);
+}

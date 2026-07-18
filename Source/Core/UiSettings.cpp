@@ -11,6 +11,10 @@ namespace
     constexpr const char* dspMeterKey  = "dspMeterEnabled";
     constexpr const char* softKeyboardKey = "softKeyboardEnabled";
     constexpr const char* uiFpsLimitKey   = "uiFpsLimit";
+    constexpr const char* interactionMinZoomKey = "interactionMinZoom";
+    constexpr const char* pinchDeadZoneKey      = "pinchDeadZone";
+    constexpr const char* zoomStrengthKey       = "zoomStrength";
+    constexpr const char* zoomCurveKey          = "zoomCurve";
 
     /** Erlaubte Modi: 120 (Nativ, max) | 60 | 30 — alles andere wird auf
         den nächsten Modus geklemmt (handeditierte Datei, alte Versionen). */
@@ -62,6 +66,17 @@ void UiSettings::loadFromFile()
         softKeyboardEnabled = file->getBoolValue (softKeyboardKey,
                                                   defaultSoftKeyboardEnabled);
         uiFpsLimit = clampFpsLimit (file->getIntValue (uiFpsLimitKey, defaultUiFpsLimit));
+        interactionMinZoom = juce::jlimit (minInteractionMinZoom, maxInteractionMinZoom,
+            static_cast<float> (file->getDoubleValue (interactionMinZoomKey,
+                                                      defaultInteractionMinZoom)));
+        pinchDeadZone = juce::jlimit (minPinchDeadZone, maxPinchDeadZone,
+            static_cast<float> (file->getDoubleValue (pinchDeadZoneKey,
+                                                      defaultPinchDeadZone)));
+        zoomStrength = juce::jlimit (minZoomStrength, maxZoomStrength,
+            static_cast<float> (file->getDoubleValue (zoomStrengthKey,
+                                                      defaultZoomStrength)));
+        zoomCurve = juce::jlimit (minZoomCurve, maxZoomCurve,
+            static_cast<float> (file->getDoubleValue (zoomCurveKey, defaultZoomCurve)));
     }
 }
 
@@ -77,6 +92,79 @@ void UiSettings::setUiFpsLimit (int limitFps)
     if (auto* file = applicationProperties.getUserSettings())
     {
         file->setValue (uiFpsLimitKey, clamped);
+        file->saveIfNeeded();
+    }
+
+    sendChangeMessage();
+}
+
+void UiSettings::setInteractionMinZoom (float zoomThreshold)
+{
+    const auto clamped = juce::jlimit (minInteractionMinZoom, maxInteractionMinZoom,
+                                       zoomThreshold);
+
+    if (juce::exactlyEqual (clamped, interactionMinZoom))
+        return;
+
+    interactionMinZoom = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (interactionMinZoomKey, static_cast<double> (clamped));
+        file->saveIfNeeded();
+    }
+
+    sendChangeMessage();
+}
+
+void UiSettings::setPinchDeadZone (float spreadFraction)
+{
+    const auto clamped = juce::jlimit (minPinchDeadZone, maxPinchDeadZone, spreadFraction);
+
+    if (juce::exactlyEqual (clamped, pinchDeadZone))
+        return;
+
+    pinchDeadZone = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (pinchDeadZoneKey, static_cast<double> (clamped));
+        file->saveIfNeeded();
+    }
+
+    sendChangeMessage();
+}
+
+void UiSettings::setZoomStrength (float gain)
+{
+    const auto clamped = juce::jlimit (minZoomStrength, maxZoomStrength, gain);
+
+    if (juce::exactlyEqual (clamped, zoomStrength))
+        return;
+
+    zoomStrength = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (zoomStrengthKey, static_cast<double> (clamped));
+        file->saveIfNeeded();
+    }
+
+    sendChangeMessage();
+}
+
+void UiSettings::setZoomCurve (float exponent)
+{
+    const auto clamped = juce::jlimit (minZoomCurve, maxZoomCurve, exponent);
+
+    if (juce::exactlyEqual (clamped, zoomCurve))
+        return;
+
+    zoomCurve = clamped;
+
+    if (auto* file = applicationProperties.getUserSettings())
+    {
+        file->setValue (zoomCurveKey, static_cast<double> (clamped));
         file->saveIfNeeded();
     }
 

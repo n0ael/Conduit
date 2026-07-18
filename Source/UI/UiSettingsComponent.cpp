@@ -48,6 +48,46 @@ UiSettingsComponent::UiSettingsComponent (UiSettings& settingsToUse)
     };
     addAndMakeVisible (fpsLimitCombo);
 
+    // Interaktions-Zoom-Grenze (ADR 008 M3a): unterhalb des Werts sind
+    // Node-Module reine Navigationsziele — Dev-Tuning pro Gerät (Prozent)
+    addAndMakeVisible (minZoomLabel);
+    minZoomSlider.setRange (static_cast<double> (UiSettings::minInteractionMinZoom) * 100.0,
+                            static_cast<double> (UiSettings::maxInteractionMinZoom) * 100.0, 1.0);
+    minZoomSlider.setTextValueSuffix (" %");
+    minZoomSlider.onValueChange = [this]
+    { settings.setInteractionMinZoom (static_cast<float> (minZoomSlider.getValue() / 100.0)); };
+    addAndMakeVisible (minZoomSlider);
+
+    // Pinch-Schwelle (ADR 008 M3a): Spread-Änderung in %, ab der eine
+    // 2-Finger-Bewegung als Zoom zählt — pro Touchscreen justierbar
+    // (User-Feedback 18.07.2026: ungenaue Screens zoomen sonst beim Pannen)
+    addAndMakeVisible (pinchDeadZoneLabel);
+    pinchDeadZoneSlider.setRange (static_cast<double> (UiSettings::minPinchDeadZone) * 100.0,
+                                  static_cast<double> (UiSettings::maxPinchDeadZone) * 100.0, 1.0);
+    pinchDeadZoneSlider.setTextValueSuffix (" %");
+    pinchDeadZoneSlider.onValueChange = [this]
+    { settings.setPinchDeadZone (static_cast<float> (pinchDeadZoneSlider.getValue() / 100.0)); };
+    addAndMakeVisible (pinchDeadZoneSlider);
+
+    // Zoom-Antwort (ADR 008 M3a): Stärke = Gesamt-Geschwindigkeit des
+    // Pinch-Zooms; Kurve > 1.0 = beginnt langsam, wird progressiv stärker
+    // (User-Feedback 18.07.2026: linear zoomte zu schnell zu stark)
+    addAndMakeVisible (zoomStrengthLabel);
+    zoomStrengthSlider.setRange (static_cast<double> (UiSettings::minZoomStrength) * 100.0,
+                                 static_cast<double> (UiSettings::maxZoomStrength) * 100.0, 1.0);
+    zoomStrengthSlider.setTextValueSuffix (" %");
+    zoomStrengthSlider.onValueChange = [this]
+    { settings.setZoomStrength (static_cast<float> (zoomStrengthSlider.getValue() / 100.0)); };
+    addAndMakeVisible (zoomStrengthSlider);
+
+    addAndMakeVisible (zoomCurveLabel);
+    zoomCurveSlider.setRange (static_cast<double> (UiSettings::minZoomCurve),
+                              static_cast<double> (UiSettings::maxZoomCurve), 0.1);
+    zoomCurveSlider.setNumDecimalPlacesToDisplay (1);
+    zoomCurveSlider.onValueChange = [this]
+    { settings.setZoomCurve (static_cast<float> (zoomCurveSlider.getValue())); };
+    addAndMakeVisible (zoomCurveSlider);
+
     devModeToggle.setButtonText (juce::String::fromUTF8 (
         "Development-Modus (DEV-Buttons in den Modul-Köpfen)"));
     devModeToggle.onClick = [this] { settings.setDevModeEnabled (devModeToggle.getToggleState()); };
@@ -96,6 +136,14 @@ void UiSettingsComponent::syncControls()
     fontScaleSlider.setValue (static_cast<double> (settings.getFontScale()) * 100.0,
                               juce::dontSendNotification);
     fpsLimitCombo.setSelectedId (settings.getUiFpsLimit(), juce::dontSendNotification);
+    minZoomSlider.setValue (static_cast<double> (settings.getInteractionMinZoom()) * 100.0,
+                            juce::dontSendNotification);
+    pinchDeadZoneSlider.setValue (static_cast<double> (settings.getPinchDeadZone()) * 100.0,
+                                  juce::dontSendNotification);
+    zoomStrengthSlider.setValue (static_cast<double> (settings.getZoomStrength()) * 100.0,
+                                 juce::dontSendNotification);
+    zoomCurveSlider.setValue (static_cast<double> (settings.getZoomCurve()),
+                              juce::dontSendNotification);
     devModeToggle.setToggleState (settings.isDevModeEnabled(), juce::dontSendNotification);
     dspMeterToggle.setToggleState (settings.isDspMeterEnabled(), juce::dontSendNotification);
     softKeyboardToggle.setToggleState (settings.isSoftKeyboardEnabled(),
@@ -122,6 +170,10 @@ void UiSettingsComponent::resized()
     layoutRow (area, uiScaleLabel, uiScaleSlider);
     layoutRow (area, fontScaleLabel, fontScaleSlider);
     layoutRow (area, fpsLimitLabel, fpsLimitCombo);
+    layoutRow (area, minZoomLabel, minZoomSlider);
+    layoutRow (area, pinchDeadZoneLabel, pinchDeadZoneSlider);
+    layoutRow (area, zoomStrengthLabel, zoomStrengthSlider);
+    layoutRow (area, zoomCurveLabel, zoomCurveSlider);
 
     devModeToggle.setBounds (area.removeFromTop (30));
     area.removeFromTop (6);

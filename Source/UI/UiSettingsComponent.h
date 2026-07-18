@@ -38,13 +38,20 @@ public:
 
     void resized() override;
 
-    [[nodiscard]] static int preferredHeight() noexcept { return 242; }
+    [[nodiscard]] static int preferredHeight() noexcept { return 386; }
 
     //==========================================================================
     // Controls public für headless Tests
     juce::Slider uiScaleSlider   { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     juce::Slider fontScaleSlider { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     juce::ComboBox fpsLimitCombo;   // Nativ (max 120) / 60 / 30
+    // Interaktions-Zoom-Grenze der Node-Canvas (ADR 008 M3a, Dev-Tuning)
+    juce::Slider minZoomSlider   { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
+    // Pinch-Schwelle: Spread-Änderung, ab der 2-Finger = Zoom (Dev-Tuning)
+    juce::Slider pinchDeadZoneSlider { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
+    // Zoom-Antwort: Gesamt-Geschwindigkeit + progressive Kurve (Dev-Tuning)
+    juce::Slider zoomStrengthSlider { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
+    juce::Slider zoomCurveSlider    { juce::Slider::LinearBar, juce::Slider::TextBoxLeft };
     // Text im ctor via String::fromUTF8 (MSVC-CP1252-Falle bei Umlaut-Literalen)
     juce::ToggleButton devModeToggle;
     juce::ToggleButton dspMeterToggle;
@@ -69,6 +76,11 @@ private:
     juce::Label uiScaleLabel   { {}, juce::String::fromUTF8 ("UI-Größe") };
     juce::Label fontScaleLabel { {}, juce::String::fromUTF8 ("Schriftgröße") };
     juce::Label fpsLimitLabel  { {}, juce::String::fromUTF8 ("UI-Framerate") };
+    // 110-px-Label-Spalte: Text bewusst kurz (nie quetschen, User-Regel 07/2026)
+    juce::Label minZoomLabel   { {}, juce::String::fromUTF8 ("Interakt.-Zoom") };
+    juce::Label pinchDeadZoneLabel { {}, juce::String::fromUTF8 ("Pinch-Schwelle") };
+    juce::Label zoomStrengthLabel  { {}, juce::String::fromUTF8 ("Zoom-Stärke") };
+    juce::Label zoomCurveLabel     { {}, juce::String::fromUTF8 ("Zoom-Kurve") };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UiSettingsComponent)
 };

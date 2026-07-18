@@ -3,7 +3,39 @@
 > Letzte Aktualisierung: 2026-07-18 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (18.07.2026) — Node-Page Multipage M1 (ADR 008): Pages-Datenmodell + Migration
+## Aktueller Meilenstein (18.07.2026) — Node-Page Multipage M3a (ADR 008): Canvas-Viewport-Neubau
+
+Zoom + Pan für den Node-Patch-Editor, komplett neu (M0-Befund: es
+existierte keinerlei Viewport). Feldgetestet am Touchscreen (18.07.,
+„super flüssig"), Trackpad-Test offen.
+
+- Architektur (Plan-Modus, User-Go): `NodeCanvasContent` als passiver
+  Transform-Träger (AffineTransform, `setInterceptsMouseClicks(false,
+  true)` → Leerraum-Regel per Konstruktion); NodeCanvas-API behält
+  Canvas-Koordinaten, konvertiert intern; Hit-Toleranzen
+  screen-konstant (÷ Zoom); Kabel-Painting 1:1 in den Content-Kontext
+  umgezogen.
+- `Core/CanvasViewport.h` (pure Mathe: zoomAbout/applyPinch, Clamps
+  0.1–2.0) + `Core/CanvasGestureRecognizer` (Zustandsmaschine
+  2/3/4/5-Finger nach MouseInputSource-Muster; Ebene 2 aktiv, 3/4/5
+  als no-op-Hooks für M3b/M4).
+- Eingabepfade Ebene 2 komplett: Touch-Pinch/Pan, mouseMagnify,
+  Scroll-Pan/Cmd+Scroll-Zoom, mittlere Maustaste; Viewport
+  persistiert ohne Undo in den M1-Page-Properties (aktive Seite).
+- Feldtest-Iterationen (alle Dev-Tuning im Oberfläche-Tab):
+  Interaktions-Sperre unter „Interakt.-Zoom" (Default 50 %, sperrt
+  auch Kabel-Trennen/Doppel-Tap), „Pinch-Schwelle" (0–30 %, weiche
+  Dead-Zone auf akkumuliertem Spread), „Zoom-Stärke" (60 %) +
+  „Zoom-Kurve" (1.6, progressiv statt linear), Anti-Zitter
+  (Translation pixelgerundet, View-State double).
+- NodeComponent-Drag klemmt auf ≥ 0 (Content-Ursprung). Tests: 976
+  Cases / 32684 Assertions grün, ASan grün (ein nicht reproduzierter
+  Einzel-Flake in einem von drei Volltest-Läufen, Name unbekannt —
+  beim nächsten Auftreten Log sichern).
+- Offen: Trackpad-Smoke, Tuning-Werte nach Erprobung als Defaults
+  fixieren; als Nächstes M2 (I/O als Browser-Module, ADR 009).
+
+## Davor (18.07.2026) — Node-Page Multipage M1 (ADR 008): Pages-Datenmodell + Migration
 
 Seiten als reine View-Schicht über EINEM Graph (ADR 008 + ADR 009,
 CLAUDE.md v5.4). M0-Inventur abgeschlossen (kein Zoom/Pan/Viewport

@@ -106,6 +106,7 @@ juce_add_gui_app(Conduit
 set(CONDUIT_CPP_SOURCES
     Source/Core/Main.cpp
     Source/Core/AudioDeviceController.cpp
+    Source/Core/CanvasGestureRecognizer.cpp
     Source/Core/CcControlModel.cpp
     Source/Core/ChannelNames.cpp
     Source/Core/ChannelStripLayers.cpp
@@ -335,6 +336,8 @@ set(CONDUIT_CPP_SOURCES
 target_sources(Conduit PRIVATE
     ${CONDUIT_CPP_SOURCES}
     Source/Core/AudioDeviceController.h
+    Source/Core/CanvasGestureRecognizer.h
+    Source/Core/CanvasViewport.h
     Source/Core/CcControlModel.h
     Source/Core/ChannelNames.h
     Source/Core/ChordMemory.h
@@ -514,6 +517,7 @@ target_sources(Conduit PRIVATE
     Source/UI/MpeShapingView.h
     Source/UI/NodeAttributePanel.h
     Source/UI/NodeCanvas.h
+    Source/UI/NodeCanvasContent.h
     Source/UI/NodeColourDot.h
     Source/UI/NodeComponent.h
     Source/UI/NoteCircleFadeTracker.h
@@ -616,6 +620,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/Browser/BrowserFileScannerTests.cpp
         Tests/Core/Browser/BrowserSearchIndexTests.cpp
         Tests/Core/CallbackTimingMonitorTests.cpp
+        Tests/Core/CanvasViewportTests.cpp
         Tests/Core/CaptureBufferTests.cpp
         Tests/Core/CaptureGateTests.cpp
         Tests/Core/CaptureMeterTests.cpp
@@ -728,6 +733,7 @@ if(CONDUIT_BUILD_TESTS)
     target_sources(ConduitTests PRIVATE
         ${CONDUIT_TEST_CPP_SOURCES}
         Source/Core/AudioDeviceController.cpp
+        Source/Core/CanvasGestureRecognizer.cpp
         Source/Core/CcControlModel.cpp
         Source/Core/ChannelNames.cpp
         Source/Core/ChannelStripLayers.cpp

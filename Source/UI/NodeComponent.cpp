@@ -967,7 +967,10 @@ void NodeComponent::mouseDrag (const juce::MouseEvent& event)
     // synchron applyTreePosition auf und setzt die Component auf das noch
     // alte Tree-Y zurück — getY() danach wäre der alte Wert (Drag war
     // dadurch auf horizontal beschränkt)
-    const auto snapped = snapToSiblings (getPosition());
+    // Klemme auf >= 0: der Content-Koordinatenraum des Canvas beginnt beim
+    // Ursprung (ADR 008 M3a) — links/oberhalb davon gibt es keine Events
+    auto snapped = snapToSiblings (getPosition());
+    snapped = { juce::jmax (0, snapped.x), juce::jmax (0, snapped.y) };
     setTopLeftPosition (snapped);
     nodeTree.setProperty (id::positionX, snapped.x, nullptr);
     nodeTree.setProperty (id::positionY, snapped.y, nullptr);

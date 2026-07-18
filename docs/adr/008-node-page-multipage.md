@@ -86,6 +86,35 @@ Seite. Der Audio-Thread kennt keine Seiten.
 ## Gesten-Parität (Trackpad/Maus-Mapping)
 - Trackpad Ebene 2 NATIV: macOS Magnify-Events (Pinch) +
   Scroll-Events (Pan); Windows Precision Touchpad analog.
+- **Touch-Target bei Zoom < 1 (Entscheidung 18.07.2026, M3a):**
+  Unterhalb der Schwelle `interactionMinZoom` (UiSettings, Dev-Menü
+  „Interakt.-Zoom", Default 50 %) ist der Patch NUR Navigation:
+  Module sind reine Navigationsziele, auch Kabel-Trennen und
+  Canvas-Doppel-Tap sind gesperrt (Smoke-Feedback 18.07.2026;
+  44-px-Regel gilt in Screen-Pixeln). Schwelle bleibt Dev-Tuning zum
+  Experimentieren pro Gerät; Zukunfts-Vision (nicht geplant):
+  Erst-Start-Dialog mit Display-Größe für abgestimmte Defaults auf
+  Nicht-iOS-Geräten.
+- **Weiche Zoom-Dead-Zone (Smoke-Feedback 18.07.2026):** Die
+  akkumulierte Spread-Änderung der 2-Finger-Geste läuft durch
+  `canvas_view::softZoomResponse` — beim Pannen bleibt der Zoom exakt
+  stehen, echtes Spreizen blendet weich ein (kein harter
+  Schwellen-Sprung). Die Schwelle ist EINSTELLBAR
+  (`UiSettings::pinchDeadZone`, Dev-Menü „Pinch-Schwelle" 0–30 %,
+  Default 6 %; Soft-Bereich = 3× Schwelle) — ungenaue Touchscreens/
+  unsaubere Bewegungen brauchen pro Gerät mehr Toleranz. Die
+  Transform-Translation wird beim Anwenden auf ganze Screen-Pixel
+  gerundet (Anti-Zitter; View-State bleibt double-genau).
+- **Progressive Zoom-Antwort (Smoke-Feedback 18.07.2026, 2. Runde):**
+  Nach der Dead-Zone formt `canvas_view::progressiveZoomResponse`
+  die Antwort: „Zoom-Stärke" (`UiSettings::zoomStrength`, 10–100 %,
+  Default 60 %) senkt die Gesamt-Geschwindigkeit, „Zoom-Kurve"
+  (`UiSettings::zoomCurve`, Exponent 1.0–3.0, Default 1.6) lässt den
+  Zoom langsam beginnen und kontinuierlich stärker werden — linear
+  zoomte zu schnell zu stark. Beides Dev-Tuning, nach Erprobung
+  fixieren.
+- Zoom-Clamps 0.1–2.0 (Entscheidung 18.07.2026): Untergrenze lässt
+  die M4-Birdeye-Pegel zu, Obergrenze 200 % für Detailarbeit.
 - Ebenen 3/4/5 auf Trackpad: gehaltene Modifier-Taste schaltet die
   Ebene (Belegung in M0/M3 festlegen), eine Hand Trackpad, eine
   Tastatur.

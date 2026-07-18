@@ -80,6 +80,46 @@ public:
     [[nodiscard]] int getUiFpsLimit() const noexcept { return uiFpsLimit; }
     void setUiFpsLimit (int limitFps);
 
+    // Interaktions-Zoom-Grenze der Node-Canvas (ADR 008 M3a, User-Entscheidung
+    // 18.07.2026): unterhalb dieses Zoom-Faktors sind Module reine
+    // Navigationsziele (Touch-Targets fielen unter die 44-px-Regel) —
+    // Dev-Tuning-Wert zum Experimentieren pro Gerät.
+    static constexpr float minInteractionMinZoom     = 0.1f;
+    static constexpr float maxInteractionMinZoom     = 1.0f;
+    static constexpr float defaultInteractionMinZoom = 0.5f;
+
+    [[nodiscard]] float getInteractionMinZoom() const noexcept { return interactionMinZoom; }
+    void setInteractionMinZoom (float zoomThreshold);
+
+    // Pinch-Schwelle (ADR 008 M3a, User-Feedback 18.07.2026): relative
+    // Spread-Änderung, ab der eine 2-Finger-Bewegung als Zoom zählt —
+    // ungenaue Touchscreens/unsaubere Bewegungen brauchen mehr Toleranz
+    // beim reinen Pannen. 0 = jede Änderung zoomt sofort. Dev-Tuning.
+    static constexpr float minPinchDeadZone     = 0.0f;
+    static constexpr float maxPinchDeadZone     = 0.30f;
+    static constexpr float defaultPinchDeadZone = 0.06f;
+
+    [[nodiscard]] float getPinchDeadZone() const noexcept { return pinchDeadZone; }
+    void setPinchDeadZone (float spreadFraction);
+
+    // Zoom-Antwort der Pinch-Geste (ADR 008 M3a, User-Feedback 18.07.2026):
+    // zoomStrength senkt die Gesamt-Geschwindigkeit (< 100 % = träger),
+    // zoomCurve > 1 lässt den Zoom langsam beginnen und kontinuierlich
+    // stärker werden (progressiv statt linear). Dev-Tuning pro Gerät.
+    static constexpr float minZoomStrength     = 0.1f;
+    static constexpr float maxZoomStrength     = 1.0f;
+    static constexpr float defaultZoomStrength = 0.6f;
+
+    static constexpr float minZoomCurve     = 1.0f;   // linear
+    static constexpr float maxZoomCurve     = 3.0f;
+    static constexpr float defaultZoomCurve = 1.6f;
+
+    [[nodiscard]] float getZoomStrength() const noexcept { return zoomStrength; }
+    void setZoomStrength (float gain);
+
+    [[nodiscard]] float getZoomCurve() const noexcept { return zoomCurve; }
+    void setZoomCurve (float exponent);
+
 private:
     void loadFromFile();
 
@@ -90,6 +130,10 @@ private:
     bool  dspMeterEnabled = true;
     bool  softKeyboardEnabled = defaultSoftKeyboardEnabled;
     int   uiFpsLimit = defaultUiFpsLimit;
+    float interactionMinZoom = defaultInteractionMinZoom;
+    float pinchDeadZone = defaultPinchDeadZone;
+    float zoomStrength = defaultZoomStrength;
+    float zoomCurve = defaultZoomCurve;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (UiSettings)
 };
