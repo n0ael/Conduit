@@ -323,9 +323,9 @@ Querschnitts-Kern:
   Jede Page definiert ihre eigene Eingabe-Tabelle (Touch, Trackpad,
   Maus+Tasten) in ihrer Rule bzw. ihrem Dossier — Grid: Rule `grid`
   (MPE-Flächen verhalten sich selbst wie ein Trackpad), TouchLive/EQ8:
-  docs/TouchLive.md, Node-Patch-Editor: ADR 008 (später
-  docs/NodeEditor.md). Die Gesten-Tabelle der Rule `ui-design` gilt
-  nur, wo eine Page nichts Eigenes definiert.
+  docs/TouchLive.md, Node-Patch-Editor: Rule `node-editor` +
+  docs/NodeEditor.md (umgesetzt 18.07.2026). Die Gesten-Tabelle der
+  Rule `ui-design` gilt nur, wo eine Page nichts Eigenes definiert.
 - **Schrift wird NIE horizontal gestaucht (User-Regel 07/2026):**
   Schriftgröße reduzieren oder Text kürzen — niemals quetschen
   (minimumHorizontalScale = 1.0, Details Rule `ui-design`).
@@ -342,7 +342,8 @@ Subsystem-Regeln + Spezifikationen (je eigene Rule + Dossier):
 **TransportBar/Metronom** → Rule `transport`, docs/Transport.md ·
 **Looper** (Engine-Level, kein Graph) → Rule `looper`, docs/Looper.md ·
 **Grid-Touch-Controller Ω** → Rule `grid`, docs/Grid.md ·
-**MIDI-Rig** → Rule `midirig`, docs/MidiRig.md.
+**MIDI-Rig** → Rule `midirig`, docs/MidiRig.md ·
+**Node-Patch-Editor (Multipage)** → Rule `node-editor`, docs/NodeEditor.md.
 
 ### 10.1 Touch-Gesten
 
@@ -375,7 +376,7 @@ Vollausbau, OSC-Send, M4L-Announce (+ Max-Testdevice ConduitLFO), Grid M1.
 | TouchLive-Page (Ableton-Live-Remote) | v2.x | M1–M4 + M5/EQ-Eight erledigt (GRID/MIXER/DEVICE/BROWSER auf Slot 2, Meter, Fast-Path, bespoke EQ-Kurve), Meilensteinleiter: docs/TouchLive.md |
 | Capture-Netzwerk-Share (Exports für entferntes Ableton) | v2.x | HTTP-Bereitstellung der Capture-Dateien |
 | MIDI-Rig (Hardware-Mapping, NRPN/PC/SysEx) | v2.x | Meilensteinleiter: docs/MidiRig.md |
-| Node-Page Multipage (Canvas-Seiten) | v2.x | Seiten als View-Schicht über EINEM Graph, Gesten-Leiter 2/3/4/5-Finger, Performance-Modus (ADR 008); I/O als Browser-Module (ADR 009); Meilensteine M0–M5 in ADR 008 |
+| Node-Page Multipage (Canvas-Seiten) | v2.x | M0–M4 UMGESETZT 18.07.2026 (ADR 008/009, Rule `node-editor`, docs/NodeEditor.md) — Feldtest offen; M5 Portal-Badges ZURÜCKGESTELLT (Bedarfsprüfung: lokale Outs pro Seite decken den Hauptfall; Cross-Page-Kabel wirken im Graph, sind nur unsichtbar) |
 | GestureHelper-Spike (separater Prozess) | v2.x, nachrangig | Raw-Trackpad-Multitouch + Systemgesten-Umschaltung je OS; Muster Push-Shuttle (Prozess-Firewall für Private-APIs); NUR falls Modifier-Pfad in der Praxis nicht reicht |
 | AUv3-Hosting (iOS/macOS) | v2.x | JUCE-nativ, lief im Erstversuch (iOS + macOS 17.07.2026); auf iOS einziges Plugin-Format; unabhängig von CLAP-Priorität |
 
@@ -454,4 +455,4 @@ Index:
 
 ---
 
-*Conduit Alpha v3 — Claude Code Instructions v5.5  |  Juli 2026*
+*Conduit Alpha v3 — Claude Code Instructions v5.6  |  Juli 2026*

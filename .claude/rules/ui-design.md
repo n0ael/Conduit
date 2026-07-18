@@ -43,7 +43,10 @@ paths:
   (Zombie-UI-Schutz, CLAUDE.md §5 / docs/PatchEngine.md 5.3);
   `stopUpdates()`-Hook für Phase 1.
 
-Touch-Gesten (App-weit):
+Touch-Gesten (App-weiter FALLBACK — gilt nur, wo eine Page nichts
+Eigenes definiert, CLAUDE.md §10.0; Node-Patch-Editor → Rule
+`node-editor`/docs/NodeEditor.md, Grid → Rule `grid`, TouchLive →
+docs/TouchLive.md):
 
 | Geste | Funktion | Priorität |
 |---|---|---|
@@ -52,5 +55,9 @@ Touch-Gesten (App-weit):
 | Grid: 1 Finger (Sonne) | Note + Pitch-Bend (X) + Ausdruck (Y) | P0 |
 | Grid: 2. Finger im Orbit (Mond) | Ring — Radius → Slide, keine neue Note | P0 |
 | 2 Finger Rotate | LFO-Phase / Tuning | P1 |
-| 3 Finger Tap | Snap-to-Zero / Reset | P1 |
 | Long Press | Kontextmenü / Node-Eigenschaften | P2 |
+
+(Der frühere Eintrag „3 Finger Tap = Snap-to-Zero/Reset" war ein
+Phantom — app-weit nie implementiert (M0-Inventur 18.07.2026); die
+3-Finger-Ebene ist seitenspezifisch belegt, z. B. Birdeye im
+Node-Patch-Editor.)
