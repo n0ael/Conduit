@@ -73,9 +73,9 @@ void LooperInPanel::buildRows()
 
             // Leerer Text = zurück zum Auto-Namen (Muster Link-Send);
             // ohne Undo — Namens-Pflege wie Slider-Werte (6.1)
-            auto input = inputsTree().getChild (index);
-            input.setProperty (id::inputUserName,
-                               rows[(size_t) index]->nameLabel.getText().trim(), nullptr);
+            auto edited = inputsTree().getChild (index);
+            edited.setProperty (id::inputUserName,
+                                rows[(size_t) index]->nameLabel.getText().trim(), nullptr);
             refreshNameLabel (index);
         };
         addAndMakeVisible (row->nameLabel);
