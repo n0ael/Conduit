@@ -102,17 +102,31 @@
     normalizeNode bei jeder Materialisierung); moduleIds/tap:-Keys
     bleiben unverändert. looper_out-Nodes alter Patches laufen in den
     definierten nodeError-Pfad („Unbekanntes Modul") und sind löschbar.
-  - **Delete-Gating + Papierkorb (ADR 012):** Looper-/Track-Delete nur
-    noch direkt, wenn weder Clips noch Patch-Out-Kabel betroffen; sonst
-    X/OK-CallOut (LooperDeleteConfirmDialog). OK = Force-Delete
+  - **Delete-Gating + Papierkorb (ADR 012, erweitert 19.07.2026):**
+    Looper-/Track-Delete nur noch direkt, wenn weder Clips noch
+    Patch-Out-Kabel betroffen; sonst X/OK-CallOut
+    (LooperDeleteConfirmDialog). OK = Force-Delete
     (`EngineProcessor::forceRemoveLooperTrack/-LastLooper`): Clips
     DETACHEN (`LooperSessionModel::detachSlot`, KEIN bank.deleteClip —
     Bank bleibt Besitzerin, ramBytesUsed zählt weiter), Kabel
     spec-relativ in den `LooperTrashCan` (~180 s), Struktur schrumpfen.
-    ↺-Kachel im Looper-Header (`LooperTrashTile`) stellt den jüngsten
-    Eintrag wieder her (`restoreLooperTrash`: Struktur nachwachsen,
-    attachClip, Kabel aus der DANN gültigen Slot-Liste); letzte 30 s
-    Rot-Fade, bei Ablauf kurzes Flackern. prepareToPlay leert den
+    Auch die **Delete-Geste auf einzelne Clips** landet im Papierkorb
+    (`EngineProcessor::trashClipSlot`, Entry-Kind `clip`: spielend →
+    sofort stoppen, dann detachen — kein endgültiges deleteSlot mehr im
+    UI-Pfad). Jeder Eintrag trägt eine stabile `entryId`; die ↺-Kachel
+    im Looper-Header (`LooperTrashTile`) stellt bei EINEM Eintrag direkt
+    wieder her, bei mehreren öffnet sie die Auswahl-Liste
+    (`LooperTrashDialog`: neuester zuoberst, Label + eingefrorene
+    Restzeit, Tap = `restoreLooperTrashEntry (entryId)`). Restore:
+    Struktur nachwachsen, attachClip, Kabel aus der DANN gültigen
+    Slot-Liste; Clip-Einträge validieren Looper/Track + freien Slot
+    (sonst zurücklegen, Id bleibt). **Clip-Thumbnails überleben den
+    Papierkorb** (User 19.07.2026): der Editor parkt beim Löschen die
+    Zell-Bilder (Tinte + Quellfarbe + eingefrorenes Quell-Label) nach
+    clipId (`stashLooperThumbnails`); refreshLooperStatus spielt sie
+    nach dem Restore automatisch in die Zelle zurück,
+    `purgeLooperThumbnails` räumt bei Ablauf (trash.onChanged). Letzte
+    30 s Rot-Fade, bei Ablauf kurzes Flackern. prepareToPlay leert den
     Papierkorb VOR bank.prepare (Store-Freigabe → Pointer wären
     dangling; kein Double-Free, da kein deleteClip aussteht). Der
     UndoManager bleibt außen vor (Clips engine-seitig, Struktur =

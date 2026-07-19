@@ -50,10 +50,17 @@ CallbackTimingMonitor, Spektrum-View, Snap-Declick, Duck, Lead-in).
   Alt-Schlüssel looper_in/looper_big_out migrieren beim Laden
   (`GraphManager::normalizeLoadedNodes`), looper_out-Nodes laufen in
   den nodeError-Pfad.
-- Delete-Gating (ADR 012): Looper-/Track-Delete direkt nur ohne Clips
-  UND ohne Patch-Out-Kabel; sonst X/OK-Dialog → Force-Delete in den
-  `LooperTrashCan` (~180 s, ↺-Kachel): Clips DETACHEN statt deleteClip
-  (Bank bleibt Besitzerin), Kabel spec-relativ sichern. prepareToPlay:
+- Delete-Gating (ADR 012, erweitert 19.07.2026): Looper-/Track-Delete
+  direkt nur ohne Clips UND ohne Patch-Out-Kabel; sonst X/OK-Dialog →
+  Force-Delete in den `LooperTrashCan` (~180 s, ↺-Kachel): Clips
+  DETACHEN statt deleteClip (Bank bleibt Besitzerin), Kabel
+  spec-relativ sichern. Auch Einzel-Clip-Delete (Geste) läuft über den
+  Papierkorb (`trashClipSlot`, Kind `clip` — spielend erst stoppen).
+  Einträge haben stabile `entryId`; ↺ bei mehreren Einträgen =
+  Auswahl-Liste (`LooperTrashDialog`), Restore gezielt via
+  `restoreLooperTrashEntry`. Thumbnails parkt der Editor nach clipId
+  (`stashLooperThumbnails` VOR dem Detach, Re-Apply im
+  refreshLooperStatus, Purge bei trash.onChanged). prepareToPlay:
   `trash.clearWithoutDelete()` VOR `bank.prepare()`. Kein UndoManager
   für Clips/Struktur.
 - Quellen-Combo listet NUR Looper-patch-IN-Slots (zuoberst) + Interface-

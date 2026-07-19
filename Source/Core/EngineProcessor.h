@@ -272,11 +272,22 @@ public:
         analog über alle seine Tracks (ein Papierkorb-Eintrag). */
     [[nodiscard]] juce::Result forceRemoveLastLooper();
 
+    /** [Message Thread] Einzelnen Clip in den Papierkorb löschen
+        (Delete-Geste): spielend → sofort stoppen, dann detachen und als
+        Kind::clip-Eintrag parken — statt endgültigem deleteSlot. */
+    [[nodiscard]] juce::Result trashClipSlot (int looperIndex, int trackIndex,
+                                              int slotIndex);
+
     /** [Message Thread] Jüngsten Papierkorb-Eintrag wiederherstellen:
         Struktur nachwachsen, Clips reattachen, Kabel spec-relativ neu
         anlegen (best effort). skippedCables (optional) zählt Kabel, die
         nicht wiederherstellbar waren (Node/Slot inzwischen weg). */
     [[nodiscard]] juce::Result restoreLooperTrash (int* skippedCables = nullptr);
+
+    /** [Message Thread] Bestimmten Eintrag wiederherstellen (Auswahl-
+        Liste der ↺-Kachel) — sonst wie restoreLooperTrash(). */
+    [[nodiscard]] juce::Result restoreLooperTrashEntry (std::uint32_t entryId,
+                                                        int* skippedCables = nullptr);
 
     /** [Message Thread] Loop-Playback mit 5-ms-Fade beenden. */
     void stopLooper() noexcept { looperBank.stopAll(); }
@@ -379,6 +390,11 @@ private:
 
     /** Logische Looper-Struktur aus den Settings (Big-Out-Auto-Follow). */
     [[nodiscard]] LooperPatchOutModule::Structure currentLooperStructure() const;
+
+    /** Gemeinsamer Restore-Kern (jüngster Eintrag / Auswahl per Id):
+        legt den Eintrag bei belegter Struktur-Position zurück. */
+    [[nodiscard]] juce::Result restoreTrashEntry (LooperTrashCan::Entry entry,
+                                                  int* skippedCables);
 
     juce::ValueTree rootState;
     juce::UndoManager undoManager;

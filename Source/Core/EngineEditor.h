@@ -12,6 +12,7 @@
 #include "UI/CaptureToast.h"
 #include "UI/DevPanel.h"
 #include <array>
+#include <map>
 
 #include "UI/EditorDockPanel.h"
 #include "UI/GridPage.h"
@@ -126,6 +127,21 @@ private:
         geben — sie zeigt sie invertiert auf Quellfarbe (09.07.2026). */
     void captureLooperClipThumbnail (int looperIndex);
 
+    /** Zell-Thumbnails der zu löschenden Slots VOR dem Papierkorb-Push
+        nach clipId parken (trackIndex −1 = alle Tracks des Loopers,
+        slotIndex −1 = alle Slots) — refreshLooperStatus spielt sie nach
+        dem Restore automatisch zurück (User 19.07.2026). */
+    void stashLooperThumbnails (int looperIndex, int trackIndex, int slotIndex);
+
+    /** Geparkte Thumbnails wegwerfen, deren Clip weder im Papierkorb
+        noch in einem Slot lebt (Ablauf/endgültiges Löschen). */
+    void purgeLooperThumbnails();
+
+    /** Restore eines bestimmten Papierkorb-Eintrags aus der ↺-Kachel
+        bzw. der Auswahl-Liste — Toast bei Fehlern/übersprungenen
+        Kabeln, danach Struktur-Refresh. */
+    void restoreLooperTrashFromUi (std::uint32_t entryId);
+
     /** Looper-Status in die Page spiegeln (Editor-Timer, 15 Hz):
         Struktur, Labels, Meter, Thumbnail-Aufräumen. */
     void refreshLooperStatus (bool devMode);
@@ -194,6 +210,17 @@ private:
     enum class LooperGesture { none, deleteClips, saveClips };
     LooperGesture looperGesture = LooperGesture::none;
     bool looperDeleteLatched = false;
+
+    // Geparkte Zell-Thumbnails gelöschter Clips (Papierkorb-Fenster):
+    // Schlüssel clipId; refreshLooperStatus setzt sie nach dem Restore
+    // zurück in die Zelle, purgeLooperThumbnails räumt bei Ablauf
+    struct TrashedThumbnail
+    {
+        juce::Image ink;
+        juce::Colour background;
+        juce::String sourceLabel;
+    };
+    std::map<juce::uint32, TrashedThumbnail> trashedLooperThumbnails;
 
     /** Track entfernen (Delete-Geste auf Header / Long-Press) — nur der
         letzte Track, nur leer & gestoppt (M4-Entscheidung). */

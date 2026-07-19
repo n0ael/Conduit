@@ -176,6 +176,7 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/LooperSendDialog.cpp
     Source/UI/LooperSettingsMenu.cpp
     Source/UI/LooperTrackStrip.cpp
+    Source/UI/LooperTrashDialog.cpp
     Source/Core/Looper/LooperBank.cpp
     Source/Core/Looper/LooperClipExporter.cpp
     Source/Core/Looper/LooperSessionModel.cpp
@@ -823,6 +824,7 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/LooperSendDialog.cpp
         Source/UI/LooperSettingsMenu.cpp
         Source/UI/LooperTrackStrip.cpp
+        Source/UI/LooperTrashDialog.cpp
         Source/Core/Looper/LooperBank.cpp
         Source/Core/Looper/LooperClipExporter.cpp
         Source/Core/Looper/LooperSessionModel.cpp

@@ -29,6 +29,8 @@ void LooperTrashCan::push (Entry entry)
     JUCE_ASSERT_MESSAGE_THREAD
 
     entry.expiresAt = nowSecondsMt() + expirySeconds;
+    if (entry.entryId == 0)
+        entry.entryId = nextEntryId++;
     entries.push_back (std::move (entry));
 
     startTimer (10'000);   // 10-s-Tick reicht — die Kachel zählt selbst
@@ -52,6 +54,30 @@ LooperTrashCan::Entry LooperTrashCan::popLatest()
         onChanged();
 
     return entry;
+}
+
+LooperTrashCan::Entry LooperTrashCan::popEntry (std::uint32_t entryId)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    for (auto it = entries.begin(); it != entries.end(); ++it)
+    {
+        if (it->entryId != entryId)
+            continue;
+
+        auto entry = std::move (*it);
+        entries.erase (it);
+
+        if (entries.empty())
+            stopTimer();
+
+        if (onChanged != nullptr)
+            onChanged();
+
+        return entry;
+    }
+
+    return {};   // entryId 0 = inzwischen abgelaufen
 }
 
 double LooperTrashCan::secondsRemaining() const noexcept

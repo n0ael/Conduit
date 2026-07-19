@@ -66,6 +66,14 @@ public:
         return thumbnailSourceLabel;
     }
 
+    // Papierkorb-Stash (Editor): Tinte + Quellfarbe zum Parken auslesen —
+    // beim Restore setzt setThumbnail beides identisch wieder
+    [[nodiscard]] const juce::Image& getThumbnailImage() const noexcept { return thumbnail; }
+    [[nodiscard]] juce::Colour getThumbnailBackground() const noexcept
+    {
+        return thumbnailBackground;
+    }
+
     /** Mittlere Tinten-Deckung (Alpha 0..1) einer normalisierten Zone des
         Tinte-Bildes — Aufbauten (Play-Dreieck, Label) nehmen auf dunklen
         Stellen die Gegenfarbe an und bleiben sichtbar (User 09.07.2026).

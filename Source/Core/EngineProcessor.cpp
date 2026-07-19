@@ -432,17 +432,95 @@ juce::Result EngineProcessor::forceRemoveLastLooper()
     return juce::Result::ok();
 }
 
+juce::Result EngineProcessor::trashClipSlot (int looperIndex, int trackIndex,
+                                             int slotIndex)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    auto* clip = looperSession.clipAt (looperIndex, trackIndex, slotIndex);
+    if (clip == nullptr)
+        return juce::Result::fail ("Slot ist leer");
+
+    // Spielender Clip: sofort stoppen (Voice-Fade läuft audio-seitig
+    // weiter, der Clip bleibt am Leben — Muster forceRemoveLooperTrack)
+    if (looperSession.getPlayingSlot (looperIndex, trackIndex) == slotIndex)
+        looperSession.stopTrack (looperIndex, trackIndex, 0.0);
+
+    LooperTrashCan::Entry entry;
+    entry.kind = LooperTrashCan::Entry::Kind::clip;
+    entry.looperIndex = looperIndex;
+    entry.trackIndex = trackIndex;
+
+    if (auto* detached = looperSession.detachSlot (looperIndex, trackIndex, slotIndex))
+        entry.clips.push_back ({ trackIndex, slotIndex, detached, detached->clipId });
+    else
+        return juce::Result::fail ("Slot ist leer");
+
+    looperTrash.push (std::move (entry));
+    return juce::Result::ok();
+}
+
 juce::Result EngineProcessor::restoreLooperTrash (int* skippedCables)
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
+    if (! looperTrash.hasEntries())
+    {
+        if (skippedCables != nullptr)
+            *skippedCables = 0;
+        return juce::Result::fail ("Papierkorb ist leer");
+    }
+
+    return restoreTrashEntry (looperTrash.popLatest(), skippedCables);
+}
+
+juce::Result EngineProcessor::restoreLooperTrashEntry (std::uint32_t entryId,
+                                                       int* skippedCables)
+{
+    JUCE_ASSERT_MESSAGE_THREAD
+
+    auto entry = looperTrash.popEntry (entryId);
+    if (entry.entryId == 0)
+    {
+        if (skippedCables != nullptr)
+            *skippedCables = 0;
+        return juce::Result::fail ("Eintrag ist inzwischen abgelaufen");
+    }
+
+    return restoreTrashEntry (std::move (entry), skippedCables);
+}
+
+juce::Result EngineProcessor::restoreTrashEntry (LooperTrashCan::Entry entry,
+                                                 int* skippedCables)
+{
     if (skippedCables != nullptr)
         *skippedCables = 0;
 
-    if (! looperTrash.hasEntries())
-        return juce::Result::fail ("Papierkorb ist leer");
+    // Einzel-Clip: Looper/Track müssen noch existieren, der Slot frei
+    // sein — sonst Eintrag zurücklegen (kein Struktur-/Kabel-Umbau)
+    if (entry.kind == LooperTrashCan::Entry::Kind::clip)
+    {
+        jassert (entry.clips.size() == 1);
 
-    auto entry = looperTrash.popLatest();
+        if (entry.looperIndex >= looperSession.getNumLoopers()
+            || entry.trackIndex >= looperSession.getNumTracks (entry.looperIndex))
+        {
+            looperTrash.push (std::move (entry));
+            return juce::Result::fail ("Track existiert nicht mehr");
+        }
+
+        for (const auto& ref : entry.clips)
+        {
+            if (! looperSession.attachClip (entry.looperIndex, ref.track,
+                                            ref.slot, ref.clip))
+            {
+                looperTrash.push (std::move (entry));
+                return juce::Result::fail ("Slot inzwischen belegt");
+            }
+        }
+
+        return juce::Result::ok();
+    }
 
     // Struktur-Position muss frei sein — sonst Eintrag zurücklegen
     // (push erneuert das Zeitfenster, bewusst großzügig)

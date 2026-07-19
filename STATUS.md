@@ -3,7 +3,28 @@
 > Letzte Aktualisierung: 2026-07-19 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (19.07.2026) — Looper patch IN/OUT (ADR 013): Umbenennung + Mini-Out entfernt
+## Aktueller Meilenstein (19.07.2026) — Papierkorb-Ausbau: Einzel-Clips, Auswahl-Restore, Thumbnail-Rettung
+
+- **Einzel-Clip-Delete → Papierkorb** (User-Feedback 19.07.2026): die
+  Delete-Geste auf Slot-Zellen ruft `EngineProcessor::trashClipSlot`
+  (spielend → sofort stoppen, detachen, Entry-Kind `clip`) statt
+  endgültigem `deleteSlot`; Restore validiert Looper/Track + freien
+  Slot, sonst Eintrag zurücklegen.
+- **Auswahl-Restore:** Papierkorb-Einträge tragen stabile `entryId`
+  (Re-Push behält sie); ↺-Kachel: EIN Eintrag = direkt, mehrere =
+  `LooperTrashDialog` (CallOut, neuester zuoberst, Label + Restzeit,
+  > 6 Zeilen scrollen) → `restoreLooperTrashEntry (entryId)`.
+- **Thumbnails überleben den Papierkorb:** Editor parkt Zell-Bilder
+  (Tinte + Quellfarbe + eingefrorenes Quell-Label) nach clipId
+  (`stashLooperThumbnails` VOR jedem Detach — Geste UND Force-Delete);
+  `refreshLooperStatus` spielt sie nach dem Restore automatisch zurück
+  (auch FFT-/Spektrum-Ansicht — das Bild ist die geschnappte View),
+  `purgeLooperThumbnails` räumt via trash.onChanged.
+- Tests: LooperTrashTests + entryId/popEntry-Mechanik + Engine-Level
+  Clip-Trash/Restore (Feeding über den echten processBlock).
+- Offen: Feldtest (gemeinsam mit ADR 010/012/013).
+
+## Davor (19.07.2026) — Looper patch IN/OUT (ADR 013): Umbenennung + Mini-Out entfernt
 
 - **`looper_out` („Looper Out Mini") ersatzlos entfernt** — Modul, Panel,
   GraphManager-Slot-API und der `outputPre/Target/Mode`-Listener-Zweig;

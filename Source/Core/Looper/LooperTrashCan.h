@@ -48,25 +48,35 @@ public:
 
     struct Entry
     {
-        enum class Kind : int { track = 0, looper };
+        enum class Kind : int { track = 0, looper, clip };
 
         Kind kind = Kind::track;
         int looperIndex = 0;
-        int trackIndex = 0;          // bei kind == track
+        int trackIndex = 0;          // bei kind == track | clip
         int numTracksSnapshot = 1;   // bei kind == looper (VOR removeLastLooper —
                                      // das resettet numTracks auf 1)
-        std::vector<ClipRef> clips;
+        std::vector<ClipRef> clips;  // bei kind == clip genau einer
         std::vector<LooperPatchOutModule::PatchOutCableRef> cables;
         double expiresAt = 0.0;      // Sekunden (Time::getMillisecondCounterHiRes/1000)
+        std::uint32_t entryId = 0;   // stabil für Auswahl-Restore (push vergibt)
     };
 
-    /** [MT] Eintrag parken; expiresAt setzt push selbst (now + expiry). */
+    /** [MT] Eintrag parken; expiresAt setzt push selbst (now + expiry).
+        entryId 0 bekommt eine frische Id — ein zurückgelegter Eintrag
+        (gescheitertes Restore) behält seine. */
     void push (Entry entry);
 
     [[nodiscard]] bool hasEntries() const noexcept { return ! entries.empty(); }
 
+    /** [MT] Bestand für Auswahl-Liste + Editor-Aufräumen (read-only). */
+    [[nodiscard]] const std::vector<Entry>& getEntries() const noexcept { return entries; }
+
     /** [MT] Jüngsten Eintrag entnehmen (Restore) — hasEntries() vorher! */
     [[nodiscard]] Entry popLatest();
+
+    /** [MT] Bestimmten Eintrag entnehmen (Auswahl-Restore). Unbekannte
+        Id (inzwischen abgelaufen) liefert einen Entry mit entryId 0. */
+    [[nodiscard]] Entry popEntry (std::uint32_t entryId);
 
     /** Restzeit des am FRÜHESTEN ablaufenden Eintrags (0 = leer). */
     [[nodiscard]] double secondsRemaining() const noexcept;
@@ -95,6 +105,7 @@ private:
 
     LooperBank& bank;
     std::vector<Entry> entries;
+    std::uint32_t nextEntryId = 1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LooperTrashCan)
 };

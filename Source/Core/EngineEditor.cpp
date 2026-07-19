@@ -13,6 +13,7 @@
 #include "UI/LooperDeleteConfirmDialog.h"
 #include "UI/LooperSendDialog.h"
 #include "UI/LooperSettingsMenu.h"
+#include "UI/LooperTrashDialog.h"
 #include "UI/SettingsWindow.h"
 #include "UI/TrackSelectorPanel.h"
 #include "UI/UiFramePacer.h"
@@ -341,6 +342,8 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
             juce::String::fromUTF8 ("Looper schließen?"), message);
         dialog->onConfirm = [this]
         {
+            // Alle Tracks des letzten Loopers — Thumbnails parken
+            stashLooperThumbnails (engine.getLooperSession().getNumLoopers() - 1, -1, -1);
             if (const auto result = engine.forceRemoveLastLooper(); result.failed())
                 captureToast.show (result.getErrorMessage());
             refreshLooperStructure();
@@ -350,26 +353,83 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
             looperPage.getRemoveLooperTile().getScreenBounds(), nullptr);
     };
 
-    // Papierkorb-Kachel (↺): jüngsten Eintrag wiederherstellen
+    // Papierkorb-Kachel (↺): EIN Eintrag = direkt wiederherstellen,
+    // mehrere = Auswahl-Liste (neuester zuoberst, User 19.07.2026)
     looperPage.onRestoreTrash = [this]
     {
-        int skipped = 0;
-        if (const auto result = engine.restoreLooperTrash (&skipped); result.failed())
+        const auto& entries = engine.getLooperTrash().getEntries();
+        if (entries.empty())
+            return;
+
+        if (entries.size() == 1)
         {
-            captureToast.show (result.getErrorMessage());
+            restoreLooperTrashFromUi (entries.front().entryId);
             return;
         }
 
-        if (skipped > 0)
-            captureToast.show (juce::String (skipped)
-                               + juce::String::fromUTF8 (" Kabel nicht wiederherstellbar"));
-        refreshLooperStructure();
+        const auto now = juce::Time::getMillisecondCounterHiRes() / 1000.0;
+        std::vector<LooperTrashDialog::Item> items;
+        for (auto it = entries.rbegin(); it != entries.rend(); ++it)
+        {
+            LooperTrashDialog::Item item;
+            item.entryId = it->entryId;
+
+            using Kind = LooperTrashCan::Entry::Kind;
+            if (it->kind == Kind::clip && ! it->clips.empty())
+            {
+                const auto& ref = it->clips.front();
+                const auto stashed = trashedLooperThumbnails.find (ref.clipId);
+                const auto name = stashed != trashedLooperThumbnails.end()
+                                    ? stashed->second.sourceLabel
+                                    : "Clip " + juce::String (ref.clipId);
+                item.label = name + juce::String::fromUTF8 (" · L")
+                           + juce::String (it->looperIndex + 1) + " T"
+                           + juce::String (ref.track + 1) + " S"
+                           + juce::String (ref.slot + 1);
+            }
+            else if (it->kind == Kind::track)
+            {
+                item.label = "Track " + juce::String (it->trackIndex + 1)
+                           + " (Looper " + juce::String (it->looperIndex + 1) + ")"
+                           + juce::String::fromUTF8 (" · ")
+                           + juce::String ((int) it->clips.size())
+                           + (it->clips.size() == 1 ? " Clip" : " Clips");
+            }
+            else
+            {
+                item.label = "Looper " + juce::String (it->looperIndex + 1)
+                           + juce::String::fromUTF8 (" · ")
+                           + juce::String (it->numTracksSnapshot)
+                           + (it->numTracksSnapshot == 1 ? " Track" : " Tracks")
+                           + juce::String::fromUTF8 (" · ")
+                           + juce::String ((int) it->clips.size())
+                           + (it->clips.size() == 1 ? " Clip" : " Clips");
+            }
+            if (! it->cables.empty())
+                item.label << juce::String::fromUTF8 (" · Kabel");
+
+            const auto seconds = juce::jmax (0, (int) std::lround (it->expiresAt - now));
+            item.timeLabel = juce::String (seconds / 60) + ":"
+                           + juce::String (seconds % 60).paddedLeft ('0', 2);
+            items.push_back (std::move (item));
+        }
+
+        auto dialog = std::make_unique<LooperTrashDialog> (std::move (items));
+        dialog->onRestore = [this] (std::uint32_t entryId)
+        {
+            restoreLooperTrashFromUi (entryId);
+        };
+        juce::CallOutBox::launchAsynchronously (
+            std::move (dialog),
+            looperPage.getTrashTile().getScreenBounds(), nullptr);
     };
 
     engine.getLooperTrash().onChanged = [this]
     {
         auto& trash = engine.getLooperTrash();
         looperPage.setTrashState (trash.secondsRemaining(), trash.hasEntries());
+        // Ablauf/Restore: verwaiste geparkte Thumbnails freigeben
+        purgeLooperThumbnails();
     };
     engine.getLooperTrash().onExpired = [this] { looperPage.flashTrashEmptied(); };
 
@@ -1057,6 +1117,10 @@ void EngineEditor::removeLooperTrack (int looperIndex, int trackIndex)
         juce::String::fromUTF8 ("Track entfernen?"), message);
     dialog->onConfirm = [this, looperIndex]
     {
+        // Letzter Track fällt — dessen Thumbnails VOR dem Detach parken
+        stashLooperThumbnails (looperIndex,
+                               engine.getLooperSession().getNumTracks (looperIndex) - 1,
+                               -1);
         if (const auto result = engine.forceRemoveLooperTrack (looperIndex);
             result.failed())
             captureToast.show (result.getErrorMessage());
@@ -1077,7 +1141,10 @@ void EngineEditor::handleLooperSlotTap (int looperIndex, int trackIndex, int slo
     // Slot-Tap zur Ziel-Auswahl der Geste, nie zum Launch
     if (looperGesture == LooperGesture::deleteClips)
     {
-        if (const auto result = session.deleteSlot (looperIndex, trackIndex, slotIndex);
+        // Einzel-Clip-Delete wandert in den Papierkorb (User 19.07.2026):
+        // Thumbnail VOR dem Detach parken — die Zelle räumt gleich auf
+        stashLooperThumbnails (looperIndex, trackIndex, slotIndex);
+        if (const auto result = engine.trashClipSlot (looperIndex, trackIndex, slotIndex);
             result.failed())
             captureToast.show (result.getErrorMessage());
         return;
@@ -1176,6 +1243,94 @@ void EngineEditor::captureLooperClipThumbnail (int looperIndex)
         background, clip->clipId, panel.getSourceCombo().getText());
 }
 
+void EngineEditor::stashLooperThumbnails (int looperIndex, int trackIndex, int slotIndex)
+{
+    if (looperIndex < 0 || looperIndex >= looperPage.getLooperCount())
+        return;
+
+    auto& panel = looperPage.getPanel (looperIndex);
+
+    const auto stashCell = [this] (LooperSlotCell& cell)
+    {
+        if (! cell.hasThumbnail())
+            return;
+
+        // Zellfläche = Quellfarbe der Aufnahme — die Zelle kennt nur die
+        // Tinte; die Fläche rekonstruiert der Re-Apply aus dem Stash
+        trashedLooperThumbnails[cell.getThumbnailClipId()] = {
+            cell.getThumbnailImage(), cell.getThumbnailBackground(),
+            cell.getThumbnailSourceLabel()
+        };
+    };
+
+    const auto firstTrack = trackIndex >= 0 ? trackIndex : 0;
+    const auto lastTrack  = trackIndex >= 0 ? trackIndex : panel.getTrackCount() - 1;
+
+    for (int t = firstTrack; t <= lastTrack && t < panel.getTrackCount(); ++t)
+    {
+        auto& track = panel.getTrack (t);
+
+        if (slotIndex >= 0)
+        {
+            if (slotIndex < track.getVisibleSlots())
+                stashCell (track.getSlotCell (slotIndex));
+        }
+        else
+        {
+            for (int s = 0; s < track.getVisibleSlots(); ++s)
+                stashCell (track.getSlotCell (s));
+        }
+    }
+}
+
+void EngineEditor::purgeLooperThumbnails()
+{
+    auto& session = engine.getLooperSession();
+    auto& trash = engine.getLooperTrash();
+
+    const auto clipIsAlive = [&] (juce::uint32 clipId)
+    {
+        for (const auto& entry : trash.getEntries())
+            for (const auto& ref : entry.clips)
+                if (ref.clipId == clipId)
+                    return true;
+
+        // Auch UNSICHTBARE Slots zählen (Restore in Slot > visibleSlots)
+        for (int l = 0; l < session.getNumLoopers(); ++l)
+            for (int t = 0; t < session.getNumTracks (l); ++t)
+                for (int s = 0; s < LooperSessionModel::maxSlots; ++s)
+                    if (auto* clip = session.clipAt (l, t, s); clip != nullptr
+                        && clip->clipId == clipId)
+                        return true;
+
+        return false;
+    };
+
+    for (auto it = trashedLooperThumbnails.begin(); it != trashedLooperThumbnails.end();)
+    {
+        if (clipIsAlive (it->first))
+            ++it;
+        else
+            it = trashedLooperThumbnails.erase (it);
+    }
+}
+
+void EngineEditor::restoreLooperTrashFromUi (std::uint32_t entryId)
+{
+    int skipped = 0;
+    if (const auto result = engine.restoreLooperTrashEntry (entryId, &skipped);
+        result.failed())
+    {
+        captureToast.show (result.getErrorMessage());
+        return;
+    }
+
+    if (skipped > 0)
+        captureToast.show (juce::String (skipped)
+                           + juce::String::fromUTF8 (" Kabel nicht wiederherstellbar"));
+    refreshLooperStructure();
+}
+
 void EngineEditor::refreshLooperStatus (bool devMode)
 {
     auto& bank = engine.getLooperBank();
@@ -1247,6 +1402,19 @@ void EngineEditor::refreshLooperStatus (bool devMode)
                     // Überschreib-Commit/Neuaufbau räumt der Timer auf
                     if (cell.hasThumbnail() && cell.getThumbnailClipId() != clip->clipId)
                         cell.clearThumbnail();
+
+                    // Papierkorb-Restore: geparktes Thumbnail zurückspielen,
+                    // sobald der Clip wieder in einer sichtbaren Zelle liegt
+                    if (! cell.hasThumbnail())
+                    {
+                        if (auto it = trashedLooperThumbnails.find (clip->clipId);
+                            it != trashedLooperThumbnails.end())
+                        {
+                            cell.setThumbnail (it->second.ink, it->second.background,
+                                               clip->clipId, it->second.sourceLabel);
+                            trashedLooperThumbnails.erase (it);
+                        }
+                    }
                 }
                 else
                 {

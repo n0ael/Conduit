@@ -195,6 +195,180 @@ TEST_CASE ("LooperTrashCan: Detach hält das RAM-Konto, Restore reattacht, Expir
 }
 
 //==============================================================================
+TEST_CASE ("LooperTrashCan: entryId-Vergabe + popEntry für den Auswahl-Restore", "[looper]")
+{
+    TrashRig rig;
+
+    LooperTrashCan::Entry first;
+    first.kind = LooperTrashCan::Entry::Kind::clip;
+    first.looperIndex = 0;
+    first.trackIndex = 0;
+    rig.trash.push (std::move (first));
+
+    LooperTrashCan::Entry second;
+    second.kind = LooperTrashCan::Entry::Kind::track;
+    second.looperIndex = 0;
+    second.trackIndex = 1;
+    rig.trash.push (std::move (second));
+
+    const auto& entries = rig.trash.getEntries();
+    REQUIRE (entries.size() == 2);
+    REQUIRE (entries[0].entryId != 0);
+    REQUIRE (entries[1].entryId != 0);
+    REQUIRE (entries[0].entryId != entries[1].entryId);
+
+    const auto firstId = entries[0].entryId;
+    const auto secondId = entries[1].entryId;
+
+    SECTION ("popEntry entnimmt gezielt, unbekannte Id liefert entryId 0")
+    {
+        const auto picked = rig.trash.popEntry (firstId);
+        REQUIRE (picked.entryId == firstId);
+        REQUIRE (picked.kind == LooperTrashCan::Entry::Kind::clip);
+        REQUIRE (rig.trash.getEntries().size() == 1);
+        REQUIRE (rig.trash.getEntries()[0].entryId == secondId);
+
+        const auto missing = rig.trash.popEntry (firstId);
+        REQUIRE (missing.entryId == 0);
+        REQUIRE (rig.trash.getEntries().size() == 1);
+    }
+
+    SECTION ("Zurückgelegter Eintrag behält seine Id (push mit entryId ≠ 0)")
+    {
+        auto picked = rig.trash.popEntry (secondId);
+        rig.trash.push (std::move (picked));
+
+        REQUIRE (rig.trash.getEntries().size() == 2);
+        REQUIRE (rig.trash.getEntries().back().entryId == secondId);
+    }
+}
+
+//==============================================================================
+TEST_CASE ("Einzel-Clip-Papierkorb: trashClipSlot detacht, Auswahl-Restore reattacht",
+           "[looper]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    conduit::test::ScopedSettingsFolder settingsFolder;
+    conduit::EngineProcessor engine { settingsFolder.folder };
+    auto& session = engine.getLooperSession();
+    auto& bank = engine.getLooperBank();
+    auto& service = engine.getCaptureService();
+
+    engine.setPlayConfigDetails (2, 2, trashSampleRate, trashBlockSize);
+    engine.prepareToPlay (trashSampleRate, trashBlockSize);
+
+    service.setChannelArmed (0, true);
+    service.setChannelArmed (1, true);
+
+    // Material + Takt-Anker über den ECHTEN Engine-Callback füttern —
+    // die Test-Anker laufen parallel auf derselben SampleClock
+    BarSampleAnchors anchors;
+    juce::AudioBuffer<float> ioBuffer { 2, trashBlockSize };
+    juce::MidiBuffer midi;
+    double beat = 0.0;
+
+    const auto feedBlocks = [&] (int blocks)
+    {
+        for (int b = 0; b < blocks; ++b)
+        {
+            const auto blockStart = service.getSampleClock().now();
+
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                auto* data = ioBuffer.getWritePointer (ch);
+                for (int i = 0; i < trashBlockSize; ++i)
+                    data[i] = 0.5f;
+            }
+
+            conduit::ClockState clock;
+            clock.bpm = 120.0;
+            clock.beatAtBlockStart = beat;
+            clock.sampleRate = trashSampleRate;
+            anchors.process (clock, blockStart, trashBlockSize);
+
+            engine.processBlock (ioBuffer, midi);
+            beat += clock.beatsPerSample() * trashBlockSize;
+        }
+    };
+
+    feedBlocks (3);
+    service.runRamGuard();
+    feedBlocks ((int) std::lround (2.5 * 4.0 * (trashSampleRate / 2.0) / trashBlockSize));
+
+    conduit::LooperClip* clipA = nullptr;
+    REQUIRE (bank.commitClip (0, 0, 1, service, 0, 1, anchors, &clipA).wasOk());
+    REQUIRE (clipA != nullptr);
+    REQUIRE (session.attachClip (0, 0, 0, clipA));
+
+    // Zweiter Clip in Slot 1 (für Auswahl + Belegt-Fall)
+    feedBlocks ((int) std::lround (1.5 * 4.0 * (trashSampleRate / 2.0) / trashBlockSize));
+    conduit::LooperClip* clipB = nullptr;
+    REQUIRE (bank.commitClip (0, 0, 1, service, 0, 1, anchors, &clipB).wasOk());
+    REQUIRE (session.attachClip (0, 0, 1, clipB));
+
+    REQUIRE (engine.trashClipSlot (0, 0, 0).wasOk());
+    REQUIRE (engine.trashClipSlot (0, 0, 1).wasOk());
+    REQUIRE (session.clipAt (0, 0, 0) == nullptr);
+    REQUIRE (session.clipAt (0, 0, 1) == nullptr);
+
+    const auto& entries = engine.getLooperTrash().getEntries();
+    REQUIRE (entries.size() == 2);
+    REQUIRE (entries[0].kind == LooperTrashCan::Entry::Kind::clip);
+    const auto idA = entries[0].entryId;
+    const auto idB = entries[1].entryId;
+
+    SECTION ("Auswahl-Restore holt gezielt den ÄLTEREN Eintrag zurück")
+    {
+        REQUIRE (engine.restoreLooperTrashEntry (idA).wasOk());
+        REQUIRE (session.clipAt (0, 0, 0) == clipA);
+        REQUIRE (session.clipAt (0, 0, 1) == nullptr);
+        REQUIRE (engine.getLooperTrash().getEntries().size() == 1);
+        REQUIRE (engine.getLooperTrash().getEntries()[0].entryId == idB);
+
+        REQUIRE (engine.restoreLooperTrashEntry (idB).wasOk());
+        REQUIRE (session.clipAt (0, 0, 1) == clipB);
+        REQUIRE_FALSE (engine.getLooperTrash().hasEntries());
+    }
+
+    SECTION ("Belegter Slot: Eintrag wird zurückgelegt, Id bleibt")
+    {
+        // Slot 0 anderweitig belegen
+        feedBlocks ((int) std::lround (1.5 * 4.0 * (trashSampleRate / 2.0) / trashBlockSize));
+        conduit::LooperClip* clipC = nullptr;
+        REQUIRE (bank.commitClip (0, 0, 1, service, 0, 1, anchors, &clipC).wasOk());
+        REQUIRE (session.attachClip (0, 0, 0, clipC));
+
+        REQUIRE (engine.restoreLooperTrashEntry (idA).failed());
+        REQUIRE (engine.getLooperTrash().getEntries().size() == 2);
+        REQUIRE (engine.getLooperTrash().getEntries().back().entryId == idA);
+        REQUIRE (session.clipAt (0, 0, 0) == clipC);
+    }
+
+    SECTION ("Track existiert nicht mehr: Restore scheitert sauber")
+    {
+        // Eintrag auf Track 2 erzeugen, dann Track 2 wieder entfernen
+        REQUIRE (session.addTrack (0));
+        feedBlocks ((int) std::lround (1.5 * 4.0 * (trashSampleRate / 2.0) / trashBlockSize));
+        conduit::LooperClip* clipC = nullptr;
+        REQUIRE (bank.commitClip (0, 1, 1, service, 0, 1, anchors, &clipC).wasOk());
+        REQUIRE (session.attachClip (0, 1, 0, clipC));
+
+        REQUIRE (engine.trashClipSlot (0, 1, 0).wasOk());
+        const auto idC = engine.getLooperTrash().getEntries().back().entryId;
+        REQUIRE (session.removeLastTrack (0).wasOk());
+
+        REQUIRE (engine.restoreLooperTrashEntry (idC).failed());
+        REQUIRE (engine.getLooperTrash().getEntries().back().entryId == idC);
+    }
+
+    SECTION ("Unbekannte Id (abgelaufen) scheitert ohne Seiteneffekt")
+    {
+        REQUIRE (engine.restoreLooperTrashEntry (987654u).failed());
+        REQUIRE (engine.getLooperTrash().getEntries().size() == 2);
+    }
+}
+
+//==============================================================================
 TEST_CASE ("Force-Delete + Restore: Big-Out-Kabel wandern durch den Papierkorb", "[looper]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;
