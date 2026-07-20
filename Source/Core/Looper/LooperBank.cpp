@@ -543,6 +543,7 @@ void LooperBank::setClipWindowOffsetBeats (LooperClip& clip, double offsetBeats)
                      false, false, false);
 }
 
+
 juce::Result LooperBank::setClipRate (int looperIndex, int trackIndex, double rate)
 {
     auto* clip = activeClipFor (looperIndex, trackIndex);
@@ -1113,6 +1114,37 @@ void LooperBank::applyClipParams (LooperClip& clip, double blockStartBeat,
                                                     numSamples, quantBeats) < 0;
         }
 
+        // NIE mitten in der Wrap-Blende umschalten (User 20.07.2026,
+        // Knacken beim LEN-Ziehen): dort haengt das ausklingende Material
+        // am Fenster-Ende bzw. am Lead-in — aendert sich Laenge oder
+        // Position, springt diese Quelle hart um (gemessen: Faktor 1000
+        // ueber der natuerlichen Signalkruemmung). Ein Block Reserve, weil
+        // der Apply fuer den GESAMTEN Block gilt.
+        // Gilt NUR für implizite Änderungen (LEN/POS/Rate). Reverse „an
+        // der Loop-Grenze" bzw. „Quantized" wählt seinen Zeitpunkt
+        // bewusst — der liegt genau dort und wird nicht verschoben.
+        const auto timedByUser = clip.applyAtWrap.load (std::memory_order_relaxed)
+            || clip.stagedApplyQuantBeats.load (std::memory_order_relaxed) > 0.0;
+
+        if (! defer && ! timedByUser && clip.activeLengthBeats > 0.0
+            && clip.samplesPerBeatRecorded > 0.0)
+        {
+            const auto windowLen = clip.activeLengthBeats * clip.samplesPerBeatRecorded;
+            const auto zoneBeats = (wrapFadeSamples (clip, windowLen)
+                                    / clip.samplesPerBeatRecorded)
+                                 + std::abs (beatStep) * numSamples;
+
+            if (zoneBeats * 2.0 < clip.activeLengthBeats)   // sonst gaebe es kein Fenster
+            {
+                const auto phase = looper::clipPhaseBeats (blockStartBeat,
+                                                           clip.activeAnchorBeat,
+                                                           clip.activeRate,
+                                                           clip.activeLengthBeats);
+                defer = phase < zoneBeats
+                     || phase > clip.activeLengthBeats - zoneBeats;
+            }
+        }
+
         if (! defer)
         {
             const auto candidate = computeCandidate (clip, blockStartBeat);
@@ -1152,6 +1184,26 @@ void LooperBank::applyClipParams (LooperClip& clip, double blockStartBeat,
 }
 
 //==============================================================================
+double LooperBank::wrapFadeSamples (const LooperClip& clip,
+                                    double windowLenSamples) noexcept
+{
+    if (windowLenSamples <= 0.0)
+        return 0.0;
+
+    // Sehr kurze Fenster brauchen einen RELATIV längeren Fade (User
+    // 20.07.2026 „Free + sehr klein knistert"): bei 50 ms Loop deckt der
+    // 5-ms-Fade nur 10 % der Periode ab — 20 Wraps/s machen die Blende
+    // dann als Rauheit hörbar. Darüber bleibt alles exakt wie bisher.
+    const auto fade = static_cast<double> (clip.crossfadeSamples);
+    const auto shortLoopSamples = shortLoopFadeFactor * fade;
+
+    auto wanted = fade;
+    if (windowLenSamples < shortLoopSamples)
+        wanted = fade * (shortLoopSamples / windowLenSamples);
+
+    return juce::jmin (wanted, windowLenSamples * 0.5);
+}
+
 float LooperBank::renderClipSample (const LooperClip& clip, int channel,
                                     double contentPosition) noexcept
 {
@@ -1186,27 +1238,21 @@ float LooperBank::renderClipSample (const LooperClip& clip, int channel,
     if (clip.numContentSamples <= fade || windowLenSamples <= 0.0)
         return readLinear (static_cast<double> (fade) + contentPosition);
 
-    // Sehr kurze Fenster brauchen einen RELATIV längeren Fade (User
-    // 20.07.2026 „Free + sehr klein knistert"): bei 50 ms Loop deckt der
-    // 5-ms-Fade nur 10 % der Periode ab — 20 Wraps/s machen die Blende
-    // dann als Rauheit hörbar. Der Fade wächst deshalb stetig, sobald das
-    // Fenster kürzer als shortLoopFactor × fade ist; darüber bleibt alles
-    // exakt wie bisher.
     const auto shortLoopSamples = shortLoopFadeFactor * static_cast<double> (fade);
-    auto wantedFade = static_cast<double> (fade);
-    if (windowLenSamples < shortLoopSamples)
-        wantedFade = static_cast<double> (fade) * (shortLoopSamples / windowLenSamples);
+    const auto wantedFade = wrapFadeSamples (clip, windowLenSamples);
 
     // Läuft hinter dem Fenster-Ende noch Material weiter? Dann blenden wir
     // NACH dem Wrap: das auslaufende Material klingt aus, während der
     // Fensteranfang einsetzt. Das braucht keinen Lead-in als Vorlauf —
     // erst dadurch ist der längere Fade bei Fenster-Start 0 überhaupt
     // möglich (der Lead-in ist nur crossfadeSamples lang).
+    // NUR für die kurzen Fenster, die den längeren Fade brauchen — längere
+    // Loops behalten den bewährten Lead-in-Pfad (dort ist der Lead-in kein
+    // Engpass, und sein Material ist die etablierte Blend-Quelle).
     if (const auto tailAvailable = contentLen - windowEnd;
-        tailAvailable >= static_cast<double> (fade))
+        windowLenSamples < shortLoopSamples && tailAvailable >= static_cast<double> (fade))
     {
-        const auto fadeEff = juce::jmin (juce::jmin (tailAvailable, windowLenSamples * 0.5),
-                                         wantedFade);
+        const auto fadeEff = juce::jmin (tailAvailable, wantedFade);
         const auto zonePosition = contentPosition - windowStart;
 
         if (zonePosition < 0.0 || zonePosition >= fadeEff || fadeEff <= 0.0)

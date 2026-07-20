@@ -436,6 +436,11 @@ private:
     void updateEffectiveMutes() noexcept;
     void refreshPlayingFlag() noexcept;
 
+    /** Länge der Wrap-Blende in Content-Samples (Renderer UND
+        Apply-Logik müssen dieselbe Zone kennen). */
+    [[nodiscard]] static double wrapFadeSamples (const LooperClip& clip,
+                                                 double windowLenSamples) noexcept;
+
     /** Kompletten Staged-Satz schreiben + Version bumpen [MT]. */
     static void stageClipParams (LooperClip& clip, double rate, double lengthBeats,
                                  double windowOffsetBeats, bool reversed,

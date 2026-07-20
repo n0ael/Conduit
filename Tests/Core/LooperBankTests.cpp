@@ -1640,11 +1640,15 @@ TEST_CASE ("LooperBank: LEN/POS — Loop-Wrap bleibt klickfrei", "[looper]")
                     if (! juce::exactlyEqual (rate, 1.0))
                         REQUIRE (rig.bank.setClipRate (0, 0, rate).wasOk());
 
-                    rig.feedBlocks (16);   // Apply + Splice-Duck ausklingen lassen
+                    rig.feedBlocks (60);   // Apply (ggf. erst am Loop-Anfang) + Duck
 
+                    // Grenze trennt SPRUENGE von legitimen Fade-Flanken:
+                    // eine Blende zwischen weit auseinanderliegendem
+                    // Material ist zwangslaeufig steil (Werte um 2e-3),
+                    // ein echter Wrap-Sprung lag bei 3.5e-1 — Faktor 100.
                     INFO ("reversed=" << (reversed ? 1 : 0) << " rate=" << rate
                           << " length=" << lengthBeats << " offset=" << offsetBeats);
-                    REQUIRE (maxKinkOver (rig, 120) < 0.002f);
+                    REQUIRE (maxKinkOver (rig, 120) < 0.005f);
                 }
             }
         }
@@ -1715,5 +1719,111 @@ TEST_CASE ("LooperBank: sehr kurze Free-Loops knistern nicht", "[looper]")
             INFO ("length=" << lengthBeats << " offset=" << offsetBeats);
             REQUIRE (maxKinkOver (rig, 60) < kinkLimit);
         }
+    }
+}
+
+//==============================================================================
+TEST_CASE ("LooperBank: LEN/POS-Ziehen bei kurzen Loops duckt nicht", "[looper]")
+{
+    // User-Fund 20.07.2026: das Knistern trat NUR beim Verstellen von
+    // Length/Position auf. Ursache: jede Aenderung schiebt die Lese-
+    // position aus dem Fenster; der Sprung laeuft hinter dem 5-ms-
+    // Splice-Duck, und beim Ziehen reisst dieser Duck nie ab. Bei kurzen
+    // Loops greifen die Aenderungen deshalb erst am Loop-Ende.
+    const auto tone = [] (std::uint64_t position)
+    {
+        return 0.5f * static_cast<float> (
+            std::sin (juce::MathConstants<double>::twoPi * 220.0
+                      * static_cast<double> (position) / testSampleRate));
+    };
+
+    // ANTEIL der Zeit, in der der Pegel gedrueckt ist (gleitende
+    // Huellkurve ueber 128 Samples ~ halbe Tonperiode; das Block-Maximum
+    // wuerde einen 5-ms-Duck im 10-ms-Block verschlucken). Ein einzelner
+    // Dip pro Durchlauf ist unvermeidbar und unhoerbar — das Knistern
+    // entsteht erst, wenn die Dips NICHT mehr abreissen.
+    const auto duckedFractionWhileDragging = [] (BankRig& r, int steps,
+                                           const std::function<void (int)>& step)
+    {
+        std::vector<float> captured;
+        captured.reserve (static_cast<std::size_t> (steps * blockSize));
+
+        for (int i = 0; i < steps; ++i)
+        {
+            step (i);
+            r.feedBlocks (1);
+            const auto* data = r.output.getReadPointer (0);
+            captured.insert (captured.end(), data, data + blockSize);
+        }
+
+        // Kein harter Sprung waehrend des Zugs: ein Parameterwechsel
+        // mitten in der Wrap-Blende riss frueher das ausklingende
+        // Material ab (gemessen 0.41 — Faktor 1000 ueber der
+        // natuerlichen Signalkruemmung von 4.1e-4).
+        {
+            auto worst = 0.0f;
+            for (std::size_t i = 2; i < captured.size(); ++i)
+                worst = juce::jmax (worst, std::abs (captured[i] - 2.0f * captured[i - 1]
+                                                     + captured[i - 2]));
+            REQUIRE (worst < 2.0e-3f);
+        }
+
+        constexpr int window = 128;
+        auto ducked = 0, total = 0;
+        for (std::size_t start = 0; start + window <= captured.size(); start += 16)
+        {
+            auto peak = 0.0f;
+            for (int k = 0; k < window; ++k)
+                peak = juce::jmax (peak, std::abs (captured[start + (std::size_t) k]));
+            ++total;
+            if (peak < 0.3f)
+                ++ducked;
+        }
+        return total > 0 ? static_cast<float> (ducked) / static_cast<float> (total)
+                         : 0.0f;
+    };
+
+    SECTION ("LEN-Zug haelt den Pegel")
+    {
+        BankRig rig;
+        rig.signal = tone;
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+        rig.feedBlocks (4);
+
+        REQUIRE (rig.bank.setClipLengthBeats (
+                     0, 0, 0.4, conduit::looper::HalveMode::firstHalf).wasOk());
+        rig.feedBlocks (16);
+
+        const auto duckedFraction = duckedFractionWhileDragging (rig, 60, [&rig] (int i)
+        {
+            // wie am Poti: pro Block eine feine Laengenaenderung
+            const auto result = rig.bank.setClipLengthBeats (
+                0, 0, 0.4 - 0.004 * i, conduit::looper::HalveMode::firstHalf);
+            juce::ignoreUnused (result);
+        });
+
+        REQUIRE (duckedFraction < 0.03f);
+    }
+
+    SECTION ("POS-Zug haelt den Pegel")
+    {
+        BankRig rig;
+        rig.signal = tone;
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+        rig.feedBlocks (4);
+
+        REQUIRE (rig.bank.setClipLengthBeats (
+                     0, 0, 0.2, conduit::looper::HalveMode::firstHalf).wasOk());
+        rig.feedBlocks (16);
+
+        const auto duckedFraction = duckedFractionWhileDragging (rig, 60, [&rig] (int i)
+        {
+            const auto result = rig.bank.setClipWindowOffsetBeats (0, 0, 0.02 * i);
+            juce::ignoreUnused (result);
+        });
+
+        REQUIRE (duckedFraction < 0.03f);
     }
 }
