@@ -1,8 +1,9 @@
 # Grid-PlayTargets — M0-Inventur (Read-only)
-> Durchgeführt: 20.07.2026 · Branch: master · Referenz: Masterplan
-> Multi-Ziel-MPE (PlayTargets M0–M6, Option B „MIDI als Kabeltyp" gated
-> auf die Mono/Stereo-Entscheidung). Dieses Dossier ist die
-> Referenz-Inventur für alle Folgemeilensteine M1–M6.
+> Durchgeführt: 20.07.2026 · Branch: master · Plan + Entscheidungen
+> E1–E7: **[GridPlayTargets-Masterplan.md](GridPlayTargets-Masterplan.md)**
+> (Multi-Ziel-MPE, M0–M6, Option B „MIDI als Kabeltyp" gated auf die
+> Mono/Stereo-Entscheidung). Dieses Dossier ist die Referenz-Inventur
+> für alle Folgemeilensteine M1–M6.
 >
 > Pflichtlektüre der Inventur: docs/Grid.md, docs/MidiRig.md, Rules
 > `grid`/`midirig`/`ui-design`, ADR 002/003/006.
