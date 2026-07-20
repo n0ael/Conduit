@@ -17,6 +17,23 @@ void LooperMapOverlay::setTargets (std::vector<TargetSpot> newTargets)
     repaint();
 }
 
+void LooperMapOverlay::setPassThroughArea (juce::Rectangle<int> area)
+{
+    passThroughArea = area;
+}
+
+bool LooperMapOverlay::hitTest (int x, int y)
+{
+    // Über einem Ziel fangen wir IMMER (auch im Panel — MST und der
+    // Output-Selektor sind mappbar). Sonst bleibt das Panel bedienbar,
+    // damit der MAP-MODE-Toggle erreichbar ist.
+    for (const auto& target : targets)
+        if (target.bounds.contains (x, y))
+            return true;
+
+    return ! passThroughArea.contains (x, y);
+}
+
 void LooperMapOverlay::setArmedKey (bool hasArmed, const grid::MacroControlKey& key)
 {
     armed = hasArmed;

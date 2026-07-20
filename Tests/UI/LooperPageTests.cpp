@@ -4,6 +4,7 @@
 #include "Core/LooperSettings.h"
 #include "UI/LooperPage.h"
 #include "UI/LooperDockTabs.h"
+#include "UI/LooperMapOverlay.h"
 #include "UI/TransportBar.h"
 
 using Catch::Approx;
@@ -750,4 +751,32 @@ TEST_CASE ("LooperMidiMap: Learn-Bindung persistiert ueber Neuinstanz", "[looper
     REQUIRE (emptied.getBindings().count() == 0);
 
     folder.deleteRecursively();
+}
+
+//==============================================================================
+TEST_CASE ("LooperMapOverlay: Panel bleibt bedienbar (kein Einsperren)", "[looper][ui]")
+{
+    // User-Fund 20.07.2026: das Overlay schluckte ALLE Klicks — damit war
+    // auch der MAP-MODE-Toggle im Seitenpanel unerreichbar, der Modus
+    // sperrte sich selbst ein.
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    conduit::LooperMapOverlay overlay;
+    overlay.setBounds (0, 0, 800, 600);
+
+    const auto panel = juce::Rectangle<int> (600, 0, 200, 600);   // „Dock" rechts
+    overlay.setPassThroughArea (panel);
+
+    const auto key = conduit::loopermidi::makeKey (
+        conduit::loopermidi::Target::masterToggle);
+    overlay.setTargets ({ { key, { 620, 40, 60, 30 }, {} } });
+
+    // Im Panel: ueber einem Ziel fangen (MST bleibt mappbar) …
+    REQUIRE (overlay.hitTest (640, 50));
+    // … daneben durchlassen (Toggle + Mappings-Liste bedienbar)
+    REQUIRE_FALSE (overlay.hitTest (640, 300));
+
+    // Auf der Page faengt das Overlay ueberall (kein versehentlicher
+    // Clip-Start waehrend des Mappens)
+    REQUIRE (overlay.hitTest (100, 300));
 }

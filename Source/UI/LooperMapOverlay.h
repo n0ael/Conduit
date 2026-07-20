@@ -35,6 +35,12 @@ public:
 
     void setTargets (std::vector<TargetSpot> newTargets);
 
+    /** Bereich, in dem Klicks NUR über Zielen abgefangen werden — sonst
+        gehen sie durch (das Seitenpanel: MAP-MODE-Toggle und Mappings-
+        Liste müssen bedienbar bleiben, sonst sperrt sich der Modus
+        selbst ein; User-Fund 20.07.2026). */
+    void setPassThroughArea (juce::Rectangle<int> area);
+
     /** Learn-scharfes Ziel orange markieren; hasArmed=false löscht. */
     void setArmedKey (bool hasArmed, const grid::MacroControlKey& key);
 
@@ -42,9 +48,11 @@ public:
 
     void paint (juce::Graphics& g) override;
     void mouseUp (const juce::MouseEvent& event) override;
+    bool hitTest (int x, int y) override;
 
 private:
     std::vector<TargetSpot> targets;
+    juce::Rectangle<int> passThroughArea;
     bool armed = false;
     grid::MacroControlKey armedKey;
 

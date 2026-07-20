@@ -1691,12 +1691,22 @@ void EngineEditor::rebuildLooperMapTargets()
 
 void EngineEditor::updateLooperMapOverlay()
 {
+    // Beim Verlassen der Looper-Page den Modus AUSschalten (nicht nur
+    // verstecken) — sonst steckt man beim Zurückkommen wieder drin
+    if (looperDockTabs != nullptr && looperDockTabs->isMapModeActive()
+        && pageHost.getPage() != TransportBar::pageLooper)
+        looperDockTabs->setMapModeActive (false);
+
     const auto active = looperDockTabs != nullptr && looperDockTabs->isMapModeActive()
                      && pageHost.getPage() == TransportBar::pageLooper;
     looperMapOverlay.setVisible (active);
 
     if (active)
     {
+        // Das Seitenpanel bleibt bedienbar (Toggle + Mappings-Liste);
+        // dort fängt das Overlay nur über echten Zielen
+        looperMapOverlay.setPassThroughArea (
+            looperMapOverlay.getLocalArea (this, editorDock.getBounds()));
         looperMapOverlay.toFront (false);
         rebuildLooperMapTargets();
     }
@@ -2583,8 +2593,11 @@ void EngineEditor::resized()
 
     pageHost.setBounds (bounds);
 
-    // MAP-MODE-Overlay über Page UND Dock (MST/Output bleiben mappbar)
-    looperMapOverlay.setBounds (getLocalBounds());
+    // MAP-MODE-Overlay über Page UND Dock (MST/Output bleiben mappbar),
+    // aber NIE über der Transportleiste — deren Seiten-Symbole sind der
+    // Weg hinaus (User-Fund 20.07.2026)
+    looperMapOverlay.setBounds (
+        getLocalBounds().withTrimmedTop (TransportBar::preferredHeight));
     if (looperMapOverlay.isVisible())
     {
         looperMapOverlay.toFront (false);
@@ -2600,6 +2613,16 @@ void EngineEditor::resized()
 bool EngineEditor::keyPressed (const juce::KeyPress& key)
 {
     const auto modifier = juce::ModifierKeys::commandModifier;
+
+    // Notausgang aus dem MAP-MODE (User-Fund 20.07.2026): das Overlay
+    // deckt die Page ab — ESC beendet den Modus von überall.
+    if (key == juce::KeyPress::escapeKey && looperDockTabs != nullptr
+        && looperDockTabs->isMapModeActive())
+    {
+        looperDockTabs->setMapModeActive (false);
+        updateLooperMapOverlay();
+        return true;
+    }
 
     // Seiten-Navigation der Node-Page (ADR 008 M3b, Tastatur-Parität):
     // Ctrl+Alt+Pfeile wechseln im Seiten-Grid — ins Leere legt eine neue
