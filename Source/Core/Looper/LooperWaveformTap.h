@@ -112,8 +112,19 @@ public:
         Thread. */
     void setSource (int leftIndex, int rightIndex) noexcept
     {
-        sourceLeft.store (leftIndex, std::memory_order_relaxed);
-        sourceRight.store (rightIndex, std::memory_order_relaxed);
+        // IDEMPOTENT (Perf-Fix 20.07.2026): ein Versions-Bump setzt den
+        // Binner zurück und meldet 8 Takte Historie zum Backfill an —
+        // 1024 Bins + 512 FFT-Spalten, die der AUDIO-Thread nachrechnet.
+        // applyLooperSourceArming ruft setSource bei JEDER Settings-
+        // Änderung (also bei jeder Mausbewegung auf Fader/XY/Send); ein
+        // blinder Bump hielt den Backfill dauerhaft am Laufen und trieb
+        // den DSP-Meter auf 99 % (User-Fund 20.07.2026).
+        const auto previousLeft  = sourceLeft.exchange (leftIndex, std::memory_order_relaxed);
+        const auto previousRight = sourceRight.exchange (rightIndex, std::memory_order_relaxed);
+
+        if (previousLeft == leftIndex && previousRight == rightIndex)
+            return;
+
         sourceVersion.fetch_add (1, std::memory_order_release);
     }
 

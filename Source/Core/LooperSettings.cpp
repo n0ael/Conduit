@@ -42,8 +42,25 @@ LooperSettings::~LooperSettings()
 
 void LooperSettings::flush()
 {
+    storePendingXml();
+
     if (auto* file = applicationProperties.getUserSettings())
         file->saveIfNeeded();
+}
+
+void LooperSettings::storePendingXml()
+{
+    if (! pendingXmlWrite)
+        return;
+
+    pendingXmlWrite = false;
+    stopTimer();
+    storeXml();
+}
+
+void LooperSettings::timerCallback()
+{
+    storePendingXml();
 }
 
 void LooperSettings::migrateFromLegacy (const juce::String& legacyLooperSource,
@@ -184,6 +201,22 @@ void LooperSettings::loadFromFile()
 
 void LooperSettings::writeAndNotify()
 {
+    storeXml();
+    sendChangeMessage();
+}
+
+void LooperSettings::writeAndNotifyCoalesced()
+{
+    // Broadcast SOFORT (Engine/UI folgen ohne Verzögerung), Schreiben
+    // gebündelt: bei Mixer-Gesten feuert der Setter pro Mausbewegung
+    storedStateLoaded = true;
+    pendingXmlWrite = true;
+    startTimer (250);
+    sendChangeMessage();
+}
+
+void LooperSettings::storeXml()
+{
     juce::XmlElement xml (xmlRoot.toString());
 
     xml.setAttribute ("launchQuant", launchQuantKey (launchQuant));
@@ -252,7 +285,7 @@ void LooperSettings::writeAndNotify()
 
     applicationProperties.getUserSettings()->setValue (keyLooperState, &xml);
     storedStateLoaded = true;
-    sendChangeMessage();
+    pendingXmlWrite = false;
 }
 
 //==============================================================================
@@ -483,7 +516,7 @@ void LooperSettings::setTrackGain (int looperIndex, int trackIndex, float gain)
         return;
 
     track.gain = clamped;
-    writeAndNotify();
+    writeAndNotifyCoalesced();
 }
 
 float LooperSettings::getTrackPan (int looperIndex, int trackIndex) const noexcept
@@ -506,7 +539,7 @@ void LooperSettings::setTrackPan (int looperIndex, int trackIndex, float pan)
         return;
 
     track.pan = clamped;
-    writeAndNotify();
+    writeAndNotifyCoalesced();
 }
 
 bool LooperSettings::isTrackMuted (int looperIndex, int trackIndex) const noexcept
@@ -596,7 +629,7 @@ void LooperSettings::setTrackSendLevel (int looperIndex, int trackIndex, int sen
         return;
 
     level = clamped;
-    writeAndNotify();
+    writeAndNotifyCoalesced();
 }
 
 int LooperSettings::getTrackSends (int looperIndex, int trackIndex) const noexcept
@@ -659,7 +692,7 @@ void LooperSettings::setTrackDistance (int looperIndex, int trackIndex, float di
         return;
 
     track.distance = clamped;
-    writeAndNotify();
+    writeAndNotifyCoalesced();
 }
 
 void LooperSettings::setDistance (const DistanceState& state)

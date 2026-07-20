@@ -244,6 +244,12 @@ private:
     // Sync/Free-Modus der LEN/POS-Potis pro Looper (VIEW-Zustand, 07/2026)
     std::array<bool, 4> looperLenSync { true, true, true, true };
 
+    // Perf-Wächter (20.07.2026): der Settings-Broadcast feuert bei jeder
+    // Mausbewegung im Mixer — Hook-Verdrahtung und Quellen-Menü-Rebuild
+    // laufen deshalb nur bei echten Struktur-/Quell-Wechseln
+    bool looperPanelsWired = false;
+    std::array<juce::String, 4> looperSourceKeyCache;
+
     /** LEN/POS-Knob-Positionen + Anzeigen aus dem Aktiv-Clip nachziehen. */
     void refreshLooperLenPos (int looperIndex);
 

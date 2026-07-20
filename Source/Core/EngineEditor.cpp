@@ -944,11 +944,14 @@ void EngineEditor::refreshLooperStructure()
     auto& settings = engine.getLooperSettings();
     auto& session = engine.getLooperSession();
 
-    // Panels folgen der Settings-Struktur; Hooks IMMER (re-)verdrahten —
-    // beim Startaufruf hat die Page ihr Panel schon aus dem ctor
-    // (setLooperCount wäre dann ein No-op ohne onPanelsChanged)
+    // Panels folgen der Settings-Struktur; ein echter Neuaufbau verdrahtet
+    // über onPanelsChanged. Der explizite Aufruf deckt NUR den Startfall ab
+    // (das Panel aus dem ctor hat nie onPanelsChanged gesehen) — pro Event
+    // neu zu verdrahten hieße, bei jeder Mausbewegung Dutzende
+    // std::functions neu zu allokieren (Perf 20.07.2026).
     looperPage.setLooperCount (settings.getNumLoopers());
-    wireLooperPanels();
+    if (! looperPanelsWired)
+        wireLooperPanels();
 
     for (int l = 0; l < looperPage.getLooperCount(); ++l)
     {
@@ -1000,12 +1003,32 @@ void EngineEditor::refreshLooperStructure()
             allToMaster = allToMaster && settings.isSendToMaster (l);
         looperDockTabs->setMasterState (allToMaster);
     }
-    rebuildLooperSources();
+
+    // Quellen-Menüs NUR bei echtem Quell-Wechsel neu bauen: der Rebuild
+    // leert und füllt das Combo-Menü jedes Panels — pro Mixer-Drag (der
+    // Settings-Broadcast feuert bei jeder Mausbewegung) war das reine
+    // Verschwendung. Registry-/Namens-Änderungen laufen weiter über die
+    // eigenen Listener-Pfade (changeListenerCallback/valueTree*).
+    bool sourceKeysChanged = false;
+    for (int l = 0; l < LooperSettings::maxLoopers; ++l)
+    {
+        auto& cached = looperSourceKeyCache[(size_t) l];
+        if (const auto key = settings.getSourceKey (l); cached != key)
+        {
+            cached = key;
+            sourceKeysChanged = true;
+        }
+    }
+    if (sourceKeysChanged)
+        rebuildLooperSources();
+
     rebuildLooperMapTargets();   // Struktur-Wechsel im MAP MODE: Rahmen nachziehen
 }
 
 void EngineEditor::wireLooperPanels()
 {
+    looperPanelsWired = true;
+
     for (int l = 0; l < looperPage.getLooperCount(); ++l)
     {
         auto& panel = looperPage.getPanel (l);

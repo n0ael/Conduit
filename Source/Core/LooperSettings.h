@@ -52,7 +52,8 @@ namespace conduit
     juce::ChangeBroadcaster (async), der EngineProcessor spiegelt per
     applyLooperSettings() in Bank/Modell.
 */
-class LooperSettings : public juce::ChangeBroadcaster
+class LooperSettings : public juce::ChangeBroadcaster,
+                       private juce::Timer
 {
 public:
     static constexpr int maxLoopers = 4;
@@ -265,6 +266,19 @@ private:
     void loadFromFile();
     void writeAndNotify();
 
+    /** Wie writeAndNotify, aber die XML-Serialisierung wird gebündelt
+        (Mixer-Gesten, 20.07.2026): Gain/Pan/Distanz/Send-Level feuern pro
+        MAUSBEWEGUNG — den kompletten Zustand dabei jedes Mal als XML
+        aufzubauen kostete mehr als die eigentliche Arbeit. Der Broadcast
+        bleibt SOFORT (Engine und UI folgen ohne Verzögerung), nur das
+        Schreiben läuft über den Timer bzw. das nächste flush(). */
+    void writeAndNotifyCoalesced();
+
+    /** Kompletten Zustand als XML in die PropertiesFile schreiben. */
+    void storeXml();
+    void storePendingXml();
+    void timerCallback() override;
+
     juce::ApplicationProperties applicationProperties;
 
     LaunchQuant launchQuant = LaunchQuant::bar1;
@@ -290,6 +304,7 @@ private:
     int yLinkSend = -1;
 
     bool storedStateLoaded = false;
+    bool pendingXmlWrite = false;   // gebündelte Mixer-Änderung wartet aufs Schreiben
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LooperSettings)
 };
