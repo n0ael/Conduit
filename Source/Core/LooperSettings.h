@@ -3,6 +3,7 @@
 #include <array>
 
 #include <juce_data_structures/juce_data_structures.h>
+#include <juce_graphics/juce_graphics.h>
 
 #include "LaunchQuantization.h"
 #include "Looper/LooperClipMath.h"
@@ -24,7 +25,8 @@ namespace conduit
 
         LooperState (globale Menü-Optionen als Attribute)
           └── Looper[i]: sourceKey, spectrum, sendMaster, numTracks
-                └── Track[t]: gain, pan, mute, solo, variQuantized
+                └── Track[t]: gain, pan, mute, solo, variQuantized,
+                              send0..send3 (Level), sendPre
 
     Globale Menü-Optionen (LooperSettingsMenu, M6):
       launchQuant   — Start/Stop-Raster (app-weites Enum, Commit bleibt sofort)
@@ -51,7 +53,8 @@ namespace conduit
     juce::ChangeBroadcaster (async), der EngineProcessor spiegelt per
     applyLooperSettings() in Bank/Modell.
 */
-class LooperSettings : public juce::ChangeBroadcaster
+class LooperSettings : public juce::ChangeBroadcaster,
+                       private juce::Timer
 {
 public:
     static constexpr int maxLoopers = 4;
@@ -60,11 +63,15 @@ public:
     static constexpr int maxVisibleSlots = 12;
     static constexpr int defaultVisibleSlots = 8;
 
-    enum class TapMode : int { retrigger = 0, toggleStop };
-    enum class ReverseMode : int { immediate = 0, boundary };
+    enum class TapMode : int { retrigger = 0, toggleStop, legato };
+    enum class ReverseMode : int { immediate = 0, boundary, quantized };
     enum class VariRaster : int { semitones = 0, sessionScale };
-    enum class VariScope : int { perTrack = 0, perLooper };
+    enum class VariScope : int { perTrack = 0, perLooper, globalScope };
     enum class SoloScope : int { perLooper = 0, globalScope };
+
+    /** Anzeige der VARI-Rastung (Panel-Option „VARI Display (Quant)"):
+        Halbtöne („+3 st") oder Skalen-Stufen („♭3") — reine UI-Option. */
+    enum class VariDisplay : int { semitones = 0, scaleDegrees };
 
     /** Eigene Datei neben Conduit.settings (Muster ChannelNames). */
     [[nodiscard]] static juce::PropertiesFile::Options defaultOptions();
@@ -115,6 +122,30 @@ public:
     [[nodiscard]] bool isAutoAdvanceEnabled() const noexcept { return autoAdvance; }
     void setAutoAdvanceEnabled (bool enabled);
 
+    [[nodiscard]] VariDisplay getVariDisplay() const noexcept { return variDisplay; }
+    void setVariDisplay (VariDisplay display);
+
+    /** Sichtbare Send-Anzahl 0..4 (MIXER-Tab „+ Send / −") — reine
+        UI-Option, die Engine rendert immer alle 4 Send-Busse (ADR 012). */
+    [[nodiscard]] int getSendCount() const noexcept { return sendCount; }
+    void setSendCount (int count);
+
+    // DISPLAY-Optionen (UI-only): Mixer-Elemente ausblendbar —
+    // Use-Case „erst MIDI-mappen, dann verstecken"
+    [[nodiscard]] bool isShowStopAll() const noexcept { return showStopAll; }
+    void setShowStopAll (bool show);
+
+    [[nodiscard]] bool isHideMuteSolo() const noexcept { return hideMuteSolo; }
+    void setHideMuteSolo (bool hide);
+
+    [[nodiscard]] bool isHideMixerXy() const noexcept { return hideMixerXy; }
+    void setHideMixerXy (bool hide);
+
+    /** Collapse-Bitmaske der Seitenpanel-Sektionen (VIEW-Zustand,
+        Muster id::outCollapsed — Bit gesetzt = Sektion zu). */
+    [[nodiscard]] int getPanelCollapsedMask() const noexcept { return panelCollapsed; }
+    void setPanelCollapsedMask (int mask);
+
     [[nodiscard]] int getNumLoopers() const noexcept { return numLoopers; }
     void setNumLoopers (int count);
 
@@ -152,13 +183,58 @@ public:
     [[nodiscard]] bool isTrackVariQuantized (int looperIndex, int trackIndex) const noexcept;
     void setTrackVariQuantized (int looperIndex, int trackIndex, bool quantized);
 
-    /** Send-Routing des Tracks (Big Out): Bitmaske Bits 0..3 = Send 1..4. */
+    /** Send-LEVEL des Tracks (Mixer 07/2026): 0..1 pro Send-Bus 1..4 —
+        ersetzt die frühere An/Aus-Bitmaske (Alt-Dateien migrieren beim
+        Laden Bit→1.0, exakte Verhaltens-Parität). */
+    [[nodiscard]] float getTrackSendLevel (int looperIndex, int trackIndex,
+                                           int sendIndex) const noexcept;
+    void setTrackSendLevel (int looperIndex, int trackIndex, int sendIndex,
+                            float level01);
+
+    /** ABGELEITETE Send-Bitmaske (Bit gesetzt = Level > 0) — Kompatibilität
+        für Farb-Resolver/Hash/Send-Dialog; Setter mappt Bit→1.0 / 0.0. */
     [[nodiscard]] int getTrackSends (int looperIndex, int trackIndex) const noexcept;
     void setTrackSends (int looperIndex, int trackIndex, int mask);
 
     /** Send-Abgriff des Tracks: true = pre (vor Gain/Pan/Mute), Default post. */
     [[nodiscard]] bool isTrackSendPre (int looperIndex, int trackIndex) const noexcept;
     void setTrackSendPre (int looperIndex, int trackIndex, bool pre);
+
+    /** Distanz des Tracks (XY-Panner-Y, 0..1 — „FAR" = 1). */
+    [[nodiscard]] float getTrackDistance (int looperIndex, int trackIndex) const noexcept;
+    void setTrackDistance (int looperIndex, int trackIndex, float distance01);
+
+    //==========================================================================
+    // Distanz-Globals (MIXER-Tab · DISTANCE · GLOBAL — gelten für alle
+    // Looper-Tracks; Semantik siehe Looper/LooperDistance.h)
+
+    struct DistanceState
+    {
+        float hiDumpDb   = 9.0f;      // Shelf-Absenkung bei d=1 (0..18 dB)
+        float hiCutHz    = 8000.0f;   // Tiefpass-Ziel bei d=1 (500..16000 Hz)
+        float baseFreqHz = 2000.0f;   // Shelf-Eckfrequenz (200..4000 Hz)
+        float width01    = 0.5f;      // verbleibende Breite bei d=1 (0..1)
+        bool  volDumpOn  = true;      // Pegel-Kurve aktiv (Default AN, 20.07.2026)
+        float volDumpDb  = 12.0f;     // dB-Neigung der Vol-Kurve (0..24)
+        float smoothMs   = 20.0f;     // Distanz-Slew (0..500 ms)
+        float ySens      = 1.0f;      // Y Sensitivity: Wirkung des Pad-Wegs (0..1)
+    };
+
+    [[nodiscard]] DistanceState getDistance() const noexcept { return distanceState; }
+    void setDistance (const DistanceState& state);
+
+    /** Y-Link: GENAU EIN Send (0..3) folgt der Distanz-Y-Achse — Puck
+        nach oben = mehr Send (Poti-Level wirkt als Untergrenze);
+        −1 = kein Send verlinkt (Default). */
+    [[nodiscard]] int getYLinkSend() const noexcept { return yLinkSend; }
+    void setYLinkSend (int sendIndex);
+
+    /** Farbe eines Sends (Kachel-Form, Puck-Overlay, Patch-OUT-Slots) —
+        frei wählbar über den ConduitColorPicker (User 20.07.2026);
+        Werks-Palette S1 ● orange · S2 ■ blau · S3 ▲ grün · S4 ⬡ türkis. */
+    [[nodiscard]] static juce::Colour defaultSendColour (int sendIndex) noexcept;
+    [[nodiscard]] juce::Colour getSendColour (int sendIndex) const noexcept;
+    void setSendColour (int sendIndex, juce::Colour colour);
 
     //==========================================================================
     /** [Message Thread] Ausstehende Änderungen sofort auf Platte schreiben. */
@@ -172,8 +248,9 @@ private:
         bool mute = false;
         bool solo = false;
         bool variQuantized = false;   // Default frei (Drift ist Feature)
-        int sends = 0;                // Bitmaske Send 1..4 (Big Out)
+        std::array<float, 4> sendLevel {};   // Send-Level 1..4 (0..1, Default 0)
         bool sendPre = false;         // Abgriff pre statt post (Default post)
+        float distance = 0.0f;        // XY-Panner-Y (0..1, „FAR" = 1)
     };
 
     struct LooperState
@@ -197,6 +274,19 @@ private:
     void loadFromFile();
     void writeAndNotify();
 
+    /** Wie writeAndNotify, aber die XML-Serialisierung wird gebündelt
+        (Mixer-Gesten, 20.07.2026): Gain/Pan/Distanz/Send-Level feuern pro
+        MAUSBEWEGUNG — den kompletten Zustand dabei jedes Mal als XML
+        aufzubauen kostete mehr als die eigentliche Arbeit. Der Broadcast
+        bleibt SOFORT (Engine und UI folgen ohne Verzögerung), nur das
+        Schreiben läuft über den Timer bzw. das nächste flush(). */
+    void writeAndNotifyCoalesced();
+
+    /** Kompletten Zustand als XML in die PropertiesFile schreiben. */
+    void storeXml();
+    void storePendingXml();
+    void timerCallback() override;
+
     juce::ApplicationProperties applicationProperties;
 
     LaunchQuant launchQuant = LaunchQuant::bar1;
@@ -210,10 +300,20 @@ private:
     bool deleteLatch = false;
     bool autoAdvance = true;
     int numLoopers = 1;
+    VariDisplay variDisplay = VariDisplay::semitones;
+    int sendCount = 4;
+    bool showStopAll = true;
+    bool hideMuteSolo = false;
+    bool hideMixerXy = false;
+    int panelCollapsed = 0;
 
     std::array<LooperState, static_cast<std::size_t> (maxLoopers)> loopers;
+    DistanceState distanceState;
+    int yLinkSend = -1;
+    std::array<juce::Colour, 4> sendColours {};   // transparent = Werks-Palette
 
     bool storedStateLoaded = false;
+    bool pendingXmlWrite = false;   // gebündelte Mixer-Änderung wartet aufs Schreiben
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LooperSettings)
 };

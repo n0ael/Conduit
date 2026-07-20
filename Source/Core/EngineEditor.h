@@ -16,6 +16,8 @@
 
 #include "UI/EditorDockPanel.h"
 #include "UI/GridPage.h"
+#include "UI/LooperDockTabs.h"
+#include "UI/LooperMapOverlay.h"
 #include "UI/LooperPage.h"
 #include "UI/NodeCanvas.h"
 #include "UI/PageHost.h"
@@ -223,8 +225,47 @@ private:
     // deklariert (der hält eine Referenz darauf), Init in der Ctor-Liste.
     TouchLivePage touchLivePage;
 
+    // Looper-MIDI-Map (07/2026): eigene MidiInBindings-Instanz +
+    // Persistenz — VOR looperDockTabs (der MIDI-Tab referenziert sie)
+    std::unique_ptr<LooperMidiMap> looperMidiMap;
+
+    // Looper-Seitenpanel (LOOPER · MIXER · MIDI, 07/2026): registriert
+    // seine Tabs im Ctor und entfernt sie im Dtor — NACH editorDock
+    // deklariert (Zerstörung rückwärts, Muster gridPage)
+    std::unique_ptr<LooperDockTabs> looperDockTabs;
+
+    // MAP-MODE-Overlay (07/2026): liegt über Page + Dock, cyan-Rahmen +
+    // CC-Badges; Ziel-Liste baut rebuildLooperMapTargets
+    LooperMapOverlay looperMapOverlay;
+
     // TARGET-Halten pro Looper (Aktiv-Auswahl statt Launch, Übergabe §2)
     std::array<bool, 4> looperTargetHold {};
+
+    // Sync/Free-Modus der LEN/POS-Potis pro Looper (VIEW-Zustand, 07/2026)
+    std::array<bool, 4> looperLenSync { true, true, true, true };
+
+    // Perf-Wächter (20.07.2026): der Settings-Broadcast feuert bei jeder
+    // Mausbewegung im Mixer — Hook-Verdrahtung und Quellen-Menü-Rebuild
+    // laufen deshalb nur bei echten Struktur-/Quell-Wechseln
+    bool looperPanelsWired = false;
+    std::array<juce::String, 4> looperSourceKeyCache;
+
+    /** LEN/POS-Knob-Positionen + Anzeigen aus dem Aktiv-Clip nachziehen. */
+    void refreshLooperLenPos (int looperIndex);
+
+    //==========================================================================
+    // Looper-MIDI-Map (07/2026): Hub-Abos aller Controller-Rolle-Geräte,
+    // Tick-Dispatch und MAP-MODE-Overlay
+
+    std::vector<int> looperMidiSubTokens;
+    int looperMidiTickToken = -1;
+    std::map<int, bool> looperMidiPressed;   // controlId → Edge-Zustand
+
+    void wireLooperMidiInputs();
+    void applyLooperMidiValue (const grid::MacroControlKey& key, float value01);
+    [[nodiscard]] float looperMidiValueFor (const grid::MacroControlKey& key);
+    void rebuildLooperMapTargets();
+    void updateLooperMapOverlay();
 
     // M7: Header-Gesten der Looper-Page (Delete/Save halten + Ziel
     // antippen; Delete optional als Latch — Menü-Option für Nicht-Touch)

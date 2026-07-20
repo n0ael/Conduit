@@ -1,9 +1,12 @@
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <functional>
 #include <memory>
 #include <thread>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "Core/Looper/BarSampleAnchors.h"
@@ -399,6 +402,275 @@ TEST_CASE ("LooperBank: Looper-I/O-Busse — AudioView, sendToMaster, Kein Maste
 
 }
 
+TEST_CASE ("LooperBank: Reverse quantized wartet auf den Grid-Übertritt", "[looper]")
+{
+    BankRig rig;
+    rig.signal = [] (std::uint64_t pos)
+    { return 0.5f * static_cast<float> (pos % 24000) / 24000.0f; };
+
+    rig.feedBars (2.5);
+    REQUIRE (rig.commit (1).wasOk());
+    rig.feedBlocks (4);
+
+    // Mehrheits-Richtung der Sägezahn-Flanken im letzten Block
+    const auto direction = [&]
+    {
+        const auto* data = rig.output.getReadPointer (0);
+        int up = 0, down = 0;
+        for (int i = 1; i < blockSize; ++i)
+        {
+            if (data[i] > data[i - 1]) ++up;
+            else if (data[i] < data[i - 1]) ++down;
+        }
+        return up - down;
+    };
+
+    // Direkt hinter eine Taktgrenze fahren (Abstand zur nächsten ist groß)
+    while (std::fmod (rig.beat, 4.0) > 0.1)
+        rig.feedBlocks (1);
+    rig.feedBlocks (2);
+
+    REQUIRE (direction() > 0);   // vorwärts: Säge steigt
+
+    REQUIRE (rig.bank.toggleClipReverse (0, 0, false, 4.0).wasOk());
+    rig.feedBlocks (5);
+    REQUIRE (direction() > 0);   // staged, aber noch NICHT aktiv (kein Übertritt)
+
+    // Bis kurz hinter die nächste Taktgrenze füttern
+    const auto blocksToBar = static_cast<int> (
+        std::ceil ((4.0 - std::fmod (rig.beat, 4.0)) / 0.02)) + 3;
+    rig.feedBlocks (blocksToBar);
+    REQUIRE (direction() < 0);   // jetzt rückwärts: Säge fällt
+}
+
+TEST_CASE ("LooperBank: LEN/POS — stufenloses Loop-Fenster", "[looper]")
+{
+    BankRig rig;
+
+    SECTION ("Freie Länge 0.5 Beats loopt exakt mit Periode 12 000 Samples")
+    {
+        // 1-Beat-Sägezahn, phasenstarr zur SampleClock (nachrechenbar)
+        rig.signal = [] (std::uint64_t pos)
+        { return 0.5f * static_cast<float> (pos % 24000) / 24000.0f; };
+
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+        rig.feedBlocks (2);
+
+        REQUIRE (rig.bank.setClipLengthBeats (0, 0, 0.5,
+                                              conduit::looper::HalveMode::firstHalf)
+                     .wasOk());
+        rig.feedBlocks (8);   // Apply + Splice-Duck ausklingen lassen
+
+        LooperBank::ClipInfo info;
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.lengthBeats == Catch::Approx (0.5));
+        REQUIRE (info.contentBeats == Catch::Approx (4.0));
+        REQUIRE (info.windowOffsetBeats == Catch::Approx (0.0));
+        REQUIRE (conduit::looper::lengthDivisor (info.contentBeats, info.lengthBeats) == 8);
+
+        // Referenzblock einfrieren, genau eine Loop-Periode später vergleichen
+        std::array<float, static_cast<std::size_t> (blockSize)> reference {};
+        std::copy_n (rig.output.getReadPointer (0), blockSize, reference.begin());
+
+        rig.feedBlocks (25);   // 0.5 Beats @ 120 BPM = 12 000 Samples = 25 Blöcke
+
+        const auto* now = rig.output.getReadPointer (0);
+        float low = 1.0f, high = -1.0f;
+        for (int i = 0; i < blockSize; ++i)
+        {
+            REQUIRE (std::abs (now[i] - reference[static_cast<std::size_t> (i)]) < 1.0e-3f);
+            low = juce::jmin (low, now[i]);
+            high = juce::jmax (high, now[i]);
+        }
+        REQUIRE (high - low > 0.001f);   // echtes Material, keine Stille/DC
+    }
+
+    SECTION ("POS verschiebt das Fenster im Content (Werte-Bereich folgt)")
+    {
+        // 1-TAKT-Sägezahn: Content-Beat b → Wert 0.5·b/4 (Fenster ablesbar)
+        rig.signal = [] (std::uint64_t pos)
+        { return 0.5f * static_cast<float> (pos % 96000) / 96000.0f; };
+
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+        rig.feedBlocks (2);
+
+        REQUIRE (rig.bank.setClipLengthBeats (0, 0, 1.0,
+                                              conduit::looper::HalveMode::firstHalf)
+                     .wasOk());
+        rig.feedBlocks (8);
+
+        // Fenster [0, 1): Werte ∈ [0, 0.125] (+ Wrap-Blend-Rand)
+        {
+            const auto* data = rig.output.getReadPointer (0);
+            for (int i = 0; i < blockSize; ++i)
+                REQUIRE (data[i] < 0.2f);
+        }
+
+        REQUIRE (rig.bank.setClipWindowOffsetBeats (0, 0, 2.0).wasOk());
+        rig.feedBlocks (8);
+
+        LooperBank::ClipInfo info;
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.windowOffsetBeats == Catch::Approx (2.0));
+
+        // Fenster [2, 3): Werte ∈ [0.25, 0.375] (Duck/Blend-Ränder toleriert)
+        {
+            const auto* data = rig.output.getReadPointer (0);
+            float high = -1.0f;
+            for (int i = 0; i < blockSize; ++i)
+                high = juce::jmax (high, data[i]);
+            REQUIRE (high > 0.24f);
+            REQUIRE (high < 0.40f);
+        }
+
+        // Clamp: Offset jenseits des Contents → content − Länge = 3.0
+        REQUIRE (rig.bank.setClipWindowOffsetBeats (0, 0, 99.0).wasOk());
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.windowOffsetBeats == Catch::Approx (3.0));
+
+        // Doppelklick-Reset: Offset 0
+        REQUIRE (rig.bank.setClipWindowOffsetBeats (0, 0, 0.0).wasOk());
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.windowOffsetBeats == Catch::Approx (0.0));
+    }
+
+    SECTION ("LEN-Clamps: 50-ms-Untergrenze und Content-Obergrenze")
+    {
+        rig.signal = [] (std::uint64_t pos)
+        { return 0.3f + 0.2f * static_cast<float> (pos % 61) / 61.0f; };
+
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+
+        // 50 ms @ 120 BPM = 0.1 Beats Untergrenze
+        REQUIRE (rig.bank.setClipLengthBeats (0, 0, 0.0001,
+                                              conduit::looper::HalveMode::firstHalf)
+                     .wasOk());
+        LooperBank::ClipInfo info;
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.lengthBeats == Catch::Approx (0.1));
+
+        // Obergrenze Content (×2 über Content hinaus unmöglich)
+        REQUIRE (rig.bank.setClipLengthBeats (0, 0, 999.0,
+                                              conduit::looper::HalveMode::firstHalf)
+                     .wasOk());
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.lengthBeats == Catch::Approx (4.0));
+
+        // Ohne Clip: sauberer Fehler
+        REQUIRE (rig.bank.setClipLengthBeats (1, 0, 1.0,
+                                              conduit::looper::HalveMode::firstHalf)
+                     .failed());
+        REQUIRE (rig.bank.setClipWindowOffsetBeats (1, 0, 1.0).failed());
+    }
+}
+
+TEST_CASE ("LooperBank: Distanz-Zug — Width-Kollaps und Vol-Stille", "[looper]")
+{
+    BankRig rig;
+    rig.signal = [] (std::uint64_t position)
+    {
+        // bipolar, damit die M/S-Stufe echtes Side-Signal sieht
+        return std::sin (static_cast<float> (position % 97) * 0.13f) * 0.5f;
+    };
+    rig.feedBars (2.5);
+    REQUIRE (rig.commit (1).wasOk());
+    rig.feedBlocks (4);
+
+    const auto rms = [] (const float* data, int numSamples)
+    {
+        double sum = 0.0;
+        for (int i = 0; i < numSamples; ++i)
+            sum += data[i] * data[i];
+        return std::sqrt (sum / numSamples);
+    };
+
+    SECTION ("d=0: Bypass — Playback unangetastet hörbar")
+    {
+        const auto view = rig.bank.getAudioView();
+        REQUIRE (rms (view.track[0][0][0], blockSize) > 0.01);
+        for (int i = 0; i < blockSize; ++i)
+            REQUIRE (juce::exactlyEqual (view.track[0][0][0][i], view.post[0][0][i]));
+    }
+
+    SECTION ("d=1 + Width 0 (VolDump aus): hart gepanntes Signal wird mono")
+    {
+        // Pan hart rechts → deutliches Side-Signal, dann volle Distanz
+        rig.bank.setTrackPan (0, 0, 1.0f);
+        rig.feedBlocks (4);   // Pan-Slew ausklingen lassen
+
+        conduit::looper::DistanceGlobals globals;
+        globals.width01 = 0.0f;
+        globals.volDumpOn = false;
+        rig.bank.setDistanceGlobals (globals, 0.0f);   // Smooth 0 = sofort
+        rig.bank.setTrackDistance (0, 0, 1.0f);
+        rig.feedBlocks (3);
+
+        const auto view = rig.bank.getAudioView();
+        REQUIRE (rms (view.track[0][0][0], blockSize) > 0.001);
+        for (int i = 0; i < blockSize; ++i)
+            REQUIRE (juce::exactlyEqual (view.track[0][0][0][i], view.track[0][0][1][i]));
+    }
+
+    SECTION ("Y-Link: Poti-Level ist Untergrenze, Distanz hebt darüber an")
+    {
+        conduit::looper::DistanceGlobals globals;
+        globals.volDumpOn = false;   // Post-Bus == gefiltertes Signal (exakt vergleichbar)
+        rig.bank.setDistanceGlobals (globals, 0.0f);
+        rig.bank.setYLinkSend (0);
+
+        // Level 0.8 > Distanz 0.3 → das Poti gewinnt
+        rig.bank.setTrackSendLevel (0, 0, 0, 0.8f);
+        rig.bank.setTrackDistance (0, 0, 0.3f);
+        rig.feedBlocks (4);
+
+        auto view = rig.bank.getAudioView();
+        for (int i = 0; i < blockSize; ++i)
+            REQUIRE (juce::exactlyEqual (view.send[0][0][i], 0.8f * view.post[0][0][i]));
+
+        // Distanz 0.95 > Level 0.8 → die Y-Achse gewinnt
+        rig.bank.setTrackDistance (0, 0, 0.95f);
+        rig.feedBlocks (4);
+
+        view = rig.bank.getAudioView();
+        for (int i = 0; i < blockSize; ++i)
+            REQUIRE (juce::exactlyEqual (view.send[0][0][i], 0.95f * view.post[0][0][i]));
+
+        // Nicht verlinkte Sends bleiben still
+        REQUIRE (juce::exactlyEqual (rms (view.send[1][0], blockSize), 0.0));
+    }
+
+    SECTION ("Y-Link + VolDump: Dry fährt in die Stille, der Send bleibt hörbar")
+    {
+        rig.bank.setDistanceGlobals (conduit::looper::DistanceGlobals {}, 0.0f);
+        rig.bank.setYLinkSend (0);
+        rig.bank.setTrackDistance (0, 0, 1.0f);
+        rig.feedBlocks (4);
+
+        const auto view = rig.bank.getAudioView();
+        REQUIRE (juce::exactlyEqual (rms (view.post[0][0], blockSize), 0.0));
+        REQUIRE (rms (view.send[0][0], blockSize) > 0.001);
+    }
+
+    SECTION ("d=1 + VolDump an (Default): komplette Stille — Y ersetzt den Fader")
+    {
+        rig.bank.setDistanceGlobals (conduit::looper::DistanceGlobals {}, 0.0f);
+        rig.bank.setTrackDistance (0, 0, 1.0f);
+        rig.feedBlocks (3);
+
+        const auto view = rig.bank.getAudioView();
+        REQUIRE (juce::exactlyEqual (rms (view.track[0][0][0], blockSize), 0.0));
+        REQUIRE (juce::exactlyEqual (rms (view.master[0], blockSize), 0.0));
+
+        // Zurück auf d=0: Signal kommt wieder
+        rig.bank.setTrackDistance (0, 0, 0.0f);
+        rig.feedBlocks (3);
+        REQUIRE (rms (rig.bank.getAudioView().track[0][0][0], blockSize) > 0.01);
+    }
+}
+
 TEST_CASE ("LooperBank: Track-/Send-Busse — trackBus post-fader, Sends pre/post", "[looper]")
 {
     BankRig rig;
@@ -440,7 +712,8 @@ TEST_CASE ("LooperBank: Track-/Send-Busse — trackBus post-fader, Sends pre/pos
         for (int s = 0; s < LooperBank::maxSends; ++s)
             REQUIRE (juce::exactlyEqual (rms (view.send[s][0], blockSize), 0.0));
 
-        rig.bank.setTrackSends (0, 0, 0b0101);   // Send 1 + 3
+        rig.bank.setTrackSendLevel (0, 0, 0, 1.0f);   // Send 1 + 3
+        rig.bank.setTrackSendLevel (0, 0, 2, 1.0f);
         rig.feedBlocks (2);
 
         view = rig.bank.getAudioView();
@@ -454,9 +727,25 @@ TEST_CASE ("LooperBank: Track-/Send-Busse — trackBus post-fader, Sends pre/pos
             REQUIRE (juce::exactlyEqual (view.send[0][0][i], view.post[0][0][i]));
     }
 
+    SECTION ("Send-LEVEL 0.5 skaliert den Bus exakt (nach Ramp-Settle)")
+    {
+        rig.bank.setTrackSendLevel (0, 0, 0, 0.5f);
+        rig.feedBlocks (2);   // Block 1 rampt (480 > 240 Samples), Block 2 konstant
+
+        const auto view = rig.bank.getAudioView();
+        REQUIRE (rms (view.send[0][0], blockSize) > 0.005);
+        for (int i = 0; i < blockSize; ++i)
+            REQUIRE (juce::exactlyEqual (view.send[0][0][i], 0.5f * view.post[0][0][i]));
+
+        // Zurück auf 0: Bus verstummt nach dem Slew wieder komplett
+        rig.bank.setTrackSendLevel (0, 0, 0, 0.0f);
+        rig.feedBlocks (2);
+        REQUIRE (juce::exactlyEqual (rms (rig.bank.getAudioView().send[0][0], blockSize), 0.0));
+    }
+
     SECTION ("Gain 0: Post-Send verstummt, Pre-Send bleibt hörbar")
     {
-        rig.bank.setTrackSends (0, 0, 0b0001);
+        rig.bank.setTrackSendLevel (0, 0, 0, 1.0f);
         rig.bank.setTrackGain (0, 0, 0.0f);
         rig.feedBlocks (4);   // Gain-Slew (5 ms) ausklingen lassen
 
@@ -487,7 +776,7 @@ TEST_CASE ("LooperBank: Track-/Send-Busse — trackBus post-fader, Sends pre/pos
     SECTION ("LooperPatchOutModule kopiert Track-/Bus-/Send-/Master-Slots")
     {
         using Big = conduit::LooperPatchOutModule;
-        rig.bank.setTrackSends (0, 0, 0b0010);   // Send 2, post
+        rig.bank.setTrackSendLevel (0, 0, 1, 1.0f);   // Send 2, post
         rig.feedBlocks (2);
 
         Big module;
@@ -1267,4 +1556,274 @@ TEST_CASE ("LooperBank: nebenläufige Commits gegen laufendes Audio (Stress)", "
         rig.bank.serviceMessageThread();
     }
     REQUIRE (rig.bank.getRamBytesUsed() < 3 * 2 * 4 * (2 * 96'000 + 240 + 4096));
+}
+
+//==============================================================================
+TEST_CASE ("LooperBank: LEN/POS — Loop-Wrap bleibt klickfrei", "[looper]")
+{
+    // Glattes Signal (Sinus, Periode = 1 Takt) OHNE eigene Spruenge: jede
+    // Sample-zu-Sample-Diskontinuitaet im Output ist damit ein Artefakt des
+    // Loop-Wraps. User-Fund 20.07.2026: bei manchen LEN/POS-Einstellungen
+    // knackte es hoerbar.
+    const auto smoothSine = [] (std::uint64_t position)
+    {
+        return 0.5f * static_cast<float> (
+            std::sin (juce::MathConstants<double>::twoPi
+                      * static_cast<double> (position) / 96000.0));
+    };
+
+    // Klick-Metrik = zweite Differenz |x[n] - 2x[n-1] + x[n-2]|: ein
+    // Crossfade zwischen weit auseinanderliegenden Stellen DARF eine
+    // steile (aber stetige) Flanke haben — die faellt hier nicht auf,
+    // weil ihre Steigung sich nur langsam aendert. Ein echter Sprung
+    // (Klick) sticht dagegen sofort heraus.
+    const auto maxKinkOver = [] (BankRig& r, int blocks)
+    {
+        auto worst = 0.0f;
+        float previous = 0.0f, beforePrevious = 0.0f;
+        auto haveHistory = 0;
+
+        for (int block = 0; block < blocks; ++block)
+        {
+            r.feedBlocks (1);
+            const auto* data = r.output.getReadPointer (0);
+            for (int i = 0; i < blockSize; ++i)
+            {
+                if (haveHistory >= 2)
+                    worst = juce::jmax (worst,
+                                        std::abs (data[i] - 2.0f * previous + beforePrevious));
+                beforePrevious = previous;
+                previous = data[i];
+                haveHistory = juce::jmin (2, haveHistory + 1);
+            }
+        }
+        return worst;
+    };
+
+    // Referenz: ungestoerter Vollfenster-Loop (bestehendes Verhalten)
+    {
+        BankRig rig;
+        rig.signal = smoothSine;
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+        rig.feedBlocks (4);
+        REQUIRE (maxKinkOver (rig, 120) < 0.002f);
+    }
+
+    // Fenster-Raster quer durch: verkuerzte Laengen, verschobene
+    // Positionen, vorwaerts UND rueckwaerts, bei 1x und Varispeed.
+    // Schwelle STRENG: das glatte Signal aendert sich pro Sample um
+    // ~3e-5, ein Wrap-Artefakt sticht sofort heraus.
+    for (const auto reversed : { false, true })
+    {
+        for (const auto rate : { 1.0, 0.5, 2.0 })
+        {
+            for (const auto lengthBeats : { 2.0, 1.0, 0.5, 1.5, 0.25, 0.1 })   // 0.1 = 50-ms-Untergrenze
+            {
+                for (const auto offsetBeats : { 0.0, 0.5, 1.0, 2.0, 1.75 })
+                {
+                    if (offsetBeats + lengthBeats > 4.0)
+                        continue;
+
+                    BankRig rig;
+                    rig.signal = smoothSine;
+                    rig.feedBars (2.5);
+                    REQUIRE (rig.commit (1).wasOk());
+                    rig.feedBlocks (4);
+
+                    REQUIRE (rig.bank.setClipLengthBeats (
+                                 0, 0, lengthBeats,
+                                 conduit::looper::HalveMode::firstHalf).wasOk());
+                    REQUIRE (rig.bank.setClipWindowOffsetBeats (0, 0, offsetBeats).wasOk());
+                    if (reversed)
+                        REQUIRE (rig.bank.toggleClipReverse (0, 0, false).wasOk());
+                    if (! juce::exactlyEqual (rate, 1.0))
+                        REQUIRE (rig.bank.setClipRate (0, 0, rate).wasOk());
+
+                    rig.feedBlocks (60);   // Apply (ggf. erst am Loop-Anfang) + Duck
+
+                    // Grenze trennt SPRUENGE von legitimen Fade-Flanken:
+                    // eine Blende zwischen weit auseinanderliegendem
+                    // Material ist zwangslaeufig steil (Werte um 2e-3),
+                    // ein echter Wrap-Sprung lag bei 3.5e-1 — Faktor 100.
+                    INFO ("reversed=" << (reversed ? 1 : 0) << " rate=" << rate
+                          << " length=" << lengthBeats << " offset=" << offsetBeats);
+                    REQUIRE (maxKinkOver (rig, 120) < 0.005f);
+                }
+            }
+        }
+    }
+}
+
+//==============================================================================
+TEST_CASE ("LooperBank: sehr kurze Free-Loops knistern nicht", "[looper]")
+{
+    // User-Fund 20.07.2026: bei Free + sehr kleinem Loop-Bereich knistert
+    // es. Der vorige Klick-Test nutzte einen 0,5-Hz-Sinus — ueber 50 ms
+    // praktisch DC, also blind fuer genau diesen Fall. Hier laeuft ein
+    // HOERBARES Signal (220 Hz): der Wrap liegt mitten in der Schwingung.
+    const auto tone = [] (std::uint64_t position)
+    {
+        return 0.5f * static_cast<float> (
+            std::sin (juce::MathConstants<double>::twoPi * 220.0
+                      * static_cast<double> (position) / testSampleRate));
+    };
+
+    // Natuerliche Kruemmung des Tons pro Sample: A * w^2 ~ 4.1e-4.
+    // Ein Wrap-Artefakt sticht deutlich darueber heraus.
+    // Grenze: die natuerliche Kruemmung (4.1e-4) mal dem Equal-Power-
+    // Ueberschuss der Blende (bis sqrt(2)) plus Reserve. Ein echter
+    // Sprung liegt um ein Vielfaches darueber.
+    constexpr float kinkLimit = 8.0e-4f;
+
+    const auto maxKinkOver = [] (BankRig& r, int blocks)
+    {
+        auto worst = 0.0f;
+        float previous = 0.0f, beforePrevious = 0.0f;
+        auto haveHistory = 0;
+
+        for (int block = 0; block < blocks; ++block)
+        {
+            r.feedBlocks (1);
+            const auto* data = r.output.getReadPointer (0);
+            for (int i = 0; i < blockSize; ++i)
+            {
+                if (haveHistory >= 2)
+                    worst = juce::jmax (worst,
+                                        std::abs (data[i] - 2.0f * previous + beforePrevious));
+                beforePrevious = previous;
+                previous = data[i];
+                haveHistory = juce::jmin (2, haveHistory + 1);
+            }
+        }
+        return worst;
+    };
+
+    // 0.1 Beats = 50 ms (Free-Untergrenze) bis 0.5 Beats
+    for (const auto lengthBeats : { 0.1, 0.15, 0.25, 0.5 })
+    {
+        for (const auto offsetBeats : { 0.0, 0.7, 1.3 })
+        {
+            BankRig rig;
+            rig.signal = tone;
+            rig.feedBars (2.5);
+            REQUIRE (rig.commit (1).wasOk());
+            rig.feedBlocks (4);
+
+            REQUIRE (rig.bank.setClipLengthBeats (
+                         0, 0, lengthBeats,
+                         conduit::looper::HalveMode::firstHalf).wasOk());
+            REQUIRE (rig.bank.setClipWindowOffsetBeats (0, 0, offsetBeats).wasOk());
+            rig.feedBlocks (16);
+
+            INFO ("length=" << lengthBeats << " offset=" << offsetBeats);
+            REQUIRE (maxKinkOver (rig, 60) < kinkLimit);
+        }
+    }
+}
+
+//==============================================================================
+TEST_CASE ("LooperBank: LEN/POS-Ziehen bei kurzen Loops duckt nicht", "[looper]")
+{
+    // User-Fund 20.07.2026: das Knistern trat NUR beim Verstellen von
+    // Length/Position auf. Ursache: jede Aenderung schiebt die Lese-
+    // position aus dem Fenster; der Sprung laeuft hinter dem 5-ms-
+    // Splice-Duck, und beim Ziehen reisst dieser Duck nie ab. Bei kurzen
+    // Loops greifen die Aenderungen deshalb erst am Loop-Ende.
+    const auto tone = [] (std::uint64_t position)
+    {
+        return 0.5f * static_cast<float> (
+            std::sin (juce::MathConstants<double>::twoPi * 220.0
+                      * static_cast<double> (position) / testSampleRate));
+    };
+
+    // ANTEIL der Zeit, in der der Pegel gedrueckt ist (gleitende
+    // Huellkurve ueber 128 Samples ~ halbe Tonperiode; das Block-Maximum
+    // wuerde einen 5-ms-Duck im 10-ms-Block verschlucken). Ein einzelner
+    // Dip pro Durchlauf ist unvermeidbar und unhoerbar — das Knistern
+    // entsteht erst, wenn die Dips NICHT mehr abreissen.
+    const auto duckedFractionWhileDragging = [] (BankRig& r, int steps,
+                                           const std::function<void (int)>& step)
+    {
+        std::vector<float> captured;
+        captured.reserve (static_cast<std::size_t> (steps * blockSize));
+
+        for (int i = 0; i < steps; ++i)
+        {
+            step (i);
+            r.feedBlocks (1);
+            const auto* data = r.output.getReadPointer (0);
+            captured.insert (captured.end(), data, data + blockSize);
+        }
+
+        // Kein harter Sprung waehrend des Zugs: ein Parameterwechsel
+        // mitten in der Wrap-Blende riss frueher das ausklingende
+        // Material ab (gemessen 0.41 — Faktor 1000 ueber der
+        // natuerlichen Signalkruemmung von 4.1e-4).
+        {
+            auto worst = 0.0f;
+            for (std::size_t i = 2; i < captured.size(); ++i)
+                worst = juce::jmax (worst, std::abs (captured[i] - 2.0f * captured[i - 1]
+                                                     + captured[i - 2]));
+            REQUIRE (worst < 2.0e-3f);
+        }
+
+        constexpr int window = 128;
+        auto ducked = 0, total = 0;
+        for (std::size_t start = 0; start + window <= captured.size(); start += 16)
+        {
+            auto peak = 0.0f;
+            for (int k = 0; k < window; ++k)
+                peak = juce::jmax (peak, std::abs (captured[start + (std::size_t) k]));
+            ++total;
+            if (peak < 0.3f)
+                ++ducked;
+        }
+        return total > 0 ? static_cast<float> (ducked) / static_cast<float> (total)
+                         : 0.0f;
+    };
+
+    SECTION ("LEN-Zug haelt den Pegel")
+    {
+        BankRig rig;
+        rig.signal = tone;
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+        rig.feedBlocks (4);
+
+        REQUIRE (rig.bank.setClipLengthBeats (
+                     0, 0, 0.4, conduit::looper::HalveMode::firstHalf).wasOk());
+        rig.feedBlocks (16);
+
+        const auto duckedFraction = duckedFractionWhileDragging (rig, 60, [&rig] (int i)
+        {
+            // wie am Poti: pro Block eine feine Laengenaenderung
+            const auto result = rig.bank.setClipLengthBeats (
+                0, 0, 0.4 - 0.004 * i, conduit::looper::HalveMode::firstHalf);
+            juce::ignoreUnused (result);
+        });
+
+        REQUIRE (duckedFraction < 0.03f);
+    }
+
+    SECTION ("POS-Zug haelt den Pegel")
+    {
+        BankRig rig;
+        rig.signal = tone;
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+        rig.feedBlocks (4);
+
+        REQUIRE (rig.bank.setClipLengthBeats (
+                     0, 0, 0.2, conduit::looper::HalveMode::firstHalf).wasOk());
+        rig.feedBlocks (16);
+
+        const auto duckedFraction = duckedFractionWhileDragging (rig, 60, [&rig] (int i)
+        {
+            const auto result = rig.bank.setClipWindowOffsetBeats (0, 0, 0.02 * i);
+            juce::ignoreUnused (result);
+        });
+
+        REQUIRE (duckedFraction < 0.03f);
+    }
 }

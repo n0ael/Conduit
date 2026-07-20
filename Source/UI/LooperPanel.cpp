@@ -8,7 +8,6 @@ namespace
     constexpr int headerHeight = 30;
     constexpr int stripHeight = 110;
     constexpr int controlsHeight = 58;
-    constexpr int addTrackWidth = 28;
 }
 
 LooperPanel::LooperPanel (int number)
@@ -33,24 +32,18 @@ LooperPanel::LooperPanel (int number)
             onSegmentClicked (bars);
     };
 
-    addTrackTile.onClick = [this]
+    // FFT/WAVE pro Looper (07/2026, ersetzt die MST-Kachel — MST lebt
+    // als globaler Toggle im MIXER-Tab): LED an = Spektrum
+    viewTile.onClick = [this]
     {
-        if (onAddTrack != nullptr)
-            onAddTrack();
+        if (onViewToggled != nullptr)
+            onViewToggled (! viewTile.isActive());
     };
 
-    // „An Master senden" (Looper-I/O, ADR 010) — LED an = in der Summe
-    sendMasterTile.onClick = [this]
-    {
-        if (onSendMasterToggled != nullptr)
-            onSendMasterToggled (! sendMasterTile.isActive());
-    };
-
-    addAndMakeVisible (sendMasterTile);
+    addAndMakeVisible (viewTile);
     addAndMakeVisible (sourceCombo);
     addAndMakeVisible (strip);
     addAndMakeVisible (controls);
-    addAndMakeVisible (addTrackTile);
 
     setTrackCount (1);
 }
@@ -61,12 +54,18 @@ void LooperPanel::wireTrack (LooperTrackStrip& track, int trackIndex)
     { if (onTrackGain) onTrackGain (trackIndex, gain); };
     track.onPanChanged = [this, trackIndex] (float pan)
     { if (onTrackPan) onTrackPan (trackIndex, pan); };
+    track.onDistanceChanged = [this, trackIndex] (float distance)
+    { if (onTrackDistance) onTrackDistance (trackIndex, distance); };
+    track.onSendLevelChanged = [this, trackIndex] (int sendIndex, float level)
+    { if (onTrackSendLevel) onTrackSendLevel (trackIndex, sendIndex, level); };
     track.onMuteToggled = [this, trackIndex] (bool muted)
     { if (onTrackMute) onTrackMute (trackIndex, muted); };
     track.onSoloToggled = [this, trackIndex] (bool solo)
     { if (onTrackSolo) onTrackSolo (trackIndex, solo); };
-    track.onSendTileTapped = [this, trackIndex]
-    { if (onTrackSendTile) onTrackSendTile (trackIndex); };
+    track.onPlay = [this, trackIndex]
+    { if (onTrackPlay) onTrackPlay (trackIndex); };
+    track.onResetSync = [this, trackIndex]
+    { if (onTrackResetSync) onTrackResetSync (trackIndex); };
     track.onStop = [this, trackIndex]
     { if (onTrackStop) onTrackStop (trackIndex); };
     track.onSlotTapped = [this, trackIndex] (int slotIndex)
@@ -96,7 +95,14 @@ void LooperPanel::setTrackCount (int count)
         tracks.push_back (std::move (track));
     }
 
-    addTrackTile.setVisible ((int) tracks.size() < 4);
+    // Mixer-Layout folgt der Track-Zahl: Kompakt-XY ab 3 Tracks,
+    // Send-Labels „S1…" nur bei genau 1 Track (Handoff 20.07.2026)
+    for (auto& track : tracks)
+    {
+        track->setXyCompact ((int) tracks.size() >= 3);
+        track->setSendLabelsVisible ((int) tracks.size() == 1);
+    }
+
     resized();
 }
 
@@ -163,9 +169,11 @@ void LooperPanel::applySelectedSourceColour()
                            colour.isTransparent() ? push::colours::text : colour);
 }
 
-void LooperPanel::setSendMaster (bool enabled)
+void LooperPanel::setSpectrumView (bool spectrum)
 {
-    sendMasterTile.setActive (enabled);
+    viewTile.setActive (spectrum);
+    strip.setView (spectrum ? LooperWaveformStrip::View::spectrum
+                            : LooperWaveformStrip::View::waveform);
 }
 
 void LooperPanel::setAudible (bool shouldGlow)
@@ -208,7 +216,7 @@ void LooperPanel::resized()
     auto header = bounds.removeFromTop (headerHeight - 4);
     header.removeFromLeft (76);   // "LOOPER n"
     header.removeFromRight (20);  // LED
-    sendMasterTile.setBounds (header.removeFromRight (44).reduced (2));
+    viewTile.setBounds (header.removeFromRight (44).reduced (2));
     sourceCombo.setBounds (header.reduced (2));
 
     strip.setBounds (bounds.removeFromTop (stripHeight));
@@ -217,10 +225,6 @@ void LooperPanel::resized()
     bounds.removeFromTop (4);
 
     auto trackArea = bounds;
-    if (addTrackTile.isVisible())
-        addTrackTile.setBounds (trackArea.removeFromRight (addTrackWidth)
-                                    .withHeight (44).reduced (2));
-
     const auto count = (int) tracks.size();
     if (count > 0)
     {

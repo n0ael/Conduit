@@ -392,3 +392,49 @@ TEST_CASE ("LooperWaveformTap: Quellwechsel → Spektral-Backfill, Budget pro Bl
 
     REQUIRE (filled > 20);
 }
+
+//==============================================================================
+TEST_CASE ("LooperWaveformTap: setSource ist idempotent (kein Backfill-Sturm)", "[looper]")
+{
+    // Regression 20.07.2026: applyLooperSourceArming ruft setSource bei
+    // JEDER Settings-Aenderung (Mixer-Drag!). Ein blinder Versions-Bump
+    // meldete jedes Mal 8 Takte Historie zum Backfill an — der
+    // Audio-Thread rechnete dauerhaft Bins + FFT-Spalten nach (DSP 99 %).
+    WaveformRig rig;
+    rig.tap.setSource (0, 1);
+    rig.service.setChannelArmed (0, true);
+    rig.service.setChannelArmed (1, true);
+
+    rig.feed (0.5f, 3);
+    rig.service.runRamGuard();
+    rig.feed (0.5f, 200);
+
+    // Alles Bisherige abholen; hoechster Live-Index ist die Wasserlinie
+    const auto settled = rig.drain();
+    REQUIRE (! settled.empty());
+    const auto highestSeen = settled.rbegin()->first;
+
+    SECTION ("gleiche Quelle: nur neue Live-Bins, kein Rueckwaerts-Backfill")
+    {
+        for (int repeat = 0; repeat < 20; ++repeat)
+            rig.tap.setSource (0, 1);   // wie der Mixer-Drag: identische Indizes
+
+        rig.feed (0.5f, 2);
+
+        for (const auto& [index, bin] : rig.drain())
+        {
+            juce::ignoreUnused (bin);
+            REQUIRE (index > highestSeen);   // ausschliesslich frische Bins
+        }
+    }
+
+    SECTION ("echter Quellwechsel: Backfill laeuft weiterhin an")
+    {
+        rig.tap.setSource (1, 0);
+        rig.feed (0.5f, 2);
+
+        const auto after = rig.drain();
+        REQUIRE (! after.empty());
+        REQUIRE (after.begin()->first < highestSeen);   // Historie wird nachgereicht
+    }
+}

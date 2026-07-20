@@ -21,9 +21,13 @@ LooperBank::LooperBank()
     for (auto& looper : effectiveMute)
         for (auto& mute : looper)
             mute.store (false, std::memory_order_relaxed);
-    for (auto& looper : targetSendMask)
-        for (auto& mask : looper)
-            mask.store (0, std::memory_order_relaxed);
+    for (auto& looper : targetSendLevel)
+        for (auto& track : looper)
+            for (auto& level : track)
+                level.store (0.0f, std::memory_order_relaxed);
+    for (auto& looper : targetDistance)
+        for (auto& distance : looper)
+            distance.store (0.0f, std::memory_order_relaxed);
     for (auto& looper : sendTapPre)
         for (auto& pre : looper)
             pre.store (false, std::memory_order_relaxed);
@@ -81,6 +85,10 @@ void LooperBank::prepare (double sampleRate, int maxBlockSamples)
             track.currentGain = 1.0f;
             track.currentPan = 0.0f;
             track.currentMuteGain = 1.0f;
+            track.currentSend.fill (0.0f);
+            track.currentDistance = 0.0f;
+            track.distLp.fill ({});
+            track.distShelf.fill ({});
         }
 
     for (std::size_t l = 0; l < static_cast<std::size_t> (maxLoopers); ++l)
@@ -398,6 +406,8 @@ bool LooperBank::getClipInfo (int looperIndex, int trackIndex, ClipInfo& out) co
     out.reversed = clip->stagedReversed.load (std::memory_order_relaxed);
     out.commitBars = clip->commitBars;
     out.clipId = clip->clipId;
+    out.contentBeats = clip->contentBeats;
+    out.windowOffsetBeats = clip->stagedWindowOffsetBeats.load (std::memory_order_relaxed);
     return true;
 }
 
@@ -406,7 +416,8 @@ bool LooperBank::getClipInfo (int looperIndex, int trackIndex, ClipInfo& out) co
 
 void LooperBank::stageClipParams (LooperClip& clip, double rate, double lengthBeats,
                                   double windowOffsetBeats, bool reversed,
-                                  bool followPhase, bool atWrap, bool resetGrid) noexcept
+                                  bool followPhase, bool atWrap, bool resetGrid,
+                                  double quantBeats) noexcept
 {
     clip.stagedRate.store (rate, std::memory_order_relaxed);
     clip.stagedLengthBeats.store (lengthBeats, std::memory_order_relaxed);
@@ -415,6 +426,7 @@ void LooperBank::stageClipParams (LooperClip& clip, double rate, double lengthBe
     clip.windowFollowsPhase.store (followPhase, std::memory_order_relaxed);
     clip.applyAtWrap.store (atWrap, std::memory_order_relaxed);
     clip.resetAnchorToGrid.store (resetGrid, std::memory_order_relaxed);
+    clip.stagedApplyQuantBeats.store (quantBeats, std::memory_order_relaxed);
     clip.paramVersion.fetch_add (1, std::memory_order_release);
 }
 
@@ -428,14 +440,16 @@ void LooperBank::setClipRate (LooperClip& clip, double rate) noexcept
                      false, false, false);
 }
 
-void LooperBank::toggleClipReverse (LooperClip& clip, bool atBoundary) noexcept
+void LooperBank::toggleClipReverse (LooperClip& clip, bool atBoundary,
+                                    double quantBeats) noexcept
 {
     stageClipParams (clip,
                      clip.stagedRate.load (std::memory_order_relaxed),
                      clip.stagedLengthBeats.load (std::memory_order_relaxed),
                      clip.stagedWindowOffsetBeats.load (std::memory_order_relaxed),
                      ! clip.stagedReversed.load (std::memory_order_relaxed),
-                     false, atBoundary, false);
+                     false, atBoundary, false,
+                     juce::jmax (0.0, quantBeats));
 }
 
 void LooperBank::multiplyClipLength (LooperClip& clip, bool doubleLength,
@@ -482,6 +496,54 @@ void LooperBank::resetClipWithSync (LooperClip& clip) noexcept
                      false, false, true);
 }
 
+void LooperBank::setClipLengthBeats (LooperClip& clip, double lengthBeats,
+                                     looper::HalveMode halveMode) noexcept
+{
+    const auto currentLength = clip.stagedLengthBeats.load (std::memory_order_relaxed);
+    auto window = clip.stagedWindowOffsetBeats.load (std::memory_order_relaxed);
+
+    // Clamps: Free-Untergrenze 50 ms (in Content-Beats des Clips),
+    // Obergrenze Content — stufenlos, KEIN Takt-Floor (LEN-Poti Free)
+    const auto minLength = looper::minFreeLengthBeats (preparedSampleRate,
+                                                       clip.samplesPerBeatRecorded);
+    const auto newLength = juce::jlimit (juce::jmin (minLength, clip.contentBeats),
+                                         clip.contentBeats, lengthBeats);
+    if (juce::exactlyEqual (newLength, currentLength))
+        return;
+
+    bool followPhase = false;
+    if (newLength > currentLength)
+    {
+        // Fenster ggf. nach vorn schieben, damit window + L in den Content passt
+        window = looper::clampWindowOffset (window, clip.contentBeats, newLength);
+    }
+    else if (halveMode == looper::HalveMode::currentHalf)
+    {
+        // Fenster folgt der Apply-Phase (verallgemeinertes ÷2 — der
+        // Audio-Thread rechnet den Offset mit SEINEM Playhead)
+        followPhase = true;
+    }
+
+    stageClipParams (clip,
+                     clip.stagedRate.load (std::memory_order_relaxed),
+                     newLength, window,
+                     clip.stagedReversed.load (std::memory_order_relaxed),
+                     followPhase, false, false);
+}
+
+void LooperBank::setClipWindowOffsetBeats (LooperClip& clip, double offsetBeats) noexcept
+{
+    const auto length = clip.stagedLengthBeats.load (std::memory_order_relaxed);
+    const auto window = looper::clampWindowOffset (offsetBeats, clip.contentBeats, length);
+
+    stageClipParams (clip,
+                     clip.stagedRate.load (std::memory_order_relaxed),
+                     length, window,
+                     clip.stagedReversed.load (std::memory_order_relaxed),
+                     false, false, false);
+}
+
+
 juce::Result LooperBank::setClipRate (int looperIndex, int trackIndex, double rate)
 {
     auto* clip = activeClipFor (looperIndex, trackIndex);
@@ -492,13 +554,14 @@ juce::Result LooperBank::setClipRate (int looperIndex, int trackIndex, double ra
     return juce::Result::ok();
 }
 
-juce::Result LooperBank::toggleClipReverse (int looperIndex, int trackIndex, bool atBoundary)
+juce::Result LooperBank::toggleClipReverse (int looperIndex, int trackIndex,
+                                            bool atBoundary, double quantBeats)
 {
     auto* clip = activeClipFor (looperIndex, trackIndex);
     if (clip == nullptr)
         return juce::Result::fail ("Kein Clip auf diesem Track");
 
-    toggleClipReverse (*clip, atBoundary);
+    toggleClipReverse (*clip, atBoundary, quantBeats);
     return juce::Result::ok();
 }
 
@@ -520,6 +583,29 @@ juce::Result LooperBank::resetClipWithSync (int looperIndex, int trackIndex)
         return juce::Result::fail ("Kein Clip auf diesem Track");
 
     resetClipWithSync (*clip);
+    return juce::Result::ok();
+}
+
+juce::Result LooperBank::setClipLengthBeats (int looperIndex, int trackIndex,
+                                             double lengthBeats,
+                                             looper::HalveMode halveMode)
+{
+    auto* clip = activeClipFor (looperIndex, trackIndex);
+    if (clip == nullptr)
+        return juce::Result::fail ("Kein Clip auf diesem Track");
+
+    setClipLengthBeats (*clip, lengthBeats, halveMode);
+    return juce::Result::ok();
+}
+
+juce::Result LooperBank::setClipWindowOffsetBeats (int looperIndex, int trackIndex,
+                                                   double offsetBeats)
+{
+    auto* clip = activeClipFor (looperIndex, trackIndex);
+    if (clip == nullptr)
+        return juce::Result::fail ("Kein Clip auf diesem Track");
+
+    setClipWindowOffsetBeats (*clip, offsetBeats);
     return juce::Result::ok();
 }
 
@@ -566,14 +652,17 @@ void LooperBank::setTrackSolo (int looperIndex, int trackIndex, bool solo) noexc
     updateEffectiveMutes();
 }
 
-void LooperBank::setTrackSends (int looperIndex, int trackIndex, std::uint32_t mask) noexcept
+void LooperBank::setTrackSendLevel (int looperIndex, int trackIndex, int sendIndex,
+                                    float level01) noexcept
 {
     if (looperIndex < 0 || looperIndex >= maxLoopers
-        || trackIndex < 0 || trackIndex >= maxTracks)
+        || trackIndex < 0 || trackIndex >= maxTracks
+        || sendIndex < 0 || sendIndex >= maxSends)
         return;
 
-    targetSendMask[static_cast<std::size_t> (looperIndex)][static_cast<std::size_t> (trackIndex)]
-        .store (mask & 0xFu, std::memory_order_relaxed);
+    targetSendLevel[static_cast<std::size_t> (looperIndex)][static_cast<std::size_t> (trackIndex)]
+                   [static_cast<std::size_t> (sendIndex)]
+        .store (juce::jlimit (0.0f, 1.0f, level01), std::memory_order_relaxed);
 }
 
 void LooperBank::setTrackSendPre (int looperIndex, int trackIndex, bool pre) noexcept
@@ -584,6 +673,28 @@ void LooperBank::setTrackSendPre (int looperIndex, int trackIndex, bool pre) noe
 
     sendTapPre[static_cast<std::size_t> (looperIndex)][static_cast<std::size_t> (trackIndex)]
         .store (pre, std::memory_order_relaxed);
+}
+
+void LooperBank::setTrackDistance (int looperIndex, int trackIndex, float distance01) noexcept
+{
+    if (looperIndex < 0 || looperIndex >= maxLoopers
+        || trackIndex < 0 || trackIndex >= maxTracks)
+        return;
+
+    targetDistance[static_cast<std::size_t> (looperIndex)][static_cast<std::size_t> (trackIndex)]
+        .store (juce::jlimit (0.0f, 1.0f, distance01), std::memory_order_relaxed);
+}
+
+void LooperBank::setDistanceGlobals (const looper::DistanceGlobals& globals,
+                                     float smoothSeconds) noexcept
+{
+    distHiDumpDb.store (globals.hiDumpDb, std::memory_order_relaxed);
+    distHiCutHz.store (globals.hiCutHz, std::memory_order_relaxed);
+    distBaseFreqHz.store (globals.baseFreqHz, std::memory_order_relaxed);
+    distWidth01.store (globals.width01, std::memory_order_relaxed);
+    distVolDumpOn.store (globals.volDumpOn, std::memory_order_relaxed);
+    distVolDumpDb.store (globals.volDumpDb, std::memory_order_relaxed);
+    distSmoothSeconds.store (juce::jmax (0.0f, smoothSeconds), std::memory_order_relaxed);
 }
 
 void LooperBank::setSoloScopeGlobal (bool global) noexcept
@@ -992,6 +1103,48 @@ void LooperBank::applyClipParams (LooperClip& clip, double blockStartBeat,
             defer = phaseEnd >= phaseStart;
         }
 
+        // Reverse-Modus „Quantized": erst im Block mit Grid-Übertritt
+        // anwenden (Block-Granularität wie applyAtWrap; die Spiegelung
+        // selbst deckt der Splice-Duck)
+        if (! defer)
+        {
+            const auto quantBeats = clip.stagedApplyQuantBeats.load (std::memory_order_relaxed);
+            if (quantBeats > 0.0)
+                defer = looper::gridCrossingOffset (blockStartBeat, beatStep,
+                                                    numSamples, quantBeats) < 0;
+        }
+
+        // NIE mitten in der Wrap-Blende umschalten (User 20.07.2026,
+        // Knacken beim LEN-Ziehen): dort haengt das ausklingende Material
+        // am Fenster-Ende bzw. am Lead-in — aendert sich Laenge oder
+        // Position, springt diese Quelle hart um (gemessen: Faktor 1000
+        // ueber der natuerlichen Signalkruemmung). Ein Block Reserve, weil
+        // der Apply fuer den GESAMTEN Block gilt.
+        // Gilt NUR für implizite Änderungen (LEN/POS/Rate). Reverse „an
+        // der Loop-Grenze" bzw. „Quantized" wählt seinen Zeitpunkt
+        // bewusst — der liegt genau dort und wird nicht verschoben.
+        const auto timedByUser = clip.applyAtWrap.load (std::memory_order_relaxed)
+            || clip.stagedApplyQuantBeats.load (std::memory_order_relaxed) > 0.0;
+
+        if (! defer && ! timedByUser && clip.activeLengthBeats > 0.0
+            && clip.samplesPerBeatRecorded > 0.0)
+        {
+            const auto windowLen = clip.activeLengthBeats * clip.samplesPerBeatRecorded;
+            const auto zoneBeats = (wrapFadeSamples (clip, windowLen)
+                                    / clip.samplesPerBeatRecorded)
+                                 + std::abs (beatStep) * numSamples;
+
+            if (zoneBeats * 2.0 < clip.activeLengthBeats)   // sonst gaebe es kein Fenster
+            {
+                const auto phase = looper::clipPhaseBeats (blockStartBeat,
+                                                           clip.activeAnchorBeat,
+                                                           clip.activeRate,
+                                                           clip.activeLengthBeats);
+                defer = phase < zoneBeats
+                     || phase > clip.activeLengthBeats - zoneBeats;
+            }
+        }
+
         if (! defer)
         {
             const auto candidate = computeCandidate (clip, blockStartBeat);
@@ -1031,6 +1184,26 @@ void LooperBank::applyClipParams (LooperClip& clip, double blockStartBeat,
 }
 
 //==============================================================================
+double LooperBank::wrapFadeSamples (const LooperClip& clip,
+                                    double windowLenSamples) noexcept
+{
+    if (windowLenSamples <= 0.0)
+        return 0.0;
+
+    // Sehr kurze Fenster brauchen einen RELATIV längeren Fade (User
+    // 20.07.2026 „Free + sehr klein knistert"): bei 50 ms Loop deckt der
+    // 5-ms-Fade nur 10 % der Periode ab — 20 Wraps/s machen die Blende
+    // dann als Rauheit hörbar. Darüber bleibt alles exakt wie bisher.
+    const auto fade = static_cast<double> (clip.crossfadeSamples);
+    const auto shortLoopSamples = shortLoopFadeFactor * fade;
+
+    auto wanted = fade;
+    if (windowLenSamples < shortLoopSamples)
+        wanted = fade * (shortLoopSamples / windowLenSamples);
+
+    return juce::jmin (wanted, windowLenSamples * 0.5);
+}
+
 float LooperBank::renderClipSample (const LooperClip& clip, int channel,
                                     double contentPosition) noexcept
 {
@@ -1048,19 +1221,88 @@ float LooperBank::renderClipSample (const LooperClip& clip, int channel,
         return data[index] + (data[next] - data[index]) * frac;
     };
 
-    const auto zoneStart = static_cast<double> (clip.numContentSamples - fade);
+    // Wrap-Zone am FENSTER-Ende (LEN/POS 07/2026): das Loop-Fenster kann
+    // seit den LEN/POS-Potis irgendwo im Content liegen — der Equal-Power-
+    // Blend zieht auf das Material VOR dem Fensterstart (Vollfenster ⇒
+    // exakt der Lead-in, bit-identisch zum alten Verhalten; Paritätstest).
+    // Reverse wrappt weiterhin durch dieselbe Zone (bekannte Näherung).
+    const auto contentLen = static_cast<double> (clip.numContentSamples);
+    const auto windowLenSamples = clip.activeLengthBeats * clip.samplesPerBeatRecorded;
+    auto windowStart = clip.activeWindowOffsetBeats * clip.samplesPerBeatRecorded;
+    auto windowEnd = windowStart + windowLenSamples;
+    if (windowEnd > contentLen - 1.0e-6)
+        windowEnd = contentLen;   // Vollfenster/Randlage exakt aufs Content-Ende
+    if (windowStart < 1.0e-6)
+        windowStart = 0.0;
 
-    if (contentPosition < zoneStart || clip.numContentSamples <= fade)
+    if (clip.numContentSamples <= fade || windowLenSamples <= 0.0)
         return readLinear (static_cast<double> (fade) + contentPosition);
 
-    // Wrap-Zone [N−F, N): equal-power vom Content-Ende auf den Lead-in
-    const auto zonePosition = contentPosition - zoneStart;          // [0, F)
-    const auto alpha = zonePosition / static_cast<double> (fade);   // 0..1
+    const auto shortLoopSamples = shortLoopFadeFactor * static_cast<double> (fade);
+    const auto wantedFade = wrapFadeSamples (clip, windowLenSamples);
+
+    // Läuft hinter dem Fenster-Ende noch Material weiter? Dann blenden wir
+    // NACH dem Wrap: das auslaufende Material klingt aus, während der
+    // Fensteranfang einsetzt. Das braucht keinen Lead-in als Vorlauf —
+    // erst dadurch ist der längere Fade bei Fenster-Start 0 überhaupt
+    // möglich (der Lead-in ist nur crossfadeSamples lang).
+    // NUR für die kurzen Fenster, die den längeren Fade brauchen — längere
+    // Loops behalten den bewährten Lead-in-Pfad (dort ist der Lead-in kein
+    // Engpass, und sein Material ist die etablierte Blend-Quelle).
+    if (const auto tailAvailable = contentLen - windowEnd;
+        windowLenSamples < shortLoopSamples && tailAvailable >= static_cast<double> (fade))
+    {
+        const auto fadeEff = juce::jmin (tailAvailable, wantedFade);
+        const auto zonePosition = contentPosition - windowStart;
+
+        if (zonePosition < 0.0 || zonePosition >= fadeEff || fadeEff <= 0.0)
+            return readLinear (static_cast<double> (fade) + contentPosition);
+
+        const auto alpha = juce::jlimit (0.0, 1.0, zonePosition / fadeEff);
+        const auto shaped = alpha * alpha * (3.0 - 2.0 * alpha);
+        const auto angle = shaped * juce::MathConstants<double>::halfPi;
+
+        const auto newSample = readLinear (static_cast<double> (fade) + contentPosition);
+        const auto outgoing = readLinear (static_cast<double> (fade) + windowEnd
+                                          + zonePosition);
+        return outgoing  * static_cast<float> (std::cos (angle))
+             + newSample * static_cast<float> (std::sin (angle));
+    }
+
+    // VOLLFENSTER (kein Material hinter dem Fenster): Blende VOR dem Wrap
+    // auf den Lead-in — unverändertes Bestandsverhalten.
+    const auto fadeEff = juce::jmin (static_cast<double> (fade), windowLenSamples * 0.5);
+    const auto zoneStart = windowEnd - fadeEff;
+
+    if (contentPosition < zoneStart || fadeEff <= 0.0)
+        return readLinear (static_cast<double> (fade) + contentPosition);
+
+    const auto zonePosition = contentPosition - zoneStart;   // [0, fadeEff)
+
+    // Die Rampe endet fadeGuardSamples VOR dem Wrap-Punkt (Klick-Fix
+    // 20.07.2026): bei Varispeed springt die Leseposition um `rate`
+    // Samples pro Ausgabe-Sample und trifft das Zonenende nie exakt —
+    // der Restanteil des alten Materials (cos(α·π/2) > 0) fiel beim Wrap
+    // abrupt weg und knackte. Mit dem Vorlauf steht α GARANTIERT auf 1,
+    // bevor gewrappt wird; die Blend-Quelle läuft dabei synchron zur
+    // Position NACH dem Wrap weiter — der Übergang bleibt stetig.
+    const auto rampLength = juce::jmax (1.0, fadeEff - fadeGuardSamples);
+    const auto alpha = juce::jmin (1.0, zonePosition / rampLength);
 
     const auto endSample  = readLinear (static_cast<double> (fade) + contentPosition);
-    const auto leadSample = readLinear (zonePosition);              // Lead-in → Loop-Start
+    // Blend-Quelle: gleitet auf den Fensterstart zu (bei z = fadeEff exakt
+    // dort) — Vollfenster: fade − fadeEff + 0 + z == zonePosition (Lead-in)
+    const auto leadSample = readLinear (static_cast<double> (fade) - fadeEff
+                                        + windowStart + zonePosition);
 
-    const auto angle = alpha * juce::MathConstants<double>::halfPi;
+    // Smoothstep AUF DEN WINKEL (Klick-Fix 20.07.2026): der Blend bleibt
+    // exakt equal-power (cos² + sin² = 1), erreicht seine Endpunkte aber
+    // mit Steigung 0. Beim linearen Winkel hing der Restanteil des alten
+    // Materials linear am Abstand zum Endpunkt — jeder Positions-Sprung
+    // (Varispeed, Blockraster) ließ ihn hörbar abreißen. Jetzt fällt der
+    // Rest quadratisch, der Wrap ist auch bei groben Schritten sauber.
+    const auto shaped = alpha * alpha * (3.0 - 2.0 * alpha);
+    const auto angle = shaped * juce::MathConstants<double>::halfPi;
     return endSample  * static_cast<float> (std::cos (angle))
          + leadSample * static_cast<float> (std::sin (angle));
 }
@@ -1157,6 +1399,19 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
                        ? static_cast<float> (1.0 / (mixSlewSeconds * preparedSampleRate))
                        : gainStep;
 
+    // Linear geramptes Add (Send-Level): dest += src · gain(start→end)
+    const auto rampAdd = [numSamples] (float* dest, const float* src,
+                                       float start, float end) noexcept
+    {
+        const auto step = (end - start) / static_cast<float> (numSamples);
+        auto gain = start;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            dest[i] += src[i] * gain;
+            gain += step;
+        }
+    };
+
     // Duck-Rampe des Blocks (Snap-Declick)
     const auto duckStartGain = duckGain;
     const auto duckStep = (snapDucking ? -1.0f : 1.0f) * gainStep;
@@ -1181,8 +1436,31 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
             auto* scratch0 = trackBus[l][t][0].data();
             auto* scratch1 = trackBus[l][t][1].data();
 
-            const auto sendMask = targetSendMask[l][t].load (std::memory_order_relaxed);
-            const auto sendPre  = sendTapPre[l][t].load (std::memory_order_relaxed);
+            const auto sendPre = sendTapPre[l][t].load (std::memory_order_relaxed);
+
+            // Send-Level-Rampe des Blocks (5-ms-Slew wie der Fader-Zug) —
+            // genau EINMAL pro Block fortgeschrieben; der Abgriff (pre/post)
+            // entscheidet nur, WO dieselbe Rampe anliegt
+            std::array<float, static_cast<std::size_t> (maxSends)> sendStart {}, sendEnd {};
+            bool anySend = false;
+            const auto yLink = yLinkSendIndex.load (std::memory_order_relaxed);
+            for (std::size_t s = 0; s < static_cast<std::size_t> (maxSends); ++s)
+            {
+                auto target = targetSendLevel[l][t][s].load (std::memory_order_relaxed);
+
+                // Y-Link: der verlinkte Send folgt der Distanz (Poti-Level
+                // = Untergrenze); currentDistance stammt aus dem Vorblock —
+                // ein Block Versatz ist unter dem 5-ms-Slew unhörbar
+                if (static_cast<int> (s) == yLink)
+                    target = juce::jmax (target, player.currentDistance);
+                const auto start = player.currentSend[s];
+                const auto maxDelta = mixStep * static_cast<float> (numSamples);
+                const auto end = start + juce::jlimit (-maxDelta, maxDelta, target - start);
+                sendStart[s] = start;
+                sendEnd[s] = end;
+                player.currentSend[s] = end;
+                anySend = anySend || start > 1.0e-6f || end > 1.0e-6f;
+            }
 
             //==============================================================
             // Voices → trackBus (pre-fader)
@@ -1290,12 +1568,12 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
             juce::FloatVectorOperations::add (preBus[l][0].data(), scratch0, numSamples);
             juce::FloatVectorOperations::add (preBus[l][1].data(), scratch1, numSamples);
 
-            if (sendMask != 0 && sendPre)
+            if (anySend && sendPre)
                 for (std::size_t s = 0; s < static_cast<std::size_t> (maxSends); ++s)
-                    if ((sendMask & (1u << s)) != 0)
+                    if (sendStart[s] > 1.0e-6f || sendEnd[s] > 1.0e-6f)
                     {
-                        juce::FloatVectorOperations::add (sendBus[s][0].data(), scratch0, numSamples);
-                        juce::FloatVectorOperations::add (sendBus[s][1].data(), scratch1, numSamples);
+                        rampAdd (sendBus[s][0].data(), scratch0, sendStart[s], sendEnd[s]);
+                        rampAdd (sendBus[s][1].data(), scratch1, sendStart[s], sendEnd[s]);
                     }
 
             //==============================================================
@@ -1327,6 +1605,95 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
                 scratch1[i] *= amp * gainRight;
             }
 
+            //==============================================================
+            // Distanz-Zug (Monolake Distance, 07/2026): High-Shelf +
+            // Tiefpass + M/S-Width — NACH dem Fader; die VOL-KURVE folgt
+            // erst NACH dem Post-Send-Abgriff (Y-Link-Kontrakt: der
+            // verlinkte Send bleibt bei voller Distanz hörbar — gefiltert,
+            // aber nicht weggeduckt). Meter/Post-Bus/Master hören das
+            // komplette distanzierte Signal; Pre-Sends bleiben unberührt.
+            // Koeffizienten EINMAL pro Block aus der geslewten Distanz
+            // (line~-Muster des Originals); d≈0 = exakter Bypass.
+            auto volStart = 1.0f, volEnd = 1.0f;
+            const auto dTarget = targetDistance[l][t].load (std::memory_order_relaxed);
+            if (dTarget < 1.0e-4f && player.currentDistance < 1.0e-4f)
+            {
+                player.currentDistance = 0.0f;
+                player.distLp.fill ({});
+                player.distShelf.fill ({});
+            }
+            else
+            {
+                const auto smoothSec = distSmoothSeconds.load (std::memory_order_relaxed);
+                const auto maxD = smoothSec > 1.0e-4f
+                    ? static_cast<float> (numSamples / (smoothSec * preparedSampleRate))
+                    : 1.0f;   // Smooth 0 = roher Sprung (bewusst)
+                const auto dStart = player.currentDistance;
+                const auto dEnd = dStart + juce::jlimit (-maxD, maxD, dTarget - dStart);
+                player.currentDistance = dEnd;
+
+                const auto lpCo = looper::makeLowpass (
+                    looper::lowpassCutoffHz (dEnd,
+                                             distHiCutHz.load (std::memory_order_relaxed),
+                                             preparedSampleRate),
+                    preparedSampleRate);
+                const auto shCo = looper::makeHighShelf (
+                    distBaseFreqHz.load (std::memory_order_relaxed),
+                    looper::shelfGainDb (dEnd, distHiDumpDb.load (std::memory_order_relaxed)),
+                    preparedSampleRate);
+
+                const auto width = distWidth01.load (std::memory_order_relaxed);
+                const auto volOn = distVolDumpOn.load (std::memory_order_relaxed);
+                const auto volDb = distVolDumpDb.load (std::memory_order_relaxed);
+                auto w = static_cast<float> (looper::widthFactor (dStart, width));
+                const auto wStep = (static_cast<float> (looper::widthFactor (dEnd, width)) - w)
+                                 / static_cast<float> (numSamples);
+                volStart = static_cast<float> (looper::volDumpGain (dStart, volOn, volDb));
+                volEnd   = static_cast<float> (looper::volDumpGain (dEnd, volOn, volDb));
+
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    const auto f0 = looper::processBiquad (player.distShelf[0], shCo,
+                        looper::processBiquad (player.distLp[0], lpCo, scratch0[i]));
+                    const auto f1 = looper::processBiquad (player.distShelf[1], shCo,
+                        looper::processBiquad (player.distLp[1], lpCo, scratch1[i]));
+                    const auto mid  = 0.5f * (f0 + f1);
+                    const auto side = 0.5f * (f0 - f1) * w;
+                    scratch0[i] = mid + side;
+                    scratch1[i] = mid - side;
+                    w += wStep;
+                }
+
+                for (auto& state : player.distLp)
+                    looper::snapStateToZero (state);
+                for (auto& state : player.distShelf)
+                    looper::snapStateToZero (state);
+            }
+
+            // Post-Fader-Sends: gefiltert + width, aber VOR der Vol-Kurve
+            // (Y-Link: „je weiter weg, desto mehr Send" — der Send trägt
+            // das Signal auch, wenn der Dry-Pfad in die Stille fährt)
+            if (anySend && ! sendPre)
+                for (std::size_t s = 0; s < static_cast<std::size_t> (maxSends); ++s)
+                    if (sendStart[s] > 1.0e-6f || sendEnd[s] > 1.0e-6f)
+                    {
+                        rampAdd (sendBus[s][0].data(), scratch0, sendStart[s], sendEnd[s]);
+                        rampAdd (sendBus[s][1].data(), scratch1, sendStart[s], sendEnd[s]);
+                    }
+
+            // Vol-Kurve des Distanz-Zugs (Dry-Pfad → Meter/Post-Bus/Master)
+            if (volStart < 1.0f || volEnd < 1.0f)
+            {
+                auto v = volStart;
+                const auto vStep = (volEnd - volStart) / static_cast<float> (numSamples);
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    scratch0[i] *= v;
+                    scratch1[i] *= v;
+                    v += vStep;
+                }
+            }
+
             {
                 float* channels[] = { scratch0, scratch1 };
                 const juce::AudioBuffer<float> view (channels, 2, numSamples);
@@ -1335,15 +1702,6 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
 
             juce::FloatVectorOperations::add (postBus[l][0].data(), scratch0, numSamples);
             juce::FloatVectorOperations::add (postBus[l][1].data(), scratch1, numSamples);
-
-            // Post-Fader-Sends des Tracks (nach Gain/Pan/Mute)
-            if (sendMask != 0 && ! sendPre)
-                for (std::size_t s = 0; s < static_cast<std::size_t> (maxSends); ++s)
-                    if ((sendMask & (1u << s)) != 0)
-                    {
-                        juce::FloatVectorOperations::add (sendBus[s][0].data(), scratch0, numSamples);
-                        juce::FloatVectorOperations::add (sendBus[s][1].data(), scratch1, numSamples);
-                    }
         }
 
     // Master-Mix = Summe der Post-Fader-Busse aller Looper mit

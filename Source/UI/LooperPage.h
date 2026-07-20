@@ -53,11 +53,13 @@ private:
 
 //==============================================================================
 /**
-    Looper-Page — Vollausbau M6 (Design-Mock + Übergabe-Dokument
-    05.07.2026): bis zu 4 Looper-Fenster NEBENEINANDER (User-Entscheidung
-    „wie im Mock"), Kopfzeile mit − / + (Looper öffnen/schließen),
-    globalem Output-Paar, Spectrum-Umschalter (alle Strips), ⚙
-    (Einstellungs-Menü) und Stop (alle Tracks); Statuszeile unten.
+    Looper-Page — Vollausbau M6, Kopf-Umbau 07/2026 (Mixer-Handoff):
+    bis zu 4 Looper-Fenster NEBENEINANDER; die frühere Kopfzeile ist
+    KOMPLETT entfallen — Looper-/Track-Anzahl, Output-Paar und MST leben
+    im Seitenpanel (LooperDockTabs), der Spectrum-Umschalter pro Looper
+    im Panel-Kopf (FFT). Unten: Statuszeile links, Papierkorb-Kachel +
+    Stop All rechts (Stop All per Setting ausblendbar — „mappen, dann
+    verstecken").
 
     Wie die TransportBar besitzt die Page NUR UI-Zustand: Aktionen laufen
     über std::function-Hooks bzw. die Hooks der LooperPanels (der
@@ -83,19 +85,20 @@ public:
     std::function<void()> onPanelsChanged;
 
     //==========================================================================
-    // Kopfzeile
+    // Hooks (Struktur-Hooks feuern seit dem Kopf-Umbau aus dem
+    // Seitenpanel-LAYOUT über den Editor — die Page hält sie nur)
 
     std::function<void()> onAddLooper;
     std::function<void()> onRemoveLooper;
     std::function<void()> onRestoreTrash;      // ↺ Papierkorb-Kachel (Big Out)
-    std::function<void()> onOpenSettings;      // ⚙ → LooperSettingsMenu (Editor)
-    std::function<void()> onStop;              // Stop = alle Tracks
-    std::function<void (bool spectrum)> onViewToggled;
-    std::function<void (int pairIndex)> onOutputPairSelected;
+    std::function<void()> onStop;              // Stop All = alle Tracks
 
-    void setOutputPairs (const juce::StringArray& pairLabels, int selectedPair);
-    void setSpectrumView (bool spectrum);
+    /** Spektrum-Ansicht des Loopers (Panel-Kopf-FFT-Kachel + Strip). */
+    void setSpectrumView (int looperIndex, bool spectrum);
     void setStatus (const juce::String& statusText);
+
+    /** Sichtbarkeit der Stop-All-Kachel (LooperSettings::isShowStopAll). */
+    void setShowStopAll (bool show);
 
     /** [Editor-Timer] Gemeinsame Puls-Phase (Target-Zellen). */
     void setPulsePhase (float phase01);
@@ -107,27 +110,17 @@ public:
     void flashTrashEmptied() { trashTile.flashEmptied(); }
 
     //==========================================================================
-    [[nodiscard]] juce::ComboBox& getOutputCombo() noexcept { return outputCombo; }
-    [[nodiscard]] push::TextTile& getSpectrumTile() noexcept { return spectrumTile; }
-    [[nodiscard]] push::TextTile& getStopTile() noexcept { return stopTile; }
-    [[nodiscard]] push::TextTile& getSettingsTile() noexcept { return settingsTile; }
-    [[nodiscard]] push::TextTile& getAddLooperTile() noexcept { return addTile; }
-    [[nodiscard]] push::TextTile& getRemoveLooperTile() noexcept { return removeTile; }
+    [[nodiscard]] push::TextTile& getStopAllTile() noexcept { return stopAllTile; }
     [[nodiscard]] LooperTrashTile& getTrashTile() noexcept { return trashTile; }
 
     void paint (juce::Graphics& g) override;
     void resized() override;
 
 private:
-    push::TextTile removeTile { juce::String::fromUTF8 ("−") };
-    push::TextTile addTile { "+" };
-    juce::Label outputCaption;
-    juce::ComboBox outputCombo;
-    push::TextTile spectrumTile { "Spectrum", push::colours::ledOrange };
-    push::TextTile settingsTile { juce::String::fromUTF8 ("⚙") };
     LooperTrashTile trashTile;
-    push::TextTile stopTile { "Stop", push::colours::ledRed };
+    push::TextTile stopAllTile { "Stop All", push::colours::ledRed };
     juce::Label statusLabel;
+    bool showStopAll = true;
 
     std::vector<std::unique_ptr<LooperPanel>> panels;
 

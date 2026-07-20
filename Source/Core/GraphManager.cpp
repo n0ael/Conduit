@@ -618,6 +618,17 @@ void GraphManager::setLooperStructure (const LooperPatchOutModule::Structure& st
 {
     JUCE_ASSERT_MESSAGE_THREAD
 
+    // Früh raus bei unveränderter Struktur (Perf 20.07.2026): der Aufrufer
+    // applyLooperSettings läuft bei JEDER Settings-Änderung — also auch bei
+    // jeder Mausbewegung auf Fader/XY/Send. syncLooperPatchOutConfigs
+    // parste sonst pro Event die <Outputs>-Liste jedes Patch-OUT-Nodes.
+    // Sicher, weil der Cache die Wahrheit ist: gleiche Struktur ⇒ der Sync
+    // lief mit exakt diesen Specs bereits, und frisch angelegte Nodes
+    // bekommen ihre Specs direkt in addModuleNode. Preset-/State-Loads
+    // rufen syncLooperPatchOutConfigs bewusst DIREKT (Cache-fremde Trees).
+    if (looperStructure == structure)
+        return;
+
     looperStructure = structure;
     syncLooperPatchOutConfigs();
 }

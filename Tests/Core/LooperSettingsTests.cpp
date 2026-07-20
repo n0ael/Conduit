@@ -167,6 +167,183 @@ TEST_CASE ("LooperSettings: Clamps und ungültige Indizes", "[looper]")
     REQUIRE (settings.getTrackSends (0, 9) == 0);
 }
 
+TEST_CASE ("LooperSettings: Send-Level — Roundtrip + Legacy-Bitmasken-Migration", "[looper]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettings temp;
+
+    SECTION ("Level-Roundtrip; abgeleitete Maske folgt Level > 0")
+    {
+        {
+            LooperSettings settings { temp.options() };
+            settings.setTrackSendLevel (1, 2, 0, 0.25f);
+            settings.setTrackSendLevel (1, 2, 3, 1.0f);
+            settings.setTrackSendLevel (0, 0, 1, 2.0f);   // clampt auf 1.0
+            settings.flush();
+        }
+
+        LooperSettings reloaded { temp.options() };
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 0) == Approx (0.25f));
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 3) == Approx (1.0f));
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 1) == Approx (0.0f));
+        REQUIRE (reloaded.getTrackSendLevel (0, 0, 1) == Approx (1.0f));
+        REQUIRE (reloaded.getTrackSends (1, 2) == 0b1001);
+
+        // Masken-Setter plättet feine Level nicht (Bit gesetzt + Level > 0
+        // bleibt unangetastet); gelöschtes Bit nullt den Level
+        reloaded.setTrackSends (1, 2, 0b1001);
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 0) == Approx (0.25f));
+        reloaded.setTrackSends (1, 2, 0b0001);
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 3) == Approx (0.0f));
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 0) == Approx (0.25f));
+
+        // Ungültiger Send-Index = No-op
+        reloaded.setTrackSendLevel (0, 0, 7, 1.0f);
+        REQUIRE (reloaded.getTrackSendLevel (0, 0, 7) == Approx (0.0f));
+    }
+
+    SECTION ("Alt-Datei mit sends-Bitmaske lädt als Level 1.0 pro Bit")
+    {
+        {
+            juce::PropertiesFile legacy { temp.options() };
+            juce::XmlElement root ("LooperState");
+            auto* looper = root.createNewChildElement ("Looper");
+            looper->setAttribute ("source", "hw:0");
+            auto* track = looper->createNewChildElement ("Track");
+            track->setAttribute ("gain", 1.0);
+            track->setAttribute ("sends", 0b0101);
+            track->setAttribute ("sendPre", true);
+            legacy.setValue ("looperState", &root);
+            legacy.save();
+        }
+
+        LooperSettings settings { temp.options() };
+        REQUIRE (settings.hasStoredState());
+        REQUIRE (settings.getTrackSendLevel (0, 0, 0) == Approx (1.0f));
+        REQUIRE (settings.getTrackSendLevel (0, 0, 1) == Approx (0.0f));
+        REQUIRE (settings.getTrackSendLevel (0, 0, 2) == Approx (1.0f));
+        REQUIRE (settings.getTrackSends (0, 0) == 0b0101);
+        REQUIRE (settings.isTrackSendPre (0, 0));
+    }
+}
+
+TEST_CASE ("LooperSettings: Panel-Optionen 07/2026 — Defaults + Roundtrip", "[looper]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettings temp;
+
+    {
+        LooperSettings settings { temp.options() };
+
+        REQUIRE (settings.getVariDisplay() == LooperSettings::VariDisplay::semitones);
+        REQUIRE (settings.getSendCount() == 4);
+        REQUIRE (settings.isShowStopAll());
+        REQUIRE_FALSE (settings.isHideMuteSolo());
+        REQUIRE_FALSE (settings.isHideMixerXy());
+        REQUIRE (settings.getPanelCollapsedMask() == 0);
+
+        settings.setTapMode (LooperSettings::TapMode::legato);
+        settings.setReverseMode (LooperSettings::ReverseMode::quantized);
+        settings.setVariScope (LooperSettings::VariScope::globalScope);
+        settings.setVariDisplay (LooperSettings::VariDisplay::scaleDegrees);
+        settings.setSendCount (2);
+        settings.setShowStopAll (false);
+        settings.setHideMuteSolo (true);
+        settings.setHideMixerXy (true);
+        settings.setPanelCollapsedMask (0b101);
+        settings.setSendCount (99);   // clampt auf 4
+        settings.flush();
+    }
+
+    LooperSettings reloaded { temp.options() };
+    REQUIRE (reloaded.getTapMode() == LooperSettings::TapMode::legato);
+    REQUIRE (reloaded.getReverseMode() == LooperSettings::ReverseMode::quantized);
+    REQUIRE (reloaded.getVariScope() == LooperSettings::VariScope::globalScope);
+    REQUIRE (reloaded.getVariDisplay() == LooperSettings::VariDisplay::scaleDegrees);
+    REQUIRE (reloaded.getSendCount() == 4);
+    REQUIRE_FALSE (reloaded.isShowStopAll());
+    REQUIRE (reloaded.isHideMuteSolo());
+    REQUIRE (reloaded.isHideMixerXy());
+    REQUIRE (reloaded.getPanelCollapsedMask() == 0b101);
+}
+
+TEST_CASE ("LooperSettings: Distanz — Defaults, Clamps, Roundtrip, Y-Link", "[looper]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettings temp;
+
+    {
+        LooperSettings settings { temp.options() };
+
+        // Defaults: Vol Dump AN (User 20.07.2026), Y-Link aus
+        const auto defaults = settings.getDistance();
+        REQUIRE (defaults.volDumpOn);
+        REQUIRE (defaults.hiDumpDb == Approx (9.0f));
+        REQUIRE (defaults.ySens == Approx (1.0f));
+        REQUIRE (settings.getYLinkSend() == -1);
+        REQUIRE (settings.getTrackDistance (0, 0) == Approx (0.0f));
+
+        auto state = defaults;
+        state.hiDumpDb = 99.0f;        // clampt auf 18
+        state.hiCutHz = 6100.0f;
+        state.baseFreqHz = 663.0f;
+        state.width01 = 0.4f;
+        state.volDumpOn = false;
+        state.smoothMs = 125.0f;
+        state.ySens = 0.7f;
+        settings.setDistance (state);
+        settings.setYLinkSend (2);
+        settings.setTrackDistance (1, 3, 0.65f);
+        settings.setTrackDistance (0, 0, 7.0f);   // clampt auf 1
+        settings.flush();
+    }
+
+    LooperSettings reloaded { temp.options() };
+    const auto dist = reloaded.getDistance();
+    REQUIRE (dist.hiDumpDb == Approx (18.0f));
+    REQUIRE (dist.hiCutHz == Approx (6100.0f));
+    REQUIRE (dist.baseFreqHz == Approx (663.0f));
+    REQUIRE (dist.width01 == Approx (0.4f));
+    REQUIRE_FALSE (dist.volDumpOn);
+    REQUIRE (dist.smoothMs == Approx (125.0f));
+    REQUIRE (dist.ySens == Approx (0.7f));
+    REQUIRE (reloaded.getYLinkSend() == 2);
+    REQUIRE (reloaded.getTrackDistance (1, 3) == Approx (0.65f));
+    REQUIRE (reloaded.getTrackDistance (0, 0) == Approx (1.0f));
+    REQUIRE (reloaded.getTrackDistance (3, 3) == Approx (0.0f));
+}
+
+TEST_CASE ("LooperSettings: Send-Farben — Werks-Palette, Auswahl, Roundtrip", "[looper]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettings temp;
+
+    {
+        LooperSettings settings { temp.options() };
+
+        // Ab Werk die Handoff-Palette (● orange · ■ blau · ▲ grün · ⬡ türkis)
+        REQUIRE (settings.getSendColour (0) == juce::Colour (0xffff8d28));
+        REQUIRE (settings.getSendColour (1) == juce::Colour (0xff6155f5));
+        REQUIRE (settings.getSendColour (2) == juce::Colour (0xff34c759));
+        REQUIRE (settings.getSendColour (3) == juce::Colour (0xff00c8b3));
+        REQUIRE (settings.getSendColour (0)
+                 == LooperSettings::defaultSendColour (0));
+
+        // Ungültiger Index fällt sauber zurück (kein UB)
+        REQUIRE (settings.getSendColour (9) == LooperSettings::defaultSendColour (0));
+        settings.setSendColour (9, juce::Colours::red);   // No-op
+
+        // Eigene Farbe wird opak gespeichert (halbtransparent → voll)
+        settings.setSendColour (1, juce::Colour (0x80123456));
+        REQUIRE (settings.getSendColour (1) == juce::Colour (0xff123456));
+        settings.flush();
+    }
+
+    LooperSettings reloaded { temp.options() };
+    REQUIRE (reloaded.getSendColour (1) == juce::Colour (0xff123456));
+    REQUIRE (reloaded.getSendColour (0) == juce::Colour (0xffff8d28));   // unberührt
+}
+
 TEST_CASE ("LooperSettings: Einmal-Migration der Legacy-Schlüssel", "[looper]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;

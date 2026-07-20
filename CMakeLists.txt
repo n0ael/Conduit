@@ -173,12 +173,13 @@ set(CONDUIT_CPP_SOURCES
     Source/UI/LooperDeleteConfirmDialog.cpp
     Source/UI/LooperPatchInPanel.cpp
     Source/UI/LooperPanel.cpp
-    Source/UI/LooperSendDialog.cpp
-    Source/UI/LooperSettingsMenu.cpp
+    Source/UI/LooperDockTabs.cpp
+    Source/UI/LooperMapOverlay.cpp
     Source/UI/LooperTrackStrip.cpp
     Source/UI/LooperTrashDialog.cpp
     Source/Core/Looper/LooperBank.cpp
     Source/Core/Looper/LooperClipExporter.cpp
+    Source/Core/Looper/LooperMidiMap.cpp
     Source/Core/Looper/LooperSessionModel.cpp
     Source/Core/Looper/LooperTrashCan.cpp
     Source/Core/Looper/LooperWaveformTap.cpp
@@ -667,6 +668,7 @@ if(CONDUIT_BUILD_TESTS)
         Tests/Core/LaunchQuantizationTests.cpp
         Tests/Core/LooperMathTests.cpp
         Tests/Core/LooperClipMathTests.cpp
+        Tests/Core/LooperDistanceTests.cpp
         Tests/Core/BarSampleAnchorsTests.cpp
         Tests/Core/LooperSourceTests.cpp
         Tests/Core/LooperWaveformTapTests.cpp
@@ -814,12 +816,13 @@ if(CONDUIT_BUILD_TESTS)
         Source/UI/LooperDeleteConfirmDialog.cpp
         Source/UI/LooperPatchInPanel.cpp
         Source/UI/LooperPanel.cpp
-        Source/UI/LooperSendDialog.cpp
-        Source/UI/LooperSettingsMenu.cpp
+        Source/UI/LooperDockTabs.cpp
+        Source/UI/LooperMapOverlay.cpp
         Source/UI/LooperTrackStrip.cpp
         Source/UI/LooperTrashDialog.cpp
         Source/Core/Looper/LooperBank.cpp
         Source/Core/Looper/LooperClipExporter.cpp
+        Source/Core/Looper/LooperMidiMap.cpp
         Source/Core/Looper/LooperSessionModel.cpp
         Source/Core/Looper/LooperTrashCan.cpp
         Source/Core/Looper/LooperWaveformTap.cpp

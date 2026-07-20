@@ -3,8 +3,9 @@
 
 #include "Core/LooperSettings.h"
 #include "UI/LooperPage.h"
-#include "UI/LooperSendDialog.h"
-#include "UI/LooperSettingsMenu.h"
+#include "UI/LooperDockTabs.h"
+#include "UI/LooperMapOverlay.h"
+#include "UI/TransportBar.h"
 
 using Catch::Approx;
 
@@ -62,21 +63,21 @@ TEST_CASE ("LooperPanel: Quellen-Auswahl und Track-Struktur", "[looper][ui]")
     panel.setSources (sources, "out:1");
     REQUIRE (panel.getSourceCombo().getSelectedId() == 0);
 
-    // MST-Kachel: Zustand + Hook (Looper-I/O)
-    bool sendMaster = true;
-    panel.onSendMasterToggled = [&] (bool enabled) { sendMaster = enabled; };
-    panel.setSendMaster (true);
-    REQUIRE (panel.getSendMasterTile().isActive());
-    panel.getSendMasterTile().onClick();
-    REQUIRE_FALSE (sendMaster);
+    // FFT/WAVE-Kachel pro Looper (ersetzt MST — der lebt global im
+    // MIXER-Tab): Zustand + Hook
+    bool spectrum = false;
+    panel.onViewToggled = [&] (bool wantsSpectrum) { spectrum = wantsSpectrum; };
+    panel.setSpectrumView (true);
+    REQUIRE (panel.getViewTile().isActive());
+    panel.getViewTile().onClick();
+    REQUIRE_FALSE (spectrum);   // aktiv → Toggle meldet false
 
-    // Tracks 1..4, „+"-Kachel verschwindet bei 4
+    // Tracks 1..4 (die frühere „+"-Kachel lebt im Seitenpanel-LAYOUT)
     REQUIRE (panel.getTrackCount() == 1);
     panel.setTrackCount (4);
     REQUIRE (panel.getTrackCount() == 4);
-    REQUIRE_FALSE (panel.getAddTrackTile().isVisible());
     panel.setTrackCount (2);
-    REQUIRE (panel.getAddTrackTile().isVisible());
+    REQUIRE (panel.getTrackCount() == 2);
 }
 
 TEST_CASE ("LooperPanel: Quellen-Menü mit Link-Gruppen — Separatoren, Farben, stabile IDs", "[looper][ui]")
@@ -293,61 +294,81 @@ TEST_CASE ("LooperTrackStrip: Hooks liefern Track-lokale Indizes und Werte", "[l
     }
 }
 
-TEST_CASE ("LooperSendDialog: S1–S4-Maske und PRE/POST-Abgriff", "[looper][ui]")
-{
-    juce::ScopedJuceInitialiser_GUI juceRuntime;
-
-    conduit::LooperSendDialog dialog { "Looper 1 · Track 2", 0b0001, false };
-    dialog.setBounds (0, 0, 228, 128);
-
-    int lastSend = -1;
-    bool lastEnabled = false, lastPre = false;
-    int sendEvents = 0, preEvents = 0;
-    dialog.onSendToggled = [&] (int s, bool enabled)
-    { lastSend = s; lastEnabled = enabled; ++sendEvents; };
-    dialog.onPreToggled = [&] (bool pre) { lastPre = pre; ++preEvents; };
-
-    REQUIRE (dialog.getSendMask() == 0b0001);
-    REQUIRE_FALSE (dialog.isPre());
-
-    // S3 dazu, S1 wieder raus — Maske folgt, Hook liefert Einzel-Events
-    dialog.sendTile (2).onClick();
-    REQUIRE (dialog.getSendMask() == 0b0101);
-    REQUIRE (lastSend == 2);
-    REQUIRE (lastEnabled);
-
-    dialog.sendTile (0).onClick();
-    REQUIRE (dialog.getSendMask() == 0b0100);
-    REQUIRE (lastSend == 0);
-    REQUIRE_FALSE (lastEnabled);
-    REQUIRE (sendEvents == 2);
-
-    // PRE-Toggle
-    dialog.preTile.onClick();
-    REQUIRE (dialog.isPre());
-    REQUIRE (lastPre);
-    dialog.preTile.onClick();
-    REQUIRE_FALSE (dialog.isPre());
-    REQUIRE (preEvents == 2);
-}
-
-TEST_CASE ("LooperTrackStrip: SND-Kachel — Hook und Zustands-Spiegel", "[looper][ui]")
+TEST_CASE ("LooperTrackStrip: Mixer — XY-Panner, Send-Kacheln, Display-Flags", "[looper][ui]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;
 
     conduit::LooperTrackStrip strip { 1 };
-    strip.setBounds (0, 0, 160, 520);
+    strip.setBounds (0, 0, 160, 620);
 
-    int taps = 0;
-    strip.onSendTileTapped = [&] { ++taps; };
-    strip.getSendTile().onClick();
-    REQUIRE (taps == 1);
+    SECTION ("XY-Panner: Setter spiegeln, Doppelklick reset meldet Hooks")
+    {
+        strip.setPan (0.5f);
+        strip.setDistance (0.75f);
+        REQUIRE (strip.getXyPad().getPan() == Catch::Approx (0.5f));
+        REQUIRE (strip.getXyPad().getDistance() == Catch::Approx (0.75f));
 
-    strip.setSendState (0b0011, false);
-    REQUIRE (strip.getSendTile().isActive());
+        float lastPan = -9.0f, lastDistance = -9.0f;
+        strip.onPanChanged = [&] (float pan) { lastPan = pan; };
+        strip.onDistanceChanged = [&] (float distance) { lastDistance = distance; };
 
-    strip.setSendState (0, false);
-    REQUIRE_FALSE (strip.getSendTile().isActive());
+        // Doppelklick = Reset (Center, Distanz 0) — beide Hooks feuern
+        const auto centre = strip.getXyPad().getLocalBounds().getCentre().toFloat();
+        juce::MouseEvent dummy { juce::Desktop::getInstance().getMainMouseSource(),
+                                 centre, {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                 &strip.getXyPad(), &strip.getXyPad(),
+                                 juce::Time::getCurrentTime(), centre,
+                                 juce::Time::getCurrentTime(), 2, false };
+        strip.getXyPad().mouseDoubleClick (dummy);
+        REQUIRE (lastPan == Catch::Approx (0.0f));
+        REQUIRE (lastDistance == Catch::Approx (0.0f));
+    }
+
+    SECTION ("Send-Kacheln: Level-Anzeige, Anzahl, Y-Link, Doppelklick = 0")
+    {
+        strip.setSendLevels ({ 0.4f, 0.0f, 1.0f, 0.2f });
+        REQUIRE (strip.getSendTile (0).getLevel() == Catch::Approx (0.4f));
+        REQUIRE (strip.getSendTile (2).getLevel() == Catch::Approx (1.0f));
+
+        strip.setSendCount (2);
+        REQUIRE (strip.getSendTile (0).isVisible());
+        REQUIRE (strip.getSendTile (1).isVisible());
+        REQUIRE_FALSE (strip.getSendTile (2).isVisible());
+        REQUIRE_FALSE (strip.getSendTile (3).isVisible());
+
+        int lastSend = -1;
+        float lastLevel = -1.0f;
+        strip.onSendLevelChanged = [&] (int s, float level)
+        { lastSend = s; lastLevel = level; };
+
+        auto& tile = strip.getSendTile (0);
+        const auto centre = tile.getLocalBounds().getCentre().toFloat();
+        juce::MouseEvent dummy { juce::Desktop::getInstance().getMainMouseSource(),
+                                 centre, {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                 &tile, &tile, juce::Time::getCurrentTime(), centre,
+                                 juce::Time::getCurrentTime(), 2, false };
+        tile.mouseDoubleClick (dummy);
+        REQUIRE (lastSend == 0);
+        REQUIRE (lastLevel == Catch::Approx (0.0f));
+        REQUIRE (tile.getLevel() == Catch::Approx (0.0f));
+    }
+
+    SECTION ("Display-Flags: Mute+Solo und XY ausblendbar")
+    {
+        REQUIRE (strip.getMuteTile().isVisible());
+        REQUIRE (strip.getXyPad().isVisible());
+
+        strip.setShowMuteSolo (false);
+        strip.setShowXy (false);
+        REQUIRE_FALSE (strip.getMuteTile().isVisible());
+        REQUIRE_FALSE (strip.getSoloTile().isVisible());
+        REQUIRE_FALSE (strip.getXyPad().isVisible());
+
+        strip.setShowMuteSolo (true);
+        strip.setShowXy (true);
+        REQUIRE (strip.getMuteTile().isVisible());
+        REQUIRE (strip.getXyPad().isVisible());
+    }
 }
 
 TEST_CASE ("LooperClipControlsRow: Dispatch nur mit Aktiv-Clip, VARI-Mapping", "[looper][ui]")
@@ -357,46 +378,79 @@ TEST_CASE ("LooperClipControlsRow: Dispatch nur mit Aktiv-Clip, VARI-Mapping", "
     conduit::LooperClipControlsRow row;
     row.setBounds (0, 0, 640, 58);
 
-    int doubled = 0, halved = 0, reversed = 0, synced = 0, cycles = 0;
+    int reversed = 0, cycles = 0;
     double lastRate = 1.0;
     bool lastRaster = false;
+    double lastLenNorm = -1.0, lastPosNorm = -1.0;
+    bool lastSyncFlag = false, lastSyncToggle = true;
+    int lenEvents = 0, posEvents = 0, syncToggles = 0;
 
-    row.onDoubleLength = [&] { ++doubled; };
-    row.onHalveLength = [&] { ++halved; };
     row.onReverseToggled = [&] { ++reversed; };
-    row.onResetWithSync = [&] { ++synced; };
     row.onTargetCycle = [&] { ++cycles; };
     row.onRateChanged = [&] (double rate) { lastRate = rate; };
     row.onRasterToggled = [&] (bool quantized) { lastRaster = quantized; };
+    row.onSyncFreeToggled = [&] (bool sync) { lastSyncToggle = sync; ++syncToggles; };
+    row.onLoopLenChanged = [&] (double norm, bool sync)
+    { lastLenNorm = norm; lastSyncFlag = sync; ++lenEvents; };
+    row.onLoopPosChanged = [&] (double norm, bool sync)
+    { lastPosNorm = norm; lastSyncFlag = sync; ++posEvents; };
 
     SECTION ("Ohne Aktiv-Clip sind die Clip-Controls wirkungslos (Übergabe §3)")
     {
         row.setClipControlsEnabled (false);
-        row.getDoubleTile().onClick();
-        row.getHalveTile().onClick();
         row.getReverseTile().onClick();
-        row.getSyncTile().onClick();
-        
-        REQUIRE (doubled + halved + reversed + synced == 0);
+        row.getLenKnob().setValue (0.5, juce::sendNotificationSync);
+        row.getPosKnob().setValue (0.5, juce::sendNotificationSync);
 
-        // Raster-Button bleibt bedienbar (Track-Eigenschaft, kein Clip nötig)
+        REQUIRE (reversed + lenEvents + posEvents == 0);
+
+        // Tape/Quant bleibt bedienbar (Track-Eigenschaft, kein Clip nötig)
         row.getRasterTile().onClick();
-        
+
         REQUIRE (lastRaster);
     }
 
-    SECTION ("Mit Aktiv-Clip feuern die Hooks")
+    SECTION ("Mit Aktiv-Clip feuern die Hooks; LEN/POS liefern Norm + Modus")
     {
         row.setClipControlsEnabled (true);
-        row.getDoubleTile().onClick();
-        row.getHalveTile().onClick();
         row.getReverseTile().onClick();
-        row.getSyncTile().onClick();
-        
-        REQUIRE (doubled == 1);
-        REQUIRE (halved == 1);
         REQUIRE (reversed == 1);
-        REQUIRE (synced == 1);
+
+        // Sync-Modus ist der Default; der Toggle meldet den Wechsel
+        REQUIRE (row.isSyncMode());
+        row.getSyncFreeTile().onClick();
+        REQUIRE (syncToggles == 1);
+        REQUIRE_FALSE (lastSyncToggle);
+        row.setSyncFree (false);   // Editor spiegelt zurück
+        REQUIRE_FALSE (row.isSyncMode());
+
+        row.getLenKnob().setValue (0.25, juce::sendNotificationSync);
+        REQUIRE (lenEvents == 1);
+        REQUIRE (lastLenNorm == Approx (0.25));
+        REQUIRE_FALSE (lastSyncFlag);   // Free-Modus aktiv
+
+        row.getPosKnob().setValue (0.6, juce::sendNotificationSync);
+        REQUIRE (posEvents == 1);
+        REQUIRE (lastPosNorm == Approx (0.6));
+
+        // Anzeige-Setter fassen die Knobs ohne Callback an
+        row.setLoopLenNorm (1.0, "4 Bars");
+        row.setLoopPosNorm (0.0, juce::String::fromUTF8 ("—"));
+        REQUIRE (lenEvents == 1);
+        REQUIRE (posEvents == 1);
+    }
+
+    SECTION ("LEN/POS-Mapping-Helfer: Sync-Raster + Free-Log")
+    {
+        using namespace conduit::looperui;
+        REQUIRE (syncFractionFromNorm (1.0) == Approx (1.0));
+        REQUIRE (syncFractionFromNorm (0.0) == Approx (0.125));
+        REQUIRE (syncFractionFromNorm (2.0 / 3.0) == Approx (0.5));
+        REQUIRE (syncNormFromFraction (0.25) == Approx (1.0 / 3.0));
+        REQUIRE (freeLenSecondsFromNorm (0.0) == Approx (0.05));
+        REQUIRE (freeLenSecondsFromNorm (1.0) == Approx (60.0));
+        REQUIRE (freeLenNormFromSeconds (freeLenSecondsFromNorm (0.4))
+                 == Approx (0.4));
     }
 
     SECTION ("VARI-Knob: Oktav-Mapping, Detent bei 1×, Rastung via snapFunction")
@@ -430,108 +484,299 @@ TEST_CASE ("LooperClipControlsRow: Dispatch nur mit Aktiv-Clip, VARI-Mapping", "
     }
 }
 
-TEST_CASE ("LooperSettingsMenu: Controls schreiben in die LooperSettings", "[looper][ui]")
+TEST_CASE ("LooperDockTabs: LOOPER-Tab schreibt in die LooperSettings", "[looper][ui]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;
 
     const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                            .getChildFile ("ConduitLooperMenuTests")
+                            .getChildFile ("ConduitLooperDockTests")
                             .getChildFile (juce::Uuid().toString());
     folder.createDirectory();
 
     juce::PropertiesFile::Options options;
-    options.applicationName = "LooperMenuTests";
+    options.applicationName = "LooperDockTests";
     options.filenameSuffix  = ".settings";
     options.folderName      = folder.getFullPathName();
 
     {
         conduit::LooperSettings settings { options };
-        conduit::LooperSettingsMenu menu { settings };
+        auto midiOptions = options;
+        midiOptions.applicationName = "LooperDockMidi";
+        conduit::LooperMidiMap midiMap { midiOptions };
+        conduit::EditorDockPanel dock;
+        conduit::LooperDockTabs tabs { dock, settings, midiMap };
 
-        menu.getQuantCombo().setSelectedId ((int) conduit::LaunchQuant::off + 1,
-                                            juce::sendNotificationSync);
+        // Tabs registriert, nur auf der Looper-Page sichtbar
+        dock.setActivePage (conduit::TransportBar::pageLooper);
+        dock.setActiveTab ("looper");
+        REQUIRE (dock.getActiveTabId() == "looper");
+
+        auto* content = tabs.getLooperTabContent();
+        REQUIRE (content != nullptr);
+        content->setBounds (0, 0, 320, 800);
+
+        // Tiefensuche über die Sektionen/Zeilen-Hierarchie
+        std::function<juce::Component* (juce::Component&, const juce::String&)> deepFind =
+            [&] (juce::Component& parent, const juce::String& id) -> juce::Component*
+        {
+            if (parent.getComponentID() == id)
+                return &parent;
+            for (auto* child : parent.getChildren())
+                if (auto* hit = deepFind (*child, id))
+                    return hit;
+            return nullptr;
+        };
+        const auto comboById = [&] (const juce::String& id)
+        { return deepFind (*content, id); };
+
+        auto* quant = dynamic_cast<juce::ComboBox*> (comboById ("quant"));
+        REQUIRE (quant != nullptr);
+        quant->setSelectedId ((int) conduit::LaunchQuant::off + 1,
+                              juce::sendNotificationSync);
         REQUIRE (settings.getLaunchQuant() == conduit::LaunchQuant::off);
 
-        menu.getTapModeCombo().setSelectedId (2, juce::sendNotificationSync);
-        REQUIRE (settings.getTapMode() == conduit::LooperSettings::TapMode::toggleStop);
+        auto* tap = dynamic_cast<juce::ComboBox*> (comboById ("tapMode"));
+        REQUIRE (tap != nullptr);
+        tap->setSelectedId (3, juce::sendNotificationSync);   // Legato
+        REQUIRE (settings.getTapMode() == conduit::LooperSettings::TapMode::legato);
 
-        menu.getSlotsCombo().setSelectedId (10, juce::sendNotificationSync);
+        auto* reverse = dynamic_cast<juce::ComboBox*> (comboById ("reverse"));
+        REQUIRE (reverse != nullptr);
+        reverse->setSelectedId (3, juce::sendNotificationSync);   // Quantized
+        REQUIRE (settings.getReverseMode()
+                 == conduit::LooperSettings::ReverseMode::quantized);
+
+        auto* display = dynamic_cast<juce::ComboBox*> (comboById ("variDisplay"));
+        REQUIRE (display != nullptr);
+        display->setSelectedId (2, juce::sendNotificationSync);   // Scale Degrees
+        REQUIRE (settings.getVariDisplay()
+                 == conduit::LooperSettings::VariDisplay::scaleDegrees);
+
+        auto* slots = dynamic_cast<juce::ComboBox*> (comboById ("slots"));
+        REQUIRE (slots != nullptr);
+        slots->setSelectedId (10, juce::sendNotificationSync);
         REQUIRE (settings.getVisibleSlots() == 10);
 
-        menu.getDeleteLatchToggle().setToggleState (true, juce::dontSendNotification);
-        menu.getDeleteLatchToggle().onClick();
-        REQUIRE (settings.isDeleteLatchEnabled());
+        auto* stopAll = dynamic_cast<juce::ToggleButton*> (comboById ("showStopAll"));
+        REQUIRE (stopAll != nullptr);
+        stopAll->setToggleState (false, juce::dontSendNotification);
+        stopAll->onClick();
+        REQUIRE_FALSE (settings.isShowStopAll());
 
-        menu.getAutoAdvanceToggle().setToggleState (false, juce::dontSendNotification);
-        menu.getAutoAdvanceToggle().onClick();
-        REQUIRE_FALSE (settings.isAutoAdvanceEnabled());
+        // Es gibt bewusst KEINE ÷2-Hälfte-Zeile mehr (LEN/POS-Potis)
+        REQUIRE (comboById ("halve") == nullptr);
     }
 
     folder.deleteRecursively();
 }
 
-TEST_CASE ("LooperPage: Kopfzeile — Output-Paare, Spectrum, Hooks", "[looper][ui]")
+TEST_CASE ("LooperPage/Dock: Kopf-Umbau — MASTER-Sektion, Stop All", "[looper][ui]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;
 
-    conduit::LooperPage page;
-    page.setBounds (0, 0, 1400, 700);
-
-    SECTION ("Output-Paare: Anker vorausgewählt, OOB geclampt, Klick meldet Index")
+    SECTION ("MIXER · MASTER: Output-Paare + globaler MST im Seitenpanel")
     {
-        // Item 0 = „Kein Master-Out" (pairIndex −1, ADR 010); Paare dahinter
-        const juce::StringArray pairs { "Out 1 / Out 2", "Out 3 / Out 4" };
-        int selectedPair = -99;
-        page.onOutputPairSelected = [&] (int pair) { selectedPair = pair; };
+        const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("ConduitLooperMasterTests")
+                                .getChildFile (juce::Uuid().toString());
+        folder.createDirectory();
 
-        page.setOutputPairs (pairs, 1);
-        REQUIRE (page.getOutputCombo().getSelectedItemIndex() == 2);
-        REQUIRE (selectedPair == -99);
+        juce::PropertiesFile::Options options;
+        options.applicationName = "LooperMasterTests";
+        options.filenameSuffix  = ".settings";
+        options.folderName      = folder.getFullPathName();
 
-        page.setOutputPairs (pairs, 7);   // OOB → geclampt
-        REQUIRE (page.getOutputCombo().getSelectedItemIndex() == 2);
+        {
+            conduit::LooperSettings settings { options };
+            auto midiOptions = options;
+            midiOptions.applicationName = "LooperMasterMidi";
+            conduit::LooperMidiMap midiMap { midiOptions };
+            conduit::EditorDockPanel dock;
+            conduit::LooperDockTabs tabs { dock, settings, midiMap };
 
-        page.getOutputCombo().setSelectedItemIndex (1, juce::sendNotificationSync);
-        REQUIRE (selectedPair == 0);
+            auto* content = tabs.getMixerTabContent();
+            REQUIRE (content != nullptr);
+            content->setBounds (0, 0, 320, 400);
 
-        // „Kein Master-Out" meldet −1 und ist vorwählbar
-        page.getOutputCombo().setSelectedItemIndex (0, juce::sendNotificationSync);
-        REQUIRE (selectedPair == -1);
+            std::function<juce::Component* (juce::Component&, const juce::String&)> deepFind =
+                [&] (juce::Component& parent, const juce::String& id) -> juce::Component*
+            {
+                if (parent.getComponentID() == id)
+                    return &parent;
+                for (auto* child : parent.getChildren())
+                    if (auto* hit = deepFind (*child, id))
+                        return hit;
+                return nullptr;
+            };
 
-        page.setOutputPairs (pairs, -1);
-        REQUIRE (page.getOutputCombo().getSelectedItemIndex() == 0);
+            auto* combo = dynamic_cast<juce::ComboBox*> (deepFind (*content, "masterOutput"));
+            REQUIRE (combo != nullptr);
+
+            // Item 0 = „Kein Master-Out" (pairIndex −1, ADR 010); Paare dahinter
+            const juce::StringArray pairs { "Out 1 / Out 2", "Out 3 / Out 4" };
+            int selectedPair = -99;
+            tabs.onOutputPairSelected = [&] (int pair) { selectedPair = pair; };
+
+            tabs.setOutputPairs (pairs, 1);
+            REQUIRE (combo->getSelectedItemIndex() == 2);
+            REQUIRE (selectedPair == -99);
+
+            tabs.setOutputPairs (pairs, 7);   // OOB → geclampt
+            REQUIRE (combo->getSelectedItemIndex() == 2);
+
+            combo->setSelectedItemIndex (1, juce::sendNotificationSync);
+            REQUIRE (selectedPair == 0);
+
+            combo->setSelectedItemIndex (0, juce::sendNotificationSync);
+            REQUIRE (selectedPair == -1);
+
+            tabs.setOutputPairs (pairs, -1);
+            REQUIRE (combo->getSelectedItemIndex() == 0);
+
+            // Globaler MST: Zustand + Hook
+            auto* mst = dynamic_cast<conduit::push::TextTile*> (deepFind (*content, "mst"));
+            REQUIRE (mst != nullptr);
+            bool toMaster = false;
+            tabs.onMasterToggled = [&] (bool on) { toMaster = on; };
+            tabs.setMasterState (false);
+            mst->onClick();
+            REQUIRE (toMaster);
+        }
+
+        folder.deleteRecursively();
     }
 
-    SECTION ("Spectrum-Kachel schaltet alle Panel-Strips")
+    SECTION ("Stop All: Hook + Sichtbarkeit per Setting")
     {
-        page.setLooperCount (2);
-        page.setSpectrumView (true);
-        REQUIRE (page.getSpectrumTile().isActive());
+        conduit::LooperPage page;
+        page.setBounds (0, 0, 1400, 700);
 
-        bool toggled = false;
-        page.onViewToggled = [&] (bool spectrum) { toggled = ! spectrum; };
-        page.getSpectrumTile().onClick();
-        
-        REQUIRE (toggled);   // aktiver Zustand → Toggle meldet false
-    }
-
-    SECTION ("−/+/⚙/Stop-Hooks feuern")
-    {
-        int added = 0, removed = 0, settingsOpened = 0, stopped = 0;
-        page.onAddLooper = [&] { ++added; };
-        page.onRemoveLooper = [&] { ++removed; };
-        page.onOpenSettings = [&] { ++settingsOpened; };
+        int stopped = 0;
         page.onStop = [&] { ++stopped; };
-
-        page.getAddLooperTile().onClick();
-        page.getRemoveLooperTile().onClick();
-        page.getSettingsTile().onClick();
-        page.getStopTile().onClick();
-        
-
-        REQUIRE (added == 1);
-        REQUIRE (removed == 1);
-        REQUIRE (settingsOpened == 1);
+        page.getStopAllTile().onClick();
         REQUIRE (stopped == 1);
+
+        REQUIRE (page.getStopAllTile().isVisible());
+        page.setShowStopAll (false);
+        REQUIRE_FALSE (page.getStopAllTile().isVisible());
+        page.setShowStopAll (true);
+        REQUIRE (page.getStopAllTile().isVisible());
     }
+
+    SECTION ("FFT pro Looper: Page reicht an das Panel durch")
+    {
+        conduit::LooperPage page;
+        page.setBounds (0, 0, 1400, 700);
+        page.setLooperCount (2);
+
+        page.setSpectrumView (1, true);
+        REQUIRE_FALSE (page.getPanel (0).getViewTile().isActive());
+        REQUIRE (page.getPanel (1).getViewTile().isActive());
+    }
+}
+
+//==============================================================================
+TEST_CASE ("LooperMidiTargets: Key-Packung + Anzeigenamen", "[looper][ui]")
+{
+    using namespace conduit::loopermidi;
+
+    const auto key = makeKey (Target::sendLevel, 2, 3, 1);
+    REQUIRE (key.layer == kLooperLayer);
+    REQUIRE (targetOf (key) == Target::sendLevel);
+    REQUIRE (looperOf (key) == 2);
+    REQUIRE (trackOf (key) == 3);
+    REQUIRE (indexOf (key) == 1);
+    REQUIRE (isLooperKey (key));
+    REQUIRE_FALSE (isLooperKey ({ 0, 5, 0 }));
+
+    // Globale Track-Nummern im 4er-Raster (Looper 3, Track 4 = Track 12)
+    REQUIRE (globalTrack (key) == 12);
+    REQUIRE (targetName (key).contains ("Send 2"));
+    REQUIRE (targetName (key).contains ("Track 12"));
+    REQUIRE (targetName (makeKey (Target::trackPlay, 3, 1)).contains ("Track 14"));
+    REQUIRE (targetName (makeKey (Target::segment, 0, 0, 3)).contains ("1 Bar"));
+    REQUIRE (targetName (makeKey (Target::stopAll)) == "Stop All");
+
+    // Slot 12 (Index 11) passt in die 4-Bit-Packung
+    const auto slot = makeKey (Target::slotCell, 1, 2, 11);
+    REQUIRE (indexOf (slot) == 11);
+}
+
+TEST_CASE ("LooperMidiMap: Learn-Bindung persistiert ueber Neuinstanz", "[looper][ui]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("ConduitLooperMidiMapTests")
+                            .getChildFile (juce::Uuid().toString());
+    folder.createDirectory();
+
+    juce::PropertiesFile::Options options;
+    options.applicationName = "LooperMidiMapTests";
+    options.filenameSuffix  = ".settings";
+    options.folderName      = folder.getFullPathName();
+
+    const auto key = conduit::loopermidi::makeKey (
+        conduit::loopermidi::Target::mute, 1, 2);
+
+    {
+        conduit::LooperMidiMap map { options };
+        int changes = 0;
+        map.onChanged = [&] { ++changes; };
+
+        // Klassisches Learn: Ziel armieren, Controller bewegen -> gebunden
+        map.getBindings().armLearn (key);
+        REQUIRE (map.getBindings().isLearnArmed());
+        map.getBindings().handleIncomingCc (5, 21, 64);
+
+        const auto* binding = map.getBindings().bindingFor (key);
+        REQUIRE (binding != nullptr);
+        REQUIRE (binding->channel == 5);
+        REQUIRE (binding->cc == 21);
+        REQUIRE (changes == 1);
+        map.flush();
+    }
+
+    conduit::LooperMidiMap reloaded { options };
+    const auto* binding = reloaded.getBindings().bindingFor (key);
+    REQUIRE (binding != nullptr);
+    REQUIRE (binding->channel == 5);
+    REQUIRE (binding->cc == 21);
+    REQUIRE_FALSE (binding->isNote);
+
+    // Loeschen persistiert ebenfalls
+    reloaded.getBindings().unbind (key);
+    reloaded.flush();
+    conduit::LooperMidiMap emptied { options };
+    REQUIRE (emptied.getBindings().count() == 0);
+
+    folder.deleteRecursively();
+}
+
+//==============================================================================
+TEST_CASE ("LooperMapOverlay: Panel bleibt bedienbar (kein Einsperren)", "[looper][ui]")
+{
+    // User-Fund 20.07.2026: das Overlay schluckte ALLE Klicks — damit war
+    // auch der MAP-MODE-Toggle im Seitenpanel unerreichbar, der Modus
+    // sperrte sich selbst ein.
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    conduit::LooperMapOverlay overlay;
+    overlay.setBounds (0, 0, 800, 600);
+
+    const auto panel = juce::Rectangle<int> (600, 0, 200, 600);   // „Dock" rechts
+    overlay.setPassThroughArea (panel);
+
+    const auto key = conduit::loopermidi::makeKey (
+        conduit::loopermidi::Target::masterToggle);
+    overlay.setTargets ({ { key, { 620, 40, 60, 30 }, {} } });
+
+    // Im Panel: ueber einem Ziel fangen (MST bleibt mappbar) …
+    REQUIRE (overlay.hitTest (640, 50));
+    // … daneben durchlassen (Toggle + Mappings-Liste bedienbar)
+    REQUIRE_FALSE (overlay.hitTest (640, 300));
+
+    // Auf der Page faengt das Overlay ueberall (kein versehentlicher
+    // Clip-Start waehrend des Mappens)
+    REQUIRE (overlay.hitTest (100, 300));
 }

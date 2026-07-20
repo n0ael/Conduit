@@ -216,3 +216,37 @@ TEST_CASE ("LooperClipMath: gridCrossingOffset — sample-genauer Grid-Übertrit
         REQUIRE (lm::gridCrossingOffset (1.0, 0.0, 128, 4.0) == -1);
     }
 }
+
+//==============================================================================
+TEST_CASE ("LooperClipMath: LEN/POS-Helfer (Free-Untergrenze, Clamp, /n-Badge)", "[looper]")
+{
+    SECTION ("minFreeLengthBeats: 50 ms in Content-Beats")
+    {
+        // 120 BPM @ 48 kHz: 24 000 Samples/Beat → 50 ms = 0.1 Beats
+        REQUIRE (lm::minFreeLengthBeats (48000.0, 24000.0) == Approx (0.1));
+        // 60 BPM: 48 000 Samples/Beat → 0.05 Beats
+        REQUIRE (lm::minFreeLengthBeats (48000.0, 48000.0) == Approx (0.05));
+        REQUIRE (lm::minFreeLengthBeats (48000.0, 0.0) == Approx (0.0));
+    }
+
+    SECTION ("clampWindowOffset: Fenster bleibt im Content")
+    {
+        REQUIRE (lm::clampWindowOffset (1.5, 4.0, 1.0) == Approx (1.5));
+        REQUIRE (lm::clampWindowOffset (99.0, 4.0, 1.0) == Approx (3.0));
+        REQUIRE (lm::clampWindowOffset (-2.0, 4.0, 1.0) == Approx (0.0));
+        REQUIRE (lm::clampWindowOffset (1.0, 4.0, 4.0) == Approx (0.0));
+        REQUIRE (lm::clampWindowOffset (1.0, 4.0, 8.0) == Approx (0.0));
+    }
+
+    SECTION ("lengthDivisor: nur exakte /1 /2 /4 /8 zählen, sonst 0 (Free)")
+    {
+        REQUIRE (lm::lengthDivisor (4.0, 4.0) == 1);
+        REQUIRE (lm::lengthDivisor (4.0, 2.0) == 2);
+        REQUIRE (lm::lengthDivisor (4.0, 1.0) == 4);
+        REQUIRE (lm::lengthDivisor (4.0, 0.5) == 8);
+        REQUIRE (lm::lengthDivisor (4.0, 0.7) == 0);
+        REQUIRE (lm::lengthDivisor (4.0, 4.0 / 3.0) == 0);
+        REQUIRE (lm::lengthDivisor (0.0, 1.0) == 0);
+        REQUIRE (lm::lengthDivisor (4.0, 0.0) == 0);
+    }
+}

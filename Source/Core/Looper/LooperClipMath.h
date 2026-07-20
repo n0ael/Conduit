@@ -135,6 +135,47 @@ enum class HalveMode : int
 }
 
 //==============================================================================
+// LEN/POS-Potis (Mixer 07/2026): stufenlose Fensterlänge/-position
+
+/** Untergrenze der freien Loop-Länge (Free-Modus des LEN-Potis). */
+constexpr double minFreeLengthSeconds = 0.05;   // 50 ms
+
+/** 50 ms in CONTENT-Beats des Clips (samplesPerBeatRecorded = Samples pro
+    Beat bei der Aufnahme). */
+[[nodiscard]] inline double minFreeLengthBeats (double sampleRate,
+                                                double samplesPerBeatRecorded) noexcept
+{
+    if (samplesPerBeatRecorded <= 0.0)
+        return 0.0;
+    return minFreeLengthSeconds * sampleRate / samplesPerBeatRecorded;
+}
+
+/** Fenster-Offset auf den Content klemmen (Fenster passt immer hinein). */
+[[nodiscard]] inline double clampWindowOffset (double offsetBeats, double contentBeats,
+                                               double lengthBeats) noexcept
+{
+    const auto maxOffset = contentBeats - lengthBeats;
+    if (maxOffset <= 0.0)
+        return 0.0;
+    if (offsetBeats < 0.0)
+        return 0.0;
+    return offsetBeats < maxOffset ? offsetBeats : maxOffset;
+}
+
+/** Badge „/n" des LEN-Potis: n ∈ {1, 2, 4, 8}, wenn die Länge (nahezu)
+    exakt content/n trifft, sonst 0 (= freie Länge, UI zeigt ms). */
+[[nodiscard]] inline int lengthDivisor (double contentBeats, double lengthBeats) noexcept
+{
+    if (contentBeats <= 0.0 || lengthBeats <= 0.0)
+        return 0;
+
+    for (const auto n : { 1, 2, 4, 8 })
+        if (std::abs (contentBeats / n - lengthBeats) < 1.0e-6 * contentBeats)
+            return n;
+    return 0;
+}
+
+//==============================================================================
 /** Sample-genauer Grid-Übertritt innerhalb eines Blocks (CLAUDE.md 4.5):
     Index des ersten Samples, dessen Beat ≥ der nächsten Grid-Grenze liegt,
     oder −1, wenn der Block keine Grenze enthält. qBeats ≤ 0 → 0 (sofort am

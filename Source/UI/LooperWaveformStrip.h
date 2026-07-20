@@ -78,6 +78,14 @@ public:
     /** Klick auf Segment → Commit-Länge in Takten (8/4/2/1). */
     std::function<void (int bars)> onSegmentClicked;
 
+    /** Bounds eines Commit-Segments (0 = 8 Bars … 3 = 1 Bar) — fürs
+        MAP-MODE-Overlay (07/2026); Layout wie paint (4 gleiche Spalten). */
+    [[nodiscard]] juce::Rectangle<int> getSegmentBounds (int segmentIndex) const noexcept
+    {
+        const auto width = getWidth() / 4;
+        return { juce::jlimit (0, 3, segmentIndex) * width, 0, width, getHeight() };
+    }
+
     /** [Editor, direkt nach dem Commit] Die committeten Takte als „Tinte
         auf transparent"-Bild der AKTUELLEN View (User-Idee 09.07.2026):
         Waveform als schwarze Min/Max-Spalten, Spektrum als Schwarz mit

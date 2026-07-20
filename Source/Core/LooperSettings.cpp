@@ -42,8 +42,25 @@ LooperSettings::~LooperSettings()
 
 void LooperSettings::flush()
 {
+    storePendingXml();
+
     if (auto* file = applicationProperties.getUserSettings())
         file->saveIfNeeded();
+}
+
+void LooperSettings::storePendingXml()
+{
+    if (! pendingXmlWrite)
+        return;
+
+    pendingXmlWrite = false;
+    stopTimer();
+    storeXml();
+}
+
+void LooperSettings::timerCallback()
+{
+    storePendingXml();
 }
 
 void LooperSettings::migrateFromLegacy (const juce::String& legacyLooperSource,
@@ -71,20 +88,33 @@ void LooperSettings::loadFromFile()
 
     launchQuant = launchQuantFromKey (xml->getStringAttribute ("launchQuant").toStdString(),
                                       LaunchQuant::bar1);
-    tapMode = xml->getStringAttribute ("tapMode") == "stop" ? TapMode::toggleStop
-                                                            : TapMode::retrigger;
+    {
+        const auto tap = xml->getStringAttribute ("tapMode");
+        tapMode = tap == "stop"   ? TapMode::toggleStop
+                : tap == "legato" ? TapMode::legato
+                                  : TapMode::retrigger;
+    }
     halveMode = xml->getStringAttribute ("halveMode") == "current"
               ? looper::HalveMode::currentHalf
               : looper::HalveMode::firstHalf;
-    reverseMode = xml->getStringAttribute ("reverseMode") == "boundary"
-                ? ReverseMode::boundary
-                : ReverseMode::immediate;
+    {
+        const auto reverse = xml->getStringAttribute ("reverseMode");
+        reverseMode = reverse == "boundary" ? ReverseMode::boundary
+                    : reverse == "quant"    ? ReverseMode::quantized
+                                            : ReverseMode::immediate;
+    }
     variRaster = xml->getStringAttribute ("variRaster") == "scale"
                ? VariRaster::sessionScale
                : VariRaster::semitones;
-    variScope = xml->getStringAttribute ("variScope") == "looper"
-              ? VariScope::perLooper
-              : VariScope::perTrack;
+    {
+        const auto scope = xml->getStringAttribute ("variScope");
+        variScope = scope == "looper" ? VariScope::perLooper
+                  : scope == "global" ? VariScope::globalScope
+                                      : VariScope::perTrack;
+    }
+    variDisplay = xml->getStringAttribute ("variDisplay") == "degrees"
+                ? VariDisplay::scaleDegrees
+                : VariDisplay::semitones;
     soloScope = xml->getStringAttribute ("soloScope") == "global"
               ? SoloScope::globalScope
               : SoloScope::perLooper;
@@ -93,6 +123,34 @@ void LooperSettings::loadFromFile()
     deleteLatch = xml->getBoolAttribute ("deleteLatch", false);
     autoAdvance = xml->getBoolAttribute ("autoAdvance", true);
     numLoopers = juce::jlimit (1, maxLoopers, xml->getIntAttribute ("numLoopers", 1));
+    sendCount = juce::jlimit (0, 4, xml->getIntAttribute ("sendCount", 4));
+    showStopAll = xml->getBoolAttribute ("showStopAll", true);
+    hideMuteSolo = xml->getBoolAttribute ("hideMuteSolo", false);
+    hideMixerXy = xml->getBoolAttribute ("hideMixerXy", false);
+    panelCollapsed = xml->getIntAttribute ("panelCollapsed", 0);
+
+    distanceState.hiDumpDb   = juce::jlimit (0.0f, 18.0f,
+        (float) xml->getDoubleAttribute ("distHiDump", 9.0));
+    distanceState.hiCutHz    = juce::jlimit (500.0f, 16000.0f,
+        (float) xml->getDoubleAttribute ("distHiCut", 8000.0));
+    distanceState.baseFreqHz = juce::jlimit (200.0f, 4000.0f,
+        (float) xml->getDoubleAttribute ("distBaseFreq", 2000.0));
+    distanceState.width01    = juce::jlimit (0.0f, 1.0f,
+        (float) xml->getDoubleAttribute ("distWidth", 0.5));
+    distanceState.volDumpOn  = xml->getBoolAttribute ("distVolDumpOn", true);
+    distanceState.volDumpDb  = juce::jlimit (0.0f, 24.0f,
+        (float) xml->getDoubleAttribute ("distVolDump", 12.0));
+    distanceState.smoothMs   = juce::jlimit (0.0f, 500.0f,
+        (float) xml->getDoubleAttribute ("distSmoothMs", 20.0));
+    distanceState.ySens      = juce::jlimit (0.0f, 1.0f,
+        (float) xml->getDoubleAttribute ("distYSens", 1.0));
+    yLinkSend = juce::jlimit (-1, 3, xml->getIntAttribute ("yLinkSend", -1));
+    for (int s = 0; s < 4; ++s)
+    {
+        const auto hex = xml->getStringAttribute ("sendColour" + juce::String (s));
+        sendColours[static_cast<std::size_t> (s)] =
+            hex.isNotEmpty() ? juce::Colour::fromString (hex) : juce::Colour();
+    }
 
     int looperIndex = 0;
     for (const auto* looperXml : xml->getChildWithTagNameIterator (xmlLooper.toString()))
@@ -121,8 +179,25 @@ void LooperSettings::loadFromFile()
             track.mute = trackXml->getBoolAttribute ("mute", false);
             track.solo = trackXml->getBoolAttribute ("solo", false);
             track.variQuantized = trackXml->getBoolAttribute ("variQuant", false);
-            track.sends = trackXml->getIntAttribute ("sends", 0) & 0xF;
+            if (trackXml->hasAttribute ("send0"))
+            {
+                for (int s = 0; s < 4; ++s)
+                    track.sendLevel[static_cast<std::size_t> (s)] = juce::jlimit (
+                        0.0f, 1.0f,
+                        (float) trackXml->getDoubleAttribute ("send" + juce::String (s), 0.0));
+            }
+            else
+            {
+                // Migration Alt-Schema: An/Aus-Bitmaske → Level 1.0 pro
+                // gesetztem Bit (der frühere Send-Add war Unity-Gain)
+                const auto legacyMask = trackXml->getIntAttribute ("sends", 0) & 0xF;
+                for (int s = 0; s < 4; ++s)
+                    track.sendLevel[static_cast<std::size_t> (s)] =
+                        (legacyMask & (1 << s)) != 0 ? 1.0f : 0.0f;
+            }
             track.sendPre = trackXml->getBoolAttribute ("sendPre", false);
+            track.distance = juce::jlimit (0.0f, 1.0f,
+                (float) trackXml->getDoubleAttribute ("dist", 0.0));
             ++trackIndex;
         }
 
@@ -132,22 +207,65 @@ void LooperSettings::loadFromFile()
 
 void LooperSettings::writeAndNotify()
 {
+    storeXml();
+    sendChangeMessage();
+}
+
+void LooperSettings::writeAndNotifyCoalesced()
+{
+    // Broadcast SOFORT (Engine/UI folgen ohne Verzögerung), Schreiben
+    // gebündelt: bei Mixer-Gesten feuert der Setter pro Mausbewegung
+    storedStateLoaded = true;
+    pendingXmlWrite = true;
+    startTimer (250);
+    sendChangeMessage();
+}
+
+void LooperSettings::storeXml()
+{
     juce::XmlElement xml (xmlRoot.toString());
 
     xml.setAttribute ("launchQuant", launchQuantKey (launchQuant));
-    xml.setAttribute ("tapMode", tapMode == TapMode::toggleStop ? "stop" : "retrigger");
+    xml.setAttribute ("tapMode", tapMode == TapMode::toggleStop ? "stop"
+                                 : tapMode == TapMode::legato   ? "legato"
+                                                                : "retrigger");
     xml.setAttribute ("halveMode",
                       halveMode == looper::HalveMode::currentHalf ? "current" : "first");
     xml.setAttribute ("reverseMode",
-                      reverseMode == ReverseMode::boundary ? "boundary" : "immediate");
+                      reverseMode == ReverseMode::boundary  ? "boundary"
+                      : reverseMode == ReverseMode::quantized ? "quant"
+                                                              : "immediate");
     xml.setAttribute ("variRaster",
                       variRaster == VariRaster::sessionScale ? "scale" : "semi");
-    xml.setAttribute ("variScope", variScope == VariScope::perLooper ? "looper" : "track");
+    xml.setAttribute ("variScope", variScope == VariScope::perLooper ? "looper"
+                                   : variScope == VariScope::globalScope ? "global"
+                                                                         : "track");
+    xml.setAttribute ("variDisplay",
+                      variDisplay == VariDisplay::scaleDegrees ? "degrees" : "semi");
     xml.setAttribute ("soloScope", soloScope == SoloScope::globalScope ? "global" : "looper");
     xml.setAttribute ("visibleSlots", visibleSlots);
     xml.setAttribute ("deleteLatch", deleteLatch);
     xml.setAttribute ("autoAdvance", autoAdvance);
     xml.setAttribute ("numLoopers", numLoopers);
+    xml.setAttribute ("sendCount", sendCount);
+    xml.setAttribute ("showStopAll", showStopAll);
+    xml.setAttribute ("hideMuteSolo", hideMuteSolo);
+    xml.setAttribute ("hideMixerXy", hideMixerXy);
+    xml.setAttribute ("panelCollapsed", panelCollapsed);
+
+    xml.setAttribute ("distHiDump", distanceState.hiDumpDb);
+    xml.setAttribute ("distHiCut", distanceState.hiCutHz);
+    xml.setAttribute ("distBaseFreq", distanceState.baseFreqHz);
+    xml.setAttribute ("distWidth", distanceState.width01);
+    xml.setAttribute ("distVolDumpOn", distanceState.volDumpOn);
+    xml.setAttribute ("distVolDump", distanceState.volDumpDb);
+    xml.setAttribute ("distSmoothMs", distanceState.smoothMs);
+    xml.setAttribute ("distYSens", distanceState.ySens);
+    xml.setAttribute ("yLinkSend", yLinkSend);
+    for (int s = 0; s < 4; ++s)
+        if (const auto& colour = sendColours[static_cast<std::size_t> (s)];
+            ! colour.isTransparent())
+            xml.setAttribute ("sendColour" + juce::String (s), colour.toString());
 
     for (int l = 0; l < maxLoopers; ++l)
     {
@@ -167,14 +285,17 @@ void LooperSettings::writeAndNotify()
             trackXml->setAttribute ("mute", track.mute);
             trackXml->setAttribute ("solo", track.solo);
             trackXml->setAttribute ("variQuant", track.variQuantized);
-            trackXml->setAttribute ("sends", track.sends);
+            for (int s = 0; s < 4; ++s)
+                trackXml->setAttribute ("send" + juce::String (s),
+                                        track.sendLevel[static_cast<std::size_t> (s)]);
             trackXml->setAttribute ("sendPre", track.sendPre);
+            trackXml->setAttribute ("dist", track.distance);
         }
     }
 
     applicationProperties.getUserSettings()->setValue (keyLooperState, &xml);
     storedStateLoaded = true;
-    sendChangeMessage();
+    pendingXmlWrite = false;
 }
 
 //==============================================================================
@@ -256,6 +377,55 @@ void LooperSettings::setAutoAdvanceEnabled (bool enabled)
     if (autoAdvance == enabled)
         return;
     autoAdvance = enabled;
+    writeAndNotify();
+}
+
+void LooperSettings::setVariDisplay (VariDisplay display)
+{
+    if (variDisplay == display)
+        return;
+    variDisplay = display;
+    writeAndNotify();
+}
+
+void LooperSettings::setSendCount (int count)
+{
+    const auto clamped = juce::jlimit (0, 4, count);
+    if (sendCount == clamped)
+        return;
+    sendCount = clamped;
+    writeAndNotify();
+}
+
+void LooperSettings::setShowStopAll (bool show)
+{
+    if (showStopAll == show)
+        return;
+    showStopAll = show;
+    writeAndNotify();
+}
+
+void LooperSettings::setHideMuteSolo (bool hide)
+{
+    if (hideMuteSolo == hide)
+        return;
+    hideMuteSolo = hide;
+    writeAndNotify();
+}
+
+void LooperSettings::setHideMixerXy (bool hide)
+{
+    if (hideMixerXy == hide)
+        return;
+    hideMixerXy = hide;
+    writeAndNotify();
+}
+
+void LooperSettings::setPanelCollapsedMask (int mask)
+{
+    if (panelCollapsed == mask)
+        return;
+    panelCollapsed = mask;
     writeAndNotify();
 }
 
@@ -356,7 +526,7 @@ void LooperSettings::setTrackGain (int looperIndex, int trackIndex, float gain)
         return;
 
     track.gain = clamped;
-    writeAndNotify();
+    writeAndNotifyCoalesced();
 }
 
 float LooperSettings::getTrackPan (int looperIndex, int trackIndex) const noexcept
@@ -379,7 +549,7 @@ void LooperSettings::setTrackPan (int looperIndex, int trackIndex, float pan)
         return;
 
     track.pan = clamped;
-    writeAndNotify();
+    writeAndNotifyCoalesced();
 }
 
 bool LooperSettings::isTrackMuted (int looperIndex, int trackIndex) const noexcept
@@ -445,12 +615,45 @@ void LooperSettings::setTrackVariQuantized (int looperIndex, int trackIndex, boo
     writeAndNotify();
 }
 
+float LooperSettings::getTrackSendLevel (int looperIndex, int trackIndex,
+                                         int sendIndex) const noexcept
+{
+    return validTrack (looperIndex, trackIndex) && sendIndex >= 0 && sendIndex < 4
+         ? loopers[static_cast<std::size_t> (looperIndex)]
+               .tracks[static_cast<std::size_t> (trackIndex)]
+               .sendLevel[static_cast<std::size_t> (sendIndex)]
+         : 0.0f;
+}
+
+void LooperSettings::setTrackSendLevel (int looperIndex, int trackIndex, int sendIndex,
+                                        float level01)
+{
+    if (! validTrack (looperIndex, trackIndex) || sendIndex < 0 || sendIndex >= 4)
+        return;
+
+    const auto clamped = juce::jlimit (0.0f, 1.0f, level01);
+    auto& track = loopers[static_cast<std::size_t> (looperIndex)]
+                      .tracks[static_cast<std::size_t> (trackIndex)];
+    auto& level = track.sendLevel[static_cast<std::size_t> (sendIndex)];
+    if (juce::exactlyEqual (level, clamped))
+        return;
+
+    level = clamped;
+    writeAndNotifyCoalesced();
+}
+
 int LooperSettings::getTrackSends (int looperIndex, int trackIndex) const noexcept
 {
-    return validTrack (looperIndex, trackIndex)
-         ? loopers[static_cast<std::size_t> (looperIndex)]
-               .tracks[static_cast<std::size_t> (trackIndex)].sends
-         : 0;
+    if (! validTrack (looperIndex, trackIndex))
+        return 0;
+
+    const auto& track = loopers[static_cast<std::size_t> (looperIndex)]
+                            .tracks[static_cast<std::size_t> (trackIndex)];
+    int mask = 0;
+    for (int s = 0; s < 4; ++s)
+        if (track.sendLevel[static_cast<std::size_t> (s)] > 0.0f)
+            mask |= 1 << s;
+    return mask;
 }
 
 void LooperSettings::setTrackSends (int looperIndex, int trackIndex, int mask)
@@ -461,10 +664,116 @@ void LooperSettings::setTrackSends (int looperIndex, int trackIndex, int mask)
     const auto clamped = mask & 0xF;
     auto& track = loopers[static_cast<std::size_t> (looperIndex)]
                       .tracks[static_cast<std::size_t> (trackIndex)];
-    if (track.sends == clamped)
+
+    bool changed = false;
+    for (int s = 0; s < 4; ++s)
+    {
+        const auto target = (clamped & (1 << s)) != 0 ? 1.0f : 0.0f;
+        auto& level = track.sendLevel[static_cast<std::size_t> (s)];
+        // Bit gesetzt + Level > 0 bleibt unangetastet (Dialog-Toggle darf
+        // ein feines Level nicht auf 1.0 plätten)
+        if (target > 0.0f ? level > 0.0f : juce::exactlyEqual (level, 0.0f))
+            continue;
+        level = target;
+        changed = true;
+    }
+
+    if (changed)
+        writeAndNotify();
+}
+
+float LooperSettings::getTrackDistance (int looperIndex, int trackIndex) const noexcept
+{
+    return validTrack (looperIndex, trackIndex)
+         ? loopers[static_cast<std::size_t> (looperIndex)]
+               .tracks[static_cast<std::size_t> (trackIndex)].distance
+         : 0.0f;
+}
+
+void LooperSettings::setTrackDistance (int looperIndex, int trackIndex, float distance01)
+{
+    if (! validTrack (looperIndex, trackIndex))
         return;
 
-    track.sends = clamped;
+    const auto clamped = juce::jlimit (0.0f, 1.0f, distance01);
+    auto& track = loopers[static_cast<std::size_t> (looperIndex)]
+                      .tracks[static_cast<std::size_t> (trackIndex)];
+    if (juce::exactlyEqual (track.distance, clamped))
+        return;
+
+    track.distance = clamped;
+    writeAndNotifyCoalesced();
+}
+
+void LooperSettings::setDistance (const DistanceState& state)
+{
+    DistanceState clamped;
+    clamped.hiDumpDb   = juce::jlimit (0.0f, 18.0f, state.hiDumpDb);
+    clamped.hiCutHz    = juce::jlimit (500.0f, 16000.0f, state.hiCutHz);
+    clamped.baseFreqHz = juce::jlimit (200.0f, 4000.0f, state.baseFreqHz);
+    clamped.width01    = juce::jlimit (0.0f, 1.0f, state.width01);
+    clamped.volDumpOn  = state.volDumpOn;
+    clamped.volDumpDb  = juce::jlimit (0.0f, 24.0f, state.volDumpDb);
+    clamped.smoothMs   = juce::jlimit (0.0f, 500.0f, state.smoothMs);
+    clamped.ySens      = juce::jlimit (0.0f, 1.0f, state.ySens);
+
+    const auto& d = distanceState;
+    if (juce::exactlyEqual (d.hiDumpDb, clamped.hiDumpDb)
+        && juce::exactlyEqual (d.hiCutHz, clamped.hiCutHz)
+        && juce::exactlyEqual (d.baseFreqHz, clamped.baseFreqHz)
+        && juce::exactlyEqual (d.width01, clamped.width01)
+        && d.volDumpOn == clamped.volDumpOn
+        && juce::exactlyEqual (d.volDumpDb, clamped.volDumpDb)
+        && juce::exactlyEqual (d.smoothMs, clamped.smoothMs)
+        && juce::exactlyEqual (d.ySens, clamped.ySens))
+        return;
+
+    distanceState = clamped;
+    writeAndNotify();
+}
+
+juce::Colour LooperSettings::defaultSendColour (int sendIndex) noexcept
+{
+    switch (sendIndex)
+    {
+        case 0:  return juce::Colour (0xffff8d28);   // ● S1
+        case 1:  return juce::Colour (0xff6155f5);   // ■ S2
+        case 2:  return juce::Colour (0xff34c759);   // ▲ S3
+        default: return juce::Colour (0xff00c8b3);   // ⬡ S4
+    }
+}
+
+juce::Colour LooperSettings::getSendColour (int sendIndex) const noexcept
+{
+    if (sendIndex < 0 || sendIndex >= 4)
+        return defaultSendColour (0);
+
+    const auto stored = sendColours[static_cast<std::size_t> (sendIndex)];
+    return stored.isTransparent() ? defaultSendColour (sendIndex) : stored;
+}
+
+void LooperSettings::setSendColour (int sendIndex, juce::Colour colour)
+{
+    if (sendIndex < 0 || sendIndex >= 4)
+        return;
+
+    // Opak speichern — transparent bedeutet „Werks-Palette"
+    const auto opaque = colour.withAlpha (1.0f);
+    auto& stored = sendColours[static_cast<std::size_t> (sendIndex)];
+    if (stored == opaque)
+        return;
+
+    stored = opaque;
+    writeAndNotifyCoalesced();   // Picker feuert live pro Mausbewegung
+}
+
+void LooperSettings::setYLinkSend (int sendIndex)
+{
+    const auto clamped = juce::jlimit (-1, 3, sendIndex);
+    if (yLinkSend == clamped)
+        return;
+
+    yLinkSend = clamped;
     writeAndNotify();
 }
 

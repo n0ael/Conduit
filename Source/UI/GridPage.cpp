@@ -311,7 +311,10 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     mappingsView->onLearnRequested = [this] (const grid::MacroControlKey& key)
     { armMapLearn (key); };
     mappingsPanel = mappingsView.get();
-    dockPanel.addTab ("map", "Map", std::move (mappingsView));
+    // Auf der Looper-Page ausgeblendet (dort lebt der eigene MIDI-Tab
+    // der LooperDockTabs, 07/2026 — Verwechslungsgefahr)
+    dockPanel.addTab ("map", "Map", std::move (mappingsView),
+                      EditorDockPanel::kAllPages & ~(1 << TransportBar::pageLooper));
     mappingsPanel->refresh();   // Namen jetzt auflösbar (controlNameFor gesetzt)
 
     // Struktur-Änderungen der Bindings: Liste neu aufbauen, Badges der

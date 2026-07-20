@@ -324,6 +324,21 @@ void EngineProcessor::applyLooperSettings()
     looperBank.setSoloScopeGlobal (looperSettings.getSoloScope()
                                    == LooperSettings::SoloScope::globalScope);
 
+    // Distanz-Globals (Monolake Distance) + Y Sensitivity: die Bank sieht
+    // die BEREITS skalierte Distanz (d_eff = y · ySens) — Puck bleibt absolut
+    const auto dist = looperSettings.getDistance();
+    {
+        looper::DistanceGlobals globals;
+        globals.hiDumpDb   = dist.hiDumpDb;
+        globals.hiCutHz    = dist.hiCutHz;
+        globals.baseFreqHz = dist.baseFreqHz;
+        globals.width01    = dist.width01;
+        globals.volDumpOn  = dist.volDumpOn;
+        globals.volDumpDb  = dist.volDumpDb;
+        looperBank.setDistanceGlobals (globals, dist.smoothMs / 1000.0f);
+        looperBank.setYLinkSend (looperSettings.getYLinkSend());
+    }
+
     for (int l = 0; l < LooperBank::maxLoopers; ++l)
     {
         // „an Master senden" pro Looper (Looper-I/O 07/2026)
@@ -335,9 +350,12 @@ void EngineProcessor::applyLooperSettings()
             looperBank.setTrackPan  (l, t, looperSettings.getTrackPan (l, t));
             looperBank.setTrackMute (l, t, looperSettings.isTrackMuted (l, t));
             looperBank.setTrackSolo (l, t, looperSettings.isTrackSolo (l, t));
-            looperBank.setTrackSends (l, t,
-                (std::uint32_t) looperSettings.getTrackSends (l, t));
+            for (int s = 0; s < LooperBank::maxSends; ++s)
+                looperBank.setTrackSendLevel (l, t, s,
+                    looperSettings.getTrackSendLevel (l, t, s));
             looperBank.setTrackSendPre (l, t, looperSettings.isTrackSendPre (l, t));
+            looperBank.setTrackDistance (l, t,
+                looperSettings.getTrackDistance (l, t) * dist.ySens);
         }
     }
 

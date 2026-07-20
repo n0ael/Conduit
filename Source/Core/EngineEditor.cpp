@@ -12,8 +12,8 @@
 #include "UI/LinkSendCreateDialog.h"
 #include "Core/Looper/LooperClipExporter.h"
 #include "UI/LooperDeleteConfirmDialog.h"
-#include "UI/LooperSendDialog.h"
-#include "UI/LooperSettingsMenu.h"
+#include "Core/Looper/LooperMidiTargets.h"
+#include "UI/LooperDockTabs.h"
 #include "UI/LooperTrashDialog.h"
 #include "UI/SettingsWindow.h"
 #include "UI/TrackSelectorPanel.h"
@@ -350,9 +350,13 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
                 captureToast.show (result.getErrorMessage());
             refreshLooperStructure();
         };
+        // Anker: Kopf des betroffenen (letzten) Loopers — die frühere
+        // −-Kachel der Kopfzeile existiert seit dem Panel-Umzug nicht mehr
+        const auto anchorPanel = juce::jlimit (0, looperPage.getLooperCount() - 1, last);
         juce::CallOutBox::launchAsynchronously (
             std::move (dialog),
-            looperPage.getRemoveLooperTile().getScreenBounds(), nullptr);
+            looperPage.getPanel (anchorPanel).getScreenBounds()
+                .removeFromTop (44), nullptr);
     };
 
     // Papierkorb-Kachel (↺): EIN Eintrag = direkt wiederherstellen,
@@ -453,33 +457,84 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
         return colour.isTransparent() ? 0u : (colour.getARGB() & 0x00ffffffu);
     };
 
-    looperPage.onOpenSettings = [this]
+    // Seitenpanel LOOPER · MIXER · MIDI (ersetzt das ⚙-CallOutBox-Menü):
+    // Struktur-Hooks laufen über die Delete-Gating-Pfade der Page-Hooks
+    looperMidiMap = std::make_unique<LooperMidiMap>();
+    looperDockTabs = std::make_unique<LooperDockTabs> (editorDock,
+                                                       engine.getLooperSettings(),
+                                                       *looperMidiMap);
+
+    // MAP-MODE (07/2026): klassisches Learn — Ziel antippen, Controller
+    // bewegen; Overlay über Page + Dock, Eingänge aller Controller-Geräte
+    looperDockTabs->onMapModeChanged = [this] (bool) { updateLooperMapOverlay(); };
+    looperDockTabs->onLearnRequested = [this] (const grid::MacroControlKey& key)
     {
-        auto menu = std::make_unique<LooperSettingsMenu> (engine.getLooperSettings());
-        juce::CallOutBox::launchAsynchronously (
-            std::move (menu),
-            looperPage.getSettingsTile().getScreenBounds(), nullptr);
+        looperMidiMap->getBindings().armLearn (key);
+        looperDockTabs->setArmedKey (true, key);
+        looperMapOverlay.setArmedKey (true, key);
+    };
+    looperMidiMap->getBindings().onLearnCompleted =
+        [this] (const grid::MacroControlKey&, int, int, bool, const grid::ModifierSet&)
+    {
+        looperDockTabs->setArmedKey (false, {});
+        looperMapOverlay.setArmedKey (false, {});
+    };
+    looperMidiMap->onChanged = [this]
+    {
+        looperDockTabs->refreshMappings();
+        rebuildLooperMapTargets();
+    };
+    looperMapOverlay.onTargetTapped = [this] (const grid::MacroControlKey& key)
+    {
+        if (looperDockTabs->onLearnRequested != nullptr)
+            looperDockTabs->onLearnRequested (key);
+    };
+    addChildComponent (looperMapOverlay);
+    wireLooperMidiInputs();
+    engine.getMidiRigSettings().addChangeListener (this);
+    looperDockTabs->onAddLooper = [this]
+    {
+        if (looperPage.onAddLooper != nullptr)
+            looperPage.onAddLooper();
+    };
+    looperDockTabs->onRemoveLooper = [this]
+    {
+        if (looperPage.onRemoveLooper != nullptr)
+            looperPage.onRemoveLooper();
+    };
+    looperDockTabs->onAddTrack = [this] (int looperIndex)
+    {
+        if (looperIndex >= 0 && looperIndex < looperPage.getLooperCount())
+            if (auto& hook = looperPage.getPanel (looperIndex).onAddTrack; hook != nullptr)
+                hook();
+    };
+    looperDockTabs->onRemoveTrack = [this] (int looperIndex)
+    {
+        const auto tracks = engine.getLooperSession().getNumTracks (looperIndex);
+        if (tracks > 1)
+            removeLooperTrack (looperIndex, tracks - 1);
     };
 
     looperPage.onStop = [this] { engine.stopLooper(); };
 
-    // Spectrum global: schaltet die Strips ALLER Looper (Settings pro
-    // Looper, Kachel wirkt auf alle — Mock-Semantik)
-    looperPage.onViewToggled = [this] (bool spectrum)
+    // MST global (MIXER · MASTER, User 20.07.2026): EIN Toggle setzt
+    // sendMaster ALLER Looper; Anzeige an = alle an
+    looperDockTabs->onMasterToggled = [this] (bool toMaster)
     {
         auto& settings = engine.getLooperSettings();
         for (int l = 0; l < LooperSettings::maxLoopers; ++l)
-            settings.setSpectrumView (l, spectrum);
-        looperPage.setSpectrumView (spectrum);
+            settings.setSendToMaster (l, toMaster);
+        looperDockTabs->setMasterState (toMaster);
     };
 
     // Metronom-Ziel-Paare fürs Link-Menü: Labels aus den ChannelNames,
     // Kanalzahl aus dem audio_out-Tree-Node (folgt der Hardware)
     transportBar.metronomeTargetNames = [this] { return buildOutputPairNames(); };
 
-    // Ausgabe-Paar des Loop-Playbacks (global, B6): Auswahl persistiert
-    // looperAnchor und routet die Bank sofort um
-    looperPage.onOutputPairSelected = [this] (int pairIndex)
+    // Ausgabe-Paar des Loop-Playbacks (global, B6 — seit dem Kopf-Umbau
+    // im MIXER · MASTER): Auswahl persistiert looperAnchor und routet
+    // die Bank sofort um
+    looperDockTabs->onOutputPairSelected = [this] (int pairIndex)
     { engine.setLooperAnchor (pairIndex); };
 
     // Startzustand: Struktur + Quellen aus den Settings ziehen
@@ -539,6 +594,13 @@ EngineEditor::~EngineEditor()
     engine.getChannelNames().removeChangeListener (this);
     engine.getCaptureService().removeChangeListener (this);
     engine.getUiSettings().removeChangeListener (this);
+    engine.getMidiRigSettings().removeChangeListener (this);
+
+    // Looper-MIDI-Abos lösen (der Hub überlebt den Editor)
+    for (const auto token : looperMidiSubTokens)
+        engine.getMidiPortHub().unsubscribe (token);
+    if (looperMidiTickToken >= 0)
+        engine.getMidiPortHub().unsubscribe (looperMidiTickToken);
 
     // Der Service überlebt den Editor — Callback lösen, sonst zeigte ein
     // späterer Export-Report ins Leere
@@ -602,6 +664,14 @@ void EngineEditor::changeListenerCallback (juce::ChangeBroadcaster* source)
     if (source == &engine.getLooperSettings())
     {
         refreshLooperStructure();
+        return;
+    }
+
+    // Rig-Änderungen (neues/entferntes Controller-Gerät): Looper-MIDI-
+    // Abos neu verdrahten
+    if (source == &engine.getMidiRigSettings())
+    {
+        wireLooperMidiInputs();
         return;
     }
 
@@ -863,8 +933,9 @@ void EngineEditor::rebuildLooperSources()
     }
 
     // Ausgabe-Paare hängen an denselben Broadcasts (ChannelNames/Hardware)
-    looperPage.setOutputPairs (buildOutputPairNames(),
-                               engine.getTransportSettings().getLooperAnchor());
+    if (looperDockTabs != nullptr)
+        looperDockTabs->setOutputPairs (buildOutputPairNames(),
+                                        engine.getTransportSettings().getLooperAnchor());
 }
 
 //==============================================================================
@@ -873,11 +944,14 @@ void EngineEditor::refreshLooperStructure()
     auto& settings = engine.getLooperSettings();
     auto& session = engine.getLooperSession();
 
-    // Panels folgen der Settings-Struktur; Hooks IMMER (re-)verdrahten —
-    // beim Startaufruf hat die Page ihr Panel schon aus dem ctor
-    // (setLooperCount wäre dann ein No-op ohne onPanelsChanged)
+    // Panels folgen der Settings-Struktur; ein echter Neuaufbau verdrahtet
+    // über onPanelsChanged. Der explizite Aufruf deckt NUR den Startfall ab
+    // (das Panel aus dem ctor hat nie onPanelsChanged gesehen) — pro Event
+    // neu zu verdrahten hieße, bei jeder Mausbewegung Dutzende
+    // std::functions neu zu allokieren (Perf 20.07.2026).
     looperPage.setLooperCount (settings.getNumLoopers());
-    wireLooperPanels();
+    if (! looperPanelsWired)
+        wireLooperPanels();
 
     for (int l = 0; l < looperPage.getLooperCount(); ++l)
     {
@@ -888,12 +962,23 @@ void EngineEditor::refreshLooperStructure()
         for (int t = 0; t < panel.getTrackCount(); ++t)
         {
             auto& track = panel.getTrack (t);
+            track.setDisplayNumber (LooperPatchOutModule::globalTrackNumber (l + 1, t + 1));
             track.setGain (settings.getTrackGain (l, t));
             track.setPan (settings.getTrackPan (l, t));
+            track.setDistance (settings.getTrackDistance (l, t));
             track.setMute (settings.isTrackMuted (l, t));
             track.setSolo (settings.isTrackSolo (l, t));
-            track.setSendState (settings.getTrackSends (l, t),
-                                settings.isTrackSendPre (l, t));
+
+            std::array<float, 4> levels {};
+            for (int s = 0; s < 4; ++s)
+                levels[(std::size_t) s] = settings.getTrackSendLevel (l, t, s);
+            track.setSendLevels (levels);
+            track.setSendCount (settings.getSendCount());
+            track.setSendColours ({ settings.getSendColour (0), settings.getSendColour (1),
+                                    settings.getSendColour (2), settings.getSendColour (3) });
+            track.setYLinkSend (settings.getYLinkSend());
+            track.setShowMuteSolo (! settings.isHideMuteSolo());
+            track.setShowXy (! settings.isHideMixerXy());
         }
 
         // VARI-Rast-Zustand der Controls: Scope-abhängig (Track des
@@ -906,12 +991,46 @@ void EngineEditor::refreshLooperStructure()
         panel.getControls().setTargetVisible (panel.getTrackCount() > 1);
     }
 
-    looperPage.setSpectrumView (settings.isSpectrumView (0));
-    rebuildLooperSources();
+    for (int l = 0; l < looperPage.getLooperCount(); ++l)
+        looperPage.setSpectrumView (l, settings.isSpectrumView (l));
+    looperPage.setShowStopAll (settings.isShowStopAll());
+
+    if (looperDockTabs != nullptr)
+    {
+        looperDockTabs->refreshLayout();
+
+        // MST-Anzeige: an = ALLE Looper senden an den Master
+        bool allToMaster = true;
+        for (int l = 0; l < LooperSettings::maxLoopers; ++l)
+            allToMaster = allToMaster && settings.isSendToMaster (l);
+        looperDockTabs->setMasterState (allToMaster);
+    }
+
+    // Quellen-Menüs NUR bei echtem Quell-Wechsel neu bauen: der Rebuild
+    // leert und füllt das Combo-Menü jedes Panels — pro Mixer-Drag (der
+    // Settings-Broadcast feuert bei jeder Mausbewegung) war das reine
+    // Verschwendung. Registry-/Namens-Änderungen laufen weiter über die
+    // eigenen Listener-Pfade (changeListenerCallback/valueTree*).
+    bool sourceKeysChanged = false;
+    for (int l = 0; l < LooperSettings::maxLoopers; ++l)
+    {
+        auto& cached = looperSourceKeyCache[(size_t) l];
+        if (const auto key = settings.getSourceKey (l); cached != key)
+        {
+            cached = key;
+            sourceKeysChanged = true;
+        }
+    }
+    if (sourceKeysChanged)
+        rebuildLooperSources();
+
+    rebuildLooperMapTargets();   // Struktur-Wechsel im MAP MODE: Rahmen nachziehen
 }
 
 void EngineEditor::wireLooperPanels()
 {
+    looperPanelsWired = true;
+
     for (int l = 0; l < looperPage.getLooperCount(); ++l)
     {
         auto& panel = looperPage.getPanel (l);
@@ -926,12 +1045,13 @@ void EngineEditor::wireLooperPanels()
             looperPage.getPanel (l).getStrip().setSourceColour (looperSourceColour (key));
         };
 
-        // „An Master senden" pro Looper (Looper-I/O, ADR 010): Settings
-        // broadcasten → applyLooperSettings spiegelt in die Bank
-        panel.setSendMaster (engine.getLooperSettings().isSendToMaster (l));
-        panel.onSendMasterToggled = [this, l] (bool enabled)
+        // FFT/WAVE pro Looper (07/2026, ersetzt die MST-Kachel des Kopfs):
+        // Settings pro Looper, Kachel + Strip folgen sofort
+        panel.setSpectrumView (engine.getLooperSettings().isSpectrumView (l));
+        panel.onViewToggled = [this, l] (bool spectrum)
         {
-            engine.getLooperSettings().setSendToMaster (l, enabled);
+            engine.getLooperSettings().setSpectrumView (l, spectrum);
+            looperPage.getPanel (l).setSpectrumView (spectrum);
         };
 
         // Segment-Klick = Commit in den Target-Slot dieses Loopers;
@@ -961,35 +1081,66 @@ void EngineEditor::wireLooperPanels()
         panel.onTrackSolo = [this, l] (int t, bool solo)
         { engine.getLooperSettings().setTrackSolo (l, t, solo); };
 
-        // SND-Kachel → Send-Dialog (Big Out): S1–S4 + PRE/POST, Persistenz
-        // in die LooperSettings — die Engine folgt über applyLooperSettings
-        panel.onTrackSendTile = [this, l] (int t)
-        {
-            auto& settings = engine.getLooperSettings();
-            auto dialog = std::make_unique<LooperSendDialog> (
-                "Sends " + juce::String::fromUTF8 ("\xe2\x80\x94") + " Looper "
-                    + juce::String (l + 1) + juce::String::fromUTF8 (" \xc2\xb7 Track ")
-                    + juce::String (t + 1),
-                settings.getTrackSends (l, t), settings.isTrackSendPre (l, t));
-
-            // Maske komplett aus dem Dialog-Zustand übernehmen — der
-            // Settings-Broadcast spiegelt sie zurück in die SND-Kachel
-            auto* raw = dialog.get();
-            raw->onSendToggled = [this, l, t, raw] (int, bool)
-            { engine.getLooperSettings().setTrackSends (l, t, raw->getSendMask()); };
-            raw->onPreToggled = [this, l, t] (bool pre)
-            { engine.getLooperSettings().setTrackSendPre (l, t, pre); };
-
-            juce::CallOutBox::launchAsynchronously (
-                std::move (dialog),
-                looperPage.getPanel (l).getTrack (t).getSendTile().getScreenBounds(),
-                nullptr);
-        };
+        // Mixer 07/2026: Distanz (XY-Y) + Send-LEVEL direkt in die
+        // Settings — die Engine folgt über applyLooperSettings (der
+        // frühere SND-Dialog ist durch die Send-Kacheln ersetzt)
+        panel.onTrackDistance = [this, l] (int t, float distance)
+        { engine.getLooperSettings().setTrackDistance (l, t, distance); };
+        panel.onTrackSendLevel = [this, l] (int t, int s, float level)
+        { engine.getLooperSettings().setTrackSendLevel (l, t, s, level); };
 
         panel.onTrackStop = [this, l] (int t)
         {
             engine.getLooperSession().stopTrack (
                 l, t, launchQuantBeats (engine.getLooperSettings().getLaunchQuant()));
+        };
+
+        // Footer-Play (07/2026): startet den aktiven, sonst den ersten
+        // belegten Slot des Tracks — synchron am Launch-Grid
+        panel.onTrackPlay = [this, l] (int t)
+        {
+            auto& session = engine.getLooperSession();
+            const auto qBeats = launchQuantBeats (
+                engine.getLooperSettings().getLaunchQuant());
+
+            auto slot = -1;
+            if (const auto active = session.getActiveSlot (l);
+                active.isValid() && active.track == t
+                && session.clipAt (l, t, active.slot) != nullptr)
+                slot = active.slot;
+            else
+                for (int s = 0; s < LooperSessionModel::maxSlots; ++s)
+                    if (session.clipAt (l, t, s) != nullptr)
+                    {
+                        slot = s;
+                        break;
+                    }
+
+            if (slot < 0)
+                return;
+            if (const auto result = session.startSlot (l, t, slot, qBeats);
+                result.failed())
+                captureToast.show (result.getErrorMessage());
+        };
+
+        // Long-Press auf ▶ = ReSet (Rate 1×, vorwärts-Anker, Re-Sync) —
+        // wirkt auf den spielenden Clip des Tracks, sonst den Aktiv-Clip
+        panel.onTrackResetSync = [this, l] (int t)
+        {
+            auto& session = engine.getLooperSession();
+            LooperClip* clip = nullptr;
+            if (const auto playing = session.getPlayingSlot (l, t); playing >= 0)
+                clip = session.clipAt (l, t, playing);
+            if (clip == nullptr)
+                if (const auto active = session.getActiveSlot (l);
+                    active.isValid() && active.track == t)
+                    clip = session.clipAt (l, t, active.slot);
+
+            if (clip != nullptr)
+            {
+                engine.getLooperBank().resetClipWithSync (*clip);
+                looperPage.getPanel (l).getControls().setRate (1.0);
+            }
         };
 
         panel.onAddTrack = [this, l]
@@ -1012,37 +1163,80 @@ void EngineEditor::wireLooperPanels()
         // ── Clip-Controls (wirken auf den Aktiv-Clip, Übergabe §2) ──────
         auto& controls = panel.getControls();
 
-        controls.onDoubleLength = [this, l]
+        // LEN/POS-Potis (07/2026): die Row liefert die Knob-NORM, hier
+        // wird mit Clip-Info in Content-Beats umgerechnet (Sync: Raster
+        // /8 /4 /2 /1 bzw. fensterweise · Free: 50 ms–60 s bzw. ms)
+        controls.setSyncFree (looperLenSync[(size_t) l]);
+        controls.onSyncFreeToggled = [this, l] (bool sync)
         {
-            if (auto* clip = engine.getLooperSession().getActiveClip (l))
-                engine.getLooperBank().multiplyClipLength (*clip, true,
-                                         engine.getLooperSettings().getHalveMode());
+            looperLenSync[(size_t) l] = sync;
+            looperPage.getPanel (l).getControls().setSyncFree (sync);
+            refreshLooperLenPos (l);
         };
-        controls.onHalveLength = [this, l]
+        controls.onLoopLenChanged = [this, l] (double norm, bool sync)
         {
-            if (auto* clip = engine.getLooperSession().getActiveClip (l))
-                engine.getLooperBank().multiplyClipLength (*clip, false,
-                                         engine.getLooperSettings().getHalveMode());
+            auto* clip = engine.getLooperSession().getActiveClip (l);
+            if (clip == nullptr || clip->contentBeats <= 0.0)
+                return;
+
+            const auto beats = sync
+                ? clip->contentBeats * looperui::syncFractionFromNorm (norm)
+                : looperui::freeLenSecondsFromNorm (norm) * engine.getSampleRate()
+                      / juce::jmax (1.0, clip->samplesPerBeatRecorded);
+            engine.getLooperBank().setClipLengthBeats (*clip, beats,
+                                       engine.getLooperSettings().getHalveMode());
+            refreshLooperLenPos (l);
         };
+        controls.onLoopPosChanged = [this, l] (double norm, bool sync)
+        {
+            auto* clip = engine.getLooperSession().getActiveClip (l);
+            if (clip == nullptr || clip->contentBeats <= 0.0)
+                return;
+
+            const auto length = clip->stagedLengthBeats.load (std::memory_order_relaxed);
+            const auto maxOffset = juce::jmax (0.0, clip->contentBeats - length);
+            auto offset = norm * maxOffset;
+            if (sync && length > 0.0)
+                offset = juce::jlimit (0.0, maxOffset,
+                                       std::round (offset / length) * length);
+            engine.getLooperBank().setClipWindowOffsetBeats (*clip, offset);
+            refreshLooperLenPos (l);
+        };
+
         controls.onReverseToggled = [this, l]
         {
             if (auto* clip = engine.getLooperSession().getActiveClip (l))
+            {
+                const auto mode = engine.getLooperSettings().getReverseMode();
                 engine.getLooperBank().toggleClipReverse (*clip,
-                                        engine.getLooperSettings().getReverseMode()
-                                            == LooperSettings::ReverseMode::boundary);
+                    mode == LooperSettings::ReverseMode::boundary,
+                    mode == LooperSettings::ReverseMode::quantized
+                        ? launchQuantBeats (engine.getLooperSettings().getLaunchQuant())
+                        : 0.0);
+            }
         };
         controls.onRateChanged = [this, l] (double rate)
         {
             if (auto* clip = engine.getLooperSession().getActiveClip (l))
                 engine.getLooperBank().setClipRate (*clip, rate);
         };
-        controls.onResetWithSync = [this, l]
+
+        // VARI Display (Quant): „+3 st" oder Skalen-Stufe „♭3", solange
+        // die Rate auf einem Halbton rastet — sonst Faktor-Anzeige
+        controls.rateFormatter = [this] (double rate)
         {
-            if (auto* clip = engine.getLooperSession().getActiveClip (l))
+            const auto semis = std::log2 (juce::jmax (1.0e-6, rate)) * 12.0;
+            const auto nearest = std::round (semis);
+            if (std::abs (semis - nearest) < 0.05)
             {
-                engine.getLooperBank().resetClipWithSync (*clip);
-                looperPage.getPanel (l).getControls().setRate (1.0);
+                const auto n = (int) nearest;
+                if (engine.getLooperSettings().getVariDisplay()
+                        == LooperSettings::VariDisplay::scaleDegrees)
+                    return scale::degreeName (n);
+                return (n >= 0 ? juce::String ("+") : juce::String())
+                     + juce::String (n) + " st";
             }
+            return juce::String (rate, 2) + juce::String::fromUTF8 ("×");
         };
 
         controls.onRasterToggled = [this, l] (bool quantized)
@@ -1090,6 +1284,439 @@ void EngineEditor::wireLooperPanels()
 
     // Nach dem Neuaufbau Quellen-Listen + Zustände nachziehen
     rebuildLooperSources();
+}
+
+void EngineEditor::refreshLooperLenPos (int looperIndex)
+{
+    auto& controls = looperPage.getPanel (looperIndex).getControls();
+    auto* clip = engine.getLooperSession().getActiveClip (looperIndex);
+    if (clip == nullptr || clip->contentBeats <= 0.0)
+    {
+        controls.setLoopLenNorm (1.0, {});
+        controls.setLoopPosNorm (0.0, {});
+        return;
+    }
+
+    const auto sync = looperLenSync[(size_t) juce::jlimit (0, 3, looperIndex)];
+    const auto length = clip->stagedLengthBeats.load (std::memory_order_relaxed);
+    const auto window = clip->stagedWindowOffsetBeats.load (std::memory_order_relaxed);
+    const auto lengthSeconds = length * juce::jmax (1.0, clip->samplesPerBeatRecorded)
+                             / juce::jmax (1.0, engine.getSampleRate());
+
+    const auto secondsText = [] (double seconds)
+    {
+        return seconds < 1.0
+             ? juce::String ((int) std::lround (seconds * 1000.0)) + " ms"
+             : juce::String (seconds, 2) + " s";
+    };
+
+    // LEN: gerastert „/n" bzw. Takte, frei in s·ms
+    const auto divisor = looper::lengthDivisor (clip->contentBeats, length);
+    if (sync && divisor > 0)
+        controls.setLoopLenNorm (
+            looperui::syncNormFromFraction (1.0 / divisor),
+            divisor > 1 ? "/" + juce::String (divisor)
+                        : juce::String (clip->commitBars)
+                              + (clip->commitBars == 1 ? " Bar" : " Bars"));
+    else
+        controls.setLoopLenNorm (looperui::freeLenNormFromSeconds (lengthSeconds),
+                                 secondsText (lengthSeconds));
+
+    // POS: fensterweise „+k" bzw. ms; „—" am Content-Anfang
+    const auto maxOffset = juce::jmax (0.0, clip->contentBeats - length);
+    const auto posNorm = maxOffset > 0.0 ? window / maxOffset : 0.0;
+    juce::String posText = juce::String::fromUTF8 ("—");
+    if (window > 1.0e-6)
+        posText = sync && length > 0.0
+                ? "+" + juce::String ((int) std::lround (window / length))
+                : "+" + secondsText (window
+                                     * juce::jmax (1.0, clip->samplesPerBeatRecorded)
+                                     / juce::jmax (1.0, engine.getSampleRate()));
+    controls.setLoopPosNorm (posNorm, posText);
+}
+
+//==============================================================================
+// Looper-MIDI-Map (07/2026)
+
+void EngineEditor::wireLooperMidiInputs()
+{
+    auto& hub = engine.getMidiPortHub();
+    for (const auto token : looperMidiSubTokens)
+        hub.unsubscribe (token);
+    looperMidiSubTokens.clear();
+
+    // Alle Controller-Rolle-Geräte des Rigs füttern die Looper-Bindings
+    // (Empfehlung 20.07.2026 — nicht nur das Grid-Controller-Gerät)
+    auto& rig = engine.getMidiRigSettings();
+    for (int deviceIndex = 0; deviceIndex < rig.getNumDevices(); ++deviceIndex)
+    {
+        const auto device = rig.getDevice (deviceIndex);
+        if (device.kind != RigDeviceKind::controller)
+            continue;
+
+        looperMidiSubTokens.push_back (hub.subscribeController (device.id,
+            [this] (const midi::ControllerEvent& event)
+            {
+                auto& bindings = looperMidiMap->getBindings();
+                if (event.kind == midi::ControllerEvent::Kind::pitchBend)
+                    bindings.handleIncomingPitchBend (event.channel, event.value);
+                else if (event.kind == midi::ControllerEvent::Kind::cc)
+                    bindings.handleIncomingCc (event.channel, event.number, event.value);
+            }));
+        looperMidiSubTokens.push_back (hub.subscribeNotes (device.id,
+            [this] (const midi::NoteEvent& event)
+            {
+                looperMidiMap->getBindings().handleIncomingNote (
+                    event.channel, event.note, event.velocity, event.isOn);
+            }));
+    }
+
+    if (looperMidiTickToken < 0)
+        looperMidiTickToken = hub.subscribeTick ([this]
+        {
+            looperMidiMap->getBindings().tick (
+                [this] (const grid::MacroControlKey& key)
+                { return looperMidiValueFor (key); },
+                [this] (const grid::MacroControlKey& key, float value01)
+                { applyLooperMidiValue (key, value01); });
+        });
+}
+
+float EngineEditor::looperMidiValueFor (const grid::MacroControlKey& key)
+{
+    using loopermidi::Target;
+    auto& settings = engine.getLooperSettings();
+    const auto l = loopermidi::looperOf (key);
+    const auto t = loopermidi::trackOf (key);
+
+    switch (loopermidi::targetOf (key))
+    {
+        case Target::gain:      return juce::jlimit (0.0f, 1.0f, settings.getTrackGain (l, t));
+        case Target::panX:      return settings.getTrackPan (l, t) * 0.5f + 0.5f;
+        case Target::panY:      return settings.getTrackDistance (l, t);
+        case Target::sendLevel: return settings.getTrackSendLevel (l, t,
+                                                                   loopermidi::indexOf (key));
+        case Target::mute:      return settings.isTrackMuted (l, t) ? 1.0f : 0.0f;
+        case Target::solo:      return settings.isTrackSolo (l, t) ? 1.0f : 0.0f;
+        case Target::vari:
+        {
+            if (l >= looperPage.getLooperCount())
+                return 0.5f;
+            const auto rate = looperPage.getPanel (l).getControls().getRate();
+            return (float) (looperui::octavesFromRate (rate)
+                            / (2.0 * looperui::variOctaveRange) + 0.5);
+        }
+        case Target::lenPoti:
+            return l < looperPage.getLooperCount()
+                 ? (float) looperPage.getPanel (l).getControls().getLenKnob().getValue()
+                 : 1.0f;
+        case Target::posPoti:
+            return l < looperPage.getLooperCount()
+                 ? (float) looperPage.getPanel (l).getControls().getPosKnob().getValue()
+                 : 0.0f;
+
+        // Schalt-/Trigger-Ziele haben keinen kontinuierlichen Ist-Wert
+        case Target::slotCell:
+        case Target::segment:
+        case Target::sourceSelect:
+        case Target::viewToggle:
+        case Target::syncFree:
+        case Target::reverse:
+        case Target::tapeQuant:
+        case Target::targetCycle:
+        case Target::trackPlay:
+        case Target::trackStop:
+        case Target::masterToggle:
+        case Target::stopAll:
+            return 0.0f;
+    }
+    return 0.0f;
+}
+
+void EngineEditor::applyLooperMidiValue (const grid::MacroControlKey& key, float value01)
+{
+    using loopermidi::Target;
+    const auto type = loopermidi::targetOf (key);
+    const auto l = loopermidi::looperOf (key);
+    const auto t = loopermidi::trackOf (key);
+    const auto index = loopermidi::indexOf (key);
+    auto& settings = engine.getLooperSettings();
+
+    const auto globalTarget = type == Target::masterToggle || type == Target::stopAll;
+    if (! globalTarget && l >= looperPage.getLooperCount())
+        return;
+
+    // Edge-Erkennung der Schalt-Ziele (Notes sind momentary, CCs stufig)
+    auto& pressed = looperMidiPressed[key.controlId];
+    const auto rising = value01 >= 0.5f && ! pressed;
+    pressed = value01 >= 0.5f;
+
+    switch (type)
+    {
+        case Target::slotCell:
+            if (rising)
+                handleLooperSlotTap (l, t, index);
+            break;
+
+        case Target::segment:
+            if (rising)
+            {
+                static constexpr int bars[] = { 8, 4, 2, 1 };
+                if (engine.commitToTarget (l, bars[index & 3]).wasOk())
+                    captureLooperClipThumbnail (l);
+            }
+            break;
+
+        case Target::sourceSelect:
+            if (rising)
+            {
+                // zyklisch zur nächsten Quelle (Item-IDs = Index + 1)
+                auto& combo = looperPage.getPanel (l).getSourceCombo();
+                const auto current = combo.getSelectedId();
+                combo.setSelectedId (current + 1, juce::sendNotificationSync);
+                if (combo.getSelectedId() != current + 1)
+                    combo.setSelectedId (1, juce::sendNotificationSync);
+            }
+            break;
+
+        case Target::viewToggle:
+            if (rising)
+                looperPage.getPanel (l).getViewTile().onClick();
+            break;
+
+        case Target::syncFree:
+            if (rising)
+                looperPage.getPanel (l).getControls().getSyncFreeTile().onClick();
+            break;
+
+        case Target::lenPoti:
+        {
+            auto& controls = looperPage.getPanel (l).getControls();
+            if (controls.onLoopLenChanged != nullptr)
+                controls.onLoopLenChanged (value01, controls.isSyncMode());
+            break;
+        }
+
+        case Target::posPoti:
+        {
+            auto& controls = looperPage.getPanel (l).getControls();
+            if (controls.onLoopPosChanged != nullptr)
+                controls.onLoopPosChanged (value01, controls.isSyncMode());
+            break;
+        }
+
+        case Target::reverse:
+            if (rising)
+                looperPage.getPanel (l).getControls().getReverseTile().onClick();
+            break;
+
+        case Target::vari:
+        {
+            auto& controls = looperPage.getPanel (l).getControls();
+            const auto rate = looperui::rateFromOctaves (looperui::applyDetent (
+                (value01 * 2.0 - 1.0) * looperui::variOctaveRange));
+            if (controls.onRateChanged != nullptr)
+                controls.onRateChanged (rate);
+            controls.setRate (rate);
+            break;
+        }
+
+        case Target::tapeQuant:
+            if (rising)
+                looperPage.getPanel (l).getControls().getRasterTile().onClick();
+            break;
+
+        case Target::targetCycle:
+            if (rising)
+                engine.getLooperSession().cycleTargetTrack (l);
+            break;
+
+        case Target::trackPlay:
+            if (rising && t < looperPage.getPanel (l).getTrackCount())
+                if (auto& hook = looperPage.getPanel (l).onTrackPlay; hook != nullptr)
+                    hook (t);
+            break;
+
+        case Target::trackStop:
+            if (rising && t < looperPage.getPanel (l).getTrackCount())
+                if (auto& hook = looperPage.getPanel (l).onTrackStop; hook != nullptr)
+                    hook (t);
+            break;
+
+        case Target::mute:
+            if (rising)
+                settings.setTrackMuted (l, t, ! settings.isTrackMuted (l, t));
+            break;
+
+        case Target::solo:
+            if (rising)
+                settings.setTrackSolo (l, t, ! settings.isTrackSolo (l, t));
+            break;
+
+        case Target::sendLevel:
+            settings.setTrackSendLevel (l, t, index, value01);
+            break;
+
+        case Target::panX:
+            settings.setTrackPan (l, t, value01 * 2.0f - 1.0f);
+            break;
+
+        case Target::panY:
+            settings.setTrackDistance (l, t, value01);
+            break;
+
+        case Target::gain:
+            settings.setTrackGain (l, t, value01);
+            break;
+
+        case Target::masterToggle:
+            if (rising && looperDockTabs != nullptr
+                && looperDockTabs->onMasterToggled != nullptr)
+            {
+                bool allToMaster = true;
+                for (int looper = 0; looper < LooperSettings::maxLoopers; ++looper)
+                    allToMaster = allToMaster && settings.isSendToMaster (looper);
+                looperDockTabs->onMasterToggled (! allToMaster);
+            }
+            break;
+
+        case Target::stopAll:
+            if (rising)
+                engine.stopLooper();
+            break;
+    }
+}
+
+void EngineEditor::rebuildLooperMapTargets()
+{
+    if (! looperMapOverlay.isVisible())
+        return;
+
+    using loopermidi::Target;
+    std::vector<LooperMapOverlay::TargetSpot> spots;
+    auto& bindings = looperMidiMap->getBindings();
+
+    const auto badgeFor = [&bindings] (const grid::MacroControlKey& key)
+    {
+        if (const auto* binding = bindings.bindingFor (key))
+            return (binding->isNote ? juce::String ("N ") : juce::String ("CC "))
+                 + juce::String (binding->cc);
+        return juce::String();
+    };
+    const auto add = [&] (juce::Component& component, const grid::MacroControlKey& key)
+    {
+        if (! component.isShowing())
+            return;
+        spots.push_back ({ key,
+                           looperMapOverlay.getLocalArea (&component,
+                                                          component.getLocalBounds()),
+                           badgeFor (key) });
+    };
+
+    for (int l = 0; l < looperPage.getLooperCount(); ++l)
+    {
+        auto& panel = looperPage.getPanel (l);
+        add (panel.getSourceCombo(), loopermidi::makeKey (Target::sourceSelect, l));
+        add (panel.getViewTile(), loopermidi::makeKey (Target::viewToggle, l));
+
+        if (panel.getStrip().isShowing())
+            for (int segment = 0; segment < 4; ++segment)
+            {
+                const auto key = loopermidi::makeKey (Target::segment, l, 0, segment);
+                spots.push_back ({ key,
+                                   looperMapOverlay.getLocalArea (
+                                       &panel.getStrip(),
+                                       panel.getStrip().getSegmentBounds (segment)),
+                                   badgeFor (key) });
+            }
+
+        auto& controls = panel.getControls();
+        add (controls.getSyncFreeTile(), loopermidi::makeKey (Target::syncFree, l));
+        add (controls.getLenKnob(), loopermidi::makeKey (Target::lenPoti, l));
+        add (controls.getPosKnob(), loopermidi::makeKey (Target::posPoti, l));
+        add (controls.getReverseTile(), loopermidi::makeKey (Target::reverse, l));
+        add (controls.getVariKnob(), loopermidi::makeKey (Target::vari, l));
+        add (controls.getRasterTile(), loopermidi::makeKey (Target::tapeQuant, l));
+
+        for (int t = 0; t < panel.getTrackCount(); ++t)
+        {
+            auto& track = panel.getTrack (t);
+
+            // XY: obere Hälfte = Distanz (Y), untere = Pan (X)
+            if (track.getXyPad().isShowing())
+            {
+                auto pad = looperMapOverlay.getLocalArea (
+                    &track.getXyPad(), track.getXyPad().getLocalBounds());
+                const auto keyY = loopermidi::makeKey (Target::panY, l, t);
+                const auto keyX = loopermidi::makeKey (Target::panX, l, t);
+                spots.push_back ({ keyY, pad.removeFromTop (pad.getHeight() / 2),
+                                   badgeFor (keyY) });
+                spots.push_back ({ keyX, pad, badgeFor (keyX) });
+            }
+
+            add (track.getPlayTile(), loopermidi::makeKey (Target::trackPlay, l, t));
+            add (track.getStopTile(), loopermidi::makeKey (Target::trackStop, l, t));
+            add (track.getMuteTile(), loopermidi::makeKey (Target::mute, l, t));
+            add (track.getSoloTile(), loopermidi::makeKey (Target::solo, l, t));
+            for (int send = 0; send < 4; ++send)
+                add (track.getSendTile (send),
+                     loopermidi::makeKey (Target::sendLevel, l, t, send));
+            for (int slot = 0; slot < track.getVisibleSlots(); ++slot)
+                add (track.getSlotCell (slot),
+                     loopermidi::makeKey (Target::slotCell, l, t, slot));
+        }
+    }
+
+    add (looperPage.getStopAllTile(), loopermidi::makeKey (Target::stopAll));
+
+    // Dock-gehostetes Ziel: der globale MST-Toggle (Overlay deckt das Dock)
+    if (auto* mixer = looperDockTabs->getMixerTabContent())
+    {
+        std::function<juce::Component* (juce::Component&)> findMst =
+            [&] (juce::Component& parent) -> juce::Component*
+        {
+            if (parent.getComponentID() == "mst")
+                return &parent;
+            for (auto* child : parent.getChildren())
+                if (auto* hit = findMst (*child))
+                    return hit;
+            return nullptr;
+        };
+        if (auto* mst = findMst (*mixer))
+            add (*mst, loopermidi::makeKey (Target::masterToggle));
+    }
+
+    looperMapOverlay.setTargets (std::move (spots));
+}
+
+void EngineEditor::updateLooperMapOverlay()
+{
+    // Beim Verlassen der Looper-Page den Modus AUSschalten (nicht nur
+    // verstecken) — sonst steckt man beim Zurückkommen wieder drin
+    if (looperDockTabs != nullptr && looperDockTabs->isMapModeActive()
+        && pageHost.getPage() != TransportBar::pageLooper)
+        looperDockTabs->setMapModeActive (false);
+
+    const auto active = looperDockTabs != nullptr && looperDockTabs->isMapModeActive()
+                     && pageHost.getPage() == TransportBar::pageLooper;
+    looperMapOverlay.setVisible (active);
+
+    if (active)
+    {
+        // Das Seitenpanel bleibt bedienbar (Toggle + Mappings-Liste);
+        // dort fängt das Overlay nur über echten Zielen
+        looperMapOverlay.setPassThroughArea (
+            looperMapOverlay.getLocalArea (this, editorDock.getBounds()));
+        looperMapOverlay.toFront (false);
+        rebuildLooperMapTargets();
+    }
+    else if (looperMidiMap != nullptr)
+    {
+        looperMidiMap->getBindings().cancelLearn();
+        if (looperDockTabs != nullptr)
+            looperDockTabs->setArmedKey (false, {});
+        looperMapOverlay.setArmedKey (false, {});
+    }
 }
 
 void EngineEditor::removeLooperTrack (int looperIndex, int trackIndex)
@@ -1203,7 +1830,12 @@ void EngineEditor::handleLooperSlotTap (int looperIndex, int trackIndex, int slo
         return;
     }
 
-    const auto qBeats = launchQuantBeats (settings.getLaunchQuant());
+    // Legato (07/2026): sofortiger, phasenstarrer Wechsel (qBeats 0 —
+    // der 5-ms-Voice-Crossfade deckt die Naht); Tap auf den spielenden
+    // Clip ist dann ein No-op
+    const auto legato = settings.getTapMode() == LooperSettings::TapMode::legato;
+    const auto qBeats = legato ? 0.0
+                               : launchQuantBeats (settings.getLaunchQuant());
     juce::Result result = juce::Result::ok();
 
     if (session.getPlayingSlot (looperIndex, trackIndex) == slotIndex)
@@ -1211,7 +1843,7 @@ void EngineEditor::handleLooperSlotTap (int looperIndex, int trackIndex, int slo
         // Tap auf den SPIELENDEN Clip: Verhalten aus dem Menü
         if (settings.getTapMode() == LooperSettings::TapMode::toggleStop)
             session.stopTrack (looperIndex, trackIndex, qBeats);
-        else
+        else if (! legato)
             result = session.retriggerSlot (looperIndex, trackIndex, slotIndex, qBeats);
     }
     else
@@ -1382,14 +2014,12 @@ juce::uint32 EngineEditor::looperOutChannelRgb (const juce::String& nodeUuid, in
             break;
 
         case Kind::send:
-            // „aktuell summiert" = spielende Tracks mit gesetztem Send-Bit
-            for (int l = 0; l < session.getNumLoopers(); ++l)
-                for (int t = 0; t < session.getNumTracks (l); ++t)
-                    if (session.getPlayingSlot (l, t) >= 0
-                        && (settings.getTrackSends (l, t) & (1 << (spec.send - 1))) != 0)
-                        if (const auto rgb = looperTrackRgb (l, t); rgb != 0)
-                            mix.push_back (rgb);
-            break;
+            // Send-Slots tragen die GEWÄHLTE Send-Farbe (User 20.07.2026):
+            // sie ist im Mixer gesetzt und identifiziert den Bus eindeutig —
+            // Kachel-Markierung und Kabel sprechen damit dieselbe Sprache
+            // wie die Send-Kacheln im Track-Strip. (Die frühere Mischung
+            // der summierten Clip-Farben war beim Umstöpseln nicht stabil.)
+            return settings.getSendColour (spec.send - 1).getARGB() & 0x00ffffffu;
 
         case Kind::master:
             for (int l = 0; l < session.getNumLoopers(); ++l)
@@ -1523,7 +2153,7 @@ void EngineEditor::refreshLooperStatus (bool devMode)
     const auto playing = bank.isPlaying();
     transportBar.setLooperStatus (pageHost.getPage() == TransportBar::pageLooper,
                                   playing);
-    looperPage.getStopTile().setEnabled (playing);
+    looperPage.getStopAllTile().setEnabled (playing);
 
     // Papierkorb-Kachel (Big Out): Countdown + Sichtbarkeit
     auto& trash = engine.getLooperTrash();
@@ -1545,7 +2175,8 @@ void EngineEditor::refreshLooperStatus (bool devMode)
             const auto rmsRight = meter.getRms (1);
             const auto audible = juce::jmax (rmsLeft, rmsRight) > 1.0e-3f;
             anyAudible = anyAudible || audible;
-            track.setMeter (rmsLeft, rmsRight, audible);
+            track.setMeter (rmsLeft, rmsRight,
+                            meter.getPeak (0), meter.getPeak (1), audible);
 
             const auto playingSlot = session.getPlayingSlot (l, t);
             const auto target = session.getTarget (l);
@@ -1571,6 +2202,21 @@ void EngineEditor::refreshLooperStatus (bool devMode)
                     const auto rate = clip->stagedRate.load (std::memory_order_relaxed);
                     if (std::abs (rate - 1.0) > 1.0e-3)
                         state.rateBadge = juce::String (rate, 2) + juce::String::fromUTF8 ("×");
+
+                    // LEN/POS (07/2026): Fenster-Dimmung + „/n"-Badge
+                    if (clip->contentBeats > 0.0)
+                    {
+                        const auto lengthBeats =
+                            clip->stagedLengthBeats.load (std::memory_order_relaxed);
+                        const auto windowBeats =
+                            clip->stagedWindowOffsetBeats.load (std::memory_order_relaxed);
+                        state.loopStart01 = (float) (windowBeats / clip->contentBeats);
+                        state.loopLen01 = (float) (lengthBeats / clip->contentBeats);
+                        if (const auto divisor = looper::lengthDivisor (clip->contentBeats,
+                                                                        lengthBeats);
+                            divisor > 1)
+                            state.divBadge = "/" + juce::String (divisor);
+                    }
 
                     if (state.playing)
                     {
@@ -1636,11 +2282,13 @@ void EngineEditor::refreshLooperStatus (bool devMode)
                                      + juce::String::fromUTF8 (" · ")
                                      + juce::String (activeClip->commitBars)
                                      + (activeClip->commitBars == 1 ? " Bar" : " Bars"));
+            refreshLooperLenPos (l);
         }
         else
         {
             controls.setClipControlsEnabled (false);
             controls.setActiveLabel ({});
+            refreshLooperLenPos (l);
         }
     }
 
@@ -1761,6 +2409,8 @@ void EngineEditor::selectPage (int pageIndex)
         transportBar.getLooperDeleteTile().setActive (false);
         transportBar.getSaveTile().setActive (false);
     }
+
+    updateLooperMapOverlay();
 }
 
 void EngineEditor::toggleBrowserPanel()
@@ -1943,6 +2593,17 @@ void EngineEditor::resized()
 
     pageHost.setBounds (bounds);
 
+    // MAP-MODE-Overlay über Page UND Dock (MST/Output bleiben mappbar),
+    // aber NIE über der Transportleiste — deren Seiten-Symbole sind der
+    // Weg hinaus (User-Fund 20.07.2026)
+    looperMapOverlay.setBounds (
+        getLocalBounds().withTrimmedTop (TransportBar::preferredHeight));
+    if (looperMapOverlay.isVisible())
+    {
+        looperMapOverlay.toFront (false);
+        rebuildLooperMapTargets();
+    }
+
     // Toast: unten mittig über dem Canvas
     captureToast.setBounds (getLocalBounds()
                                 .withSizeKeepingCentre (460, 44)
@@ -1952,6 +2613,16 @@ void EngineEditor::resized()
 bool EngineEditor::keyPressed (const juce::KeyPress& key)
 {
     const auto modifier = juce::ModifierKeys::commandModifier;
+
+    // Notausgang aus dem MAP-MODE (User-Fund 20.07.2026): das Overlay
+    // deckt die Page ab — ESC beendet den Modus von überall.
+    if (key == juce::KeyPress::escapeKey && looperDockTabs != nullptr
+        && looperDockTabs->isMapModeActive())
+    {
+        looperDockTabs->setMapModeActive (false);
+        updateLooperMapOverlay();
+        return true;
+    }
 
     // Seiten-Navigation der Node-Page (ADR 008 M3b, Tastatur-Parität):
     // Ctrl+Alt+Pfeile wechseln im Seiten-Grid — ins Leere legt eine neue

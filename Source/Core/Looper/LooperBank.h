@@ -14,6 +14,7 @@
 #include "Interfaces/IClockSource.h"
 #include "LooperClip.h"
 #include "LooperClipMath.h"
+#include "LooperDistance.h"
 #include "LooperMath.h"
 #include "Util/SpscQueue.h"
 
@@ -64,7 +65,9 @@ namespace conduit
         Equal-Power-Pan + effektives Mute (MT-berechnet aus Mute/Solo/
         Solo-Scope) → Post-Fader-LevelMeter → additiv aufs Anker-Paar.
         Meter laufen auch bei OOB-Anker weiter. Send-Busse 1..4 greifen
-        pro Track wahlweise pre (vor dem Fader-Zug) oder post ab.
+        pro Track wahlweise pre (vor dem Fader-Zug) oder post ab —
+        seit dem Mixer (07/2026) mit stufenlosem LEVEL 0..1 pro Send
+        (5-ms-Block-Ramp) statt An/Aus-Maske.
 
     RAM-Konto: right-sized Clips statt Prealloc; die Summe aller lebenden
     Clips (Store + Graveyard) ist auf ramBudgetBytes begrenzt — ein Commit
@@ -92,6 +95,16 @@ public:
 
     // Lese-Sprünge oberhalb dieser Schwelle laufen hinter dem Splice-Duck
     static constexpr double spliceThresholdSamples = 64.0;
+
+    // Vorlauf der Wrap-Crossfade-Rampe (Klick-Fix 20.07.2026): sie muss
+    // ihren Endwert erreichen, BEVOR die Leseposition wrappt — bei
+    // Varispeed überspringt sie das Zonenende um bis zu `rate` Samples
+    static constexpr double fadeGuardSamples = 24.0;
+
+    // Unterhalb dieser Fensterlänge (Vielfaches des Crossfades, ~100 ms)
+    // wächst der Wrap-Fade relativ mit — sonst dominiert bei sehr kurzen
+    // Free-Loops die Wrap-Rate den Klang (User 20.07.2026: „knistert")
+    static constexpr double shortLoopFadeFactor = 20.0;
 
     static constexpr double minRate = 0.25, maxRate = 4.0;   // VARI ±2 Oktaven
     static constexpr std::int64_t defaultRamBudgetBytes = 1'500'000'000;
@@ -163,9 +176,12 @@ public:
     [[nodiscard]] juce::Result setClipRate (int looperIndex, int trackIndex,
                                             double rate);
 
-    /** Reverse-Toggle; atBoundary = erst an der Loop-Grenze anwenden. */
+    /** Reverse-Toggle; atBoundary = erst an der Loop-Grenze anwenden;
+        quantBeats > 0 = erst im Block mit Grid-Übertritt (Reverse-Modus
+        „Quantized", Block-Granularität wie applyAtWrap). */
     [[nodiscard]] juce::Result toggleClipReverse (int looperIndex, int trackIndex,
-                                                  bool atBoundary);
+                                                  bool atBoundary,
+                                                  double quantBeats = 0.0);
 
     /** ×2 (doubleLength=true) / ÷2 — ändert NUR die Länge L (Clamps:
         ≥ 1 Takt, ≤ Content). ÷2-Hälfte nach HalveMode. */
@@ -176,15 +192,32 @@ public:
     /** „Reset mit Sync": Rate 1× und Anker zurück aufs Commit-Taktraster. */
     [[nodiscard]] juce::Result resetClipWithSync (int looperIndex, int trackIndex);
 
+    /** LEN-Poti: Loop-Länge STUFENLOS in Content-Beats setzen (Sync-Raster
+        rechnet die UI: content/n). Clamps: ≥ 50 ms (Free-Untergrenze),
+        ≤ Content. Beim Schrumpfen mit HalveMode::currentHalf folgt das
+        Fenster der Apply-Phase (verallgemeinertes ÷2). */
+    [[nodiscard]] juce::Result setClipLengthBeats (int looperIndex, int trackIndex,
+                                                   double lengthBeats,
+                                                   looper::HalveMode halveMode);
+
+    /** POS-Poti: Fenster-Offset STUFENLOS in Content-Beats (geclampt auf
+        [0, content − Länge]); 0 = Reset (Doppelklick). */
+    [[nodiscard]] juce::Result setClipWindowOffsetBeats (int looperIndex, int trackIndex,
+                                                         double offsetBeats);
+
     //==========================================================================
     // Clip-Edits per Pointer [MT] — für die Aktiv-Clip-Auswahl des Modells
     // (TARGET-Halten kann JEDEN Clip wählen, nicht nur den spielenden)
 
     void setClipRate (LooperClip& clip, double rate) noexcept;
-    void toggleClipReverse (LooperClip& clip, bool atBoundary) noexcept;
+    void toggleClipReverse (LooperClip& clip, bool atBoundary,
+                            double quantBeats = 0.0) noexcept;
     void multiplyClipLength (LooperClip& clip, bool doubleLength,
                              looper::HalveMode halveMode) noexcept;
     void resetClipWithSync (LooperClip& clip) noexcept;
+    void setClipLengthBeats (LooperClip& clip, double lengthBeats,
+                             looper::HalveMode halveMode) noexcept;
+    void setClipWindowOffsetBeats (LooperClip& clip, double offsetBeats) noexcept;
 
     //==========================================================================
     // Track-Mix [Message Thread schreibt, Audio liest]
@@ -194,11 +227,29 @@ public:
     void setTrackMute (int looperIndex, int trackIndex, bool muted) noexcept;
     void setTrackSolo (int looperIndex, int trackIndex, bool solo) noexcept;
 
-    /** Send-Routing des Tracks: Bits 0..3 = Send 1..4 (Big Out). */
-    void setTrackSends (int looperIndex, int trackIndex, std::uint32_t mask) noexcept;
+    /** Send-LEVEL des Tracks (0..1, geclampt) auf Bus sendIndex 0..3 —
+        Audio slewt mit 5-ms-Block-Ramp dorthin (Mixer 07/2026). */
+    void setTrackSendLevel (int looperIndex, int trackIndex, int sendIndex,
+                            float level01) noexcept;
 
     /** Send-Abgriff des Tracks: true = pre (vor Gain/Pan/Mute), false = post. */
     void setTrackSendPre (int looperIndex, int trackIndex, bool pre) noexcept;
+
+    /** Distanz-Ziel des Tracks (XY-Y, 0..1) — Audio slewt mit der
+        Smooth-Zeit der Distanz-Globals dorthin (Monolake Distance). */
+    void setTrackDistance (int looperIndex, int trackIndex, float distance01) noexcept;
+
+    /** Distanz-Globals + Smooth-Zeit in Sekunden [MT schreibt, Audio liest]. */
+    void setDistanceGlobals (const looper::DistanceGlobals& globals,
+                             float smoothSeconds) noexcept;
+
+    /** Y-Link: Send-Index 0..3, der der Distanz folgt (Level = max aus
+        Poti-Level und geslewter Distanz), −1 = aus. */
+    void setYLinkSend (int sendIndex) noexcept
+    {
+        yLinkSendIndex.store (juce::jlimit (-1, maxSends - 1, sendIndex),
+                              std::memory_order_relaxed);
+    }
 
     /** Solo-Scope (Menü-Option): false = pro Looper (Default), true = global. */
     void setSoloScopeGlobal (bool global) noexcept;
@@ -297,6 +348,10 @@ public:
         bool reversed = false;
         int commitBars = 0;
         std::uint32_t clipId = 0;
+
+        // LEN/POS (Mixer 07/2026): Fenster fürs Slot-Dimming + „/n"-Badge
+        double contentBeats = 0.0;
+        double windowOffsetBeats = 0.0;
     };
     [[nodiscard]] bool getClipInfo (int looperIndex, int trackIndex,
                                     ClipInfo& out) const noexcept;
@@ -360,6 +415,11 @@ private:
         float currentGain = 1.0f;
         float currentPan = 0.0f;
         float currentMuteGain = 1.0f;
+        std::array<float, static_cast<std::size_t> (maxSends)> currentSend {};
+
+        // Distanz-Zug (Audio): geslewte Distanz + Filterzustände (2 Kanäle)
+        float currentDistance = 0.0f;
+        std::array<looper::BiquadState, 2> distLp {}, distShelf {};
     };
 
     // MT-only: Graveyard-Eintrag wartet auf die Audio-Quittung + Pins
@@ -376,10 +436,16 @@ private:
     void updateEffectiveMutes() noexcept;
     void refreshPlayingFlag() noexcept;
 
+    /** Länge der Wrap-Blende in Content-Samples (Renderer UND
+        Apply-Logik müssen dieselbe Zone kennen). */
+    [[nodiscard]] static double wrapFadeSamples (const LooperClip& clip,
+                                                 double windowLenSamples) noexcept;
+
     /** Kompletten Staged-Satz schreiben + Version bumpen [MT]. */
     static void stageClipParams (LooperClip& clip, double rate, double lengthBeats,
                                  double windowOffsetBeats, bool reversed,
-                                 bool followPhase, bool atWrap, bool resetGrid) noexcept;
+                                 bool followPhase, bool atWrap, bool resetGrid,
+                                 double quantBeats = 0.0) noexcept;
 
     /** Kanal chunked in den Clip-Buffer lesen (Export-Halte-Protokoll) [MT]. */
     static void readChannelChunked (const CaptureChannel* channel,
@@ -472,9 +538,22 @@ private:
     std::array<std::array<std::atomic<bool>, static_cast<std::size_t> (maxTracks)>,
                static_cast<std::size_t> (maxLoopers)> effectiveMute;
 
-    // Send-Routing [MT schreibt, Audio liest]: Maske Bits 0..3 + Abgriff
-    std::array<std::array<std::atomic<std::uint32_t>, static_cast<std::size_t> (maxTracks)>,
-               static_cast<std::size_t> (maxLoopers)> targetSendMask;
+    // Send-Level [MT schreibt, Audio slewt dorthin]: 0..1 pro Bus + Abgriff
+    std::array<std::array<std::array<std::atomic<float>, static_cast<std::size_t> (maxSends)>,
+                          static_cast<std::size_t> (maxTracks)>,
+               static_cast<std::size_t> (maxLoopers)> targetSendLevel;
+
+    // Distanz [MT schreibt, Audio liest]: Ziel pro Track + Globals
+    std::array<std::array<std::atomic<float>, static_cast<std::size_t> (maxTracks)>,
+               static_cast<std::size_t> (maxLoopers)> targetDistance;
+    std::atomic<float> distHiDumpDb { 9.0f };
+    std::atomic<float> distHiCutHz { 8000.0f };
+    std::atomic<float> distBaseFreqHz { 2000.0f };
+    std::atomic<float> distWidth01 { 0.5f };
+    std::atomic<bool>  distVolDumpOn { true };
+    std::atomic<float> distVolDumpDb { 12.0f };
+    std::atomic<float> distSmoothSeconds { 0.02f };
+    std::atomic<int>   yLinkSendIndex { -1 };
     std::array<std::array<std::atomic<bool>, static_cast<std::size_t> (maxTracks)>,
                static_cast<std::size_t> (maxLoopers)> sendTapPre;
 
