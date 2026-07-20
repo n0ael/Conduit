@@ -227,6 +227,52 @@ TEST_CASE ("LooperSettings: Send-Level — Roundtrip + Legacy-Bitmasken-Migratio
     }
 }
 
+TEST_CASE ("LooperSettings: Distanz — Defaults, Clamps, Roundtrip, Y-Link", "[looper]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettings temp;
+
+    {
+        LooperSettings settings { temp.options() };
+
+        // Defaults: Vol Dump AN (User 20.07.2026), Y-Link aus
+        const auto defaults = settings.getDistance();
+        REQUIRE (defaults.volDumpOn);
+        REQUIRE (defaults.hiDumpDb == Approx (9.0f));
+        REQUIRE (defaults.ySens == Approx (1.0f));
+        REQUIRE (settings.getYLinkSend() == -1);
+        REQUIRE (settings.getTrackDistance (0, 0) == Approx (0.0f));
+
+        auto state = defaults;
+        state.hiDumpDb = 99.0f;        // clampt auf 18
+        state.hiCutHz = 6100.0f;
+        state.baseFreqHz = 663.0f;
+        state.width01 = 0.4f;
+        state.volDumpOn = false;
+        state.smoothMs = 125.0f;
+        state.ySens = 0.7f;
+        settings.setDistance (state);
+        settings.setYLinkSend (2);
+        settings.setTrackDistance (1, 3, 0.65f);
+        settings.setTrackDistance (0, 0, 7.0f);   // clampt auf 1
+        settings.flush();
+    }
+
+    LooperSettings reloaded { temp.options() };
+    const auto dist = reloaded.getDistance();
+    REQUIRE (dist.hiDumpDb == Approx (18.0f));
+    REQUIRE (dist.hiCutHz == Approx (6100.0f));
+    REQUIRE (dist.baseFreqHz == Approx (663.0f));
+    REQUIRE (dist.width01 == Approx (0.4f));
+    REQUIRE_FALSE (dist.volDumpOn);
+    REQUIRE (dist.smoothMs == Approx (125.0f));
+    REQUIRE (dist.ySens == Approx (0.7f));
+    REQUIRE (reloaded.getYLinkSend() == 2);
+    REQUIRE (reloaded.getTrackDistance (1, 3) == Approx (0.65f));
+    REQUIRE (reloaded.getTrackDistance (0, 0) == Approx (1.0f));
+    REQUIRE (reloaded.getTrackDistance (3, 3) == Approx (0.0f));
+}
+
 TEST_CASE ("LooperSettings: Einmal-Migration der Legacy-Schlüssel", "[looper]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;

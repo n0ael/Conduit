@@ -213,6 +213,14 @@ public:
     void setDistanceGlobals (const looper::DistanceGlobals& globals,
                              float smoothSeconds) noexcept;
 
+    /** Y-Link: Send-Index 0..3, der der Distanz folgt (Level = max aus
+        Poti-Level und geslewter Distanz), −1 = aus. */
+    void setYLinkSend (int sendIndex) noexcept
+    {
+        yLinkSendIndex.store (juce::jlimit (-1, maxSends - 1, sendIndex),
+                              std::memory_order_relaxed);
+    }
+
     /** Solo-Scope (Menü-Option): false = pro Looper (Default), true = global. */
     void setSoloScopeGlobal (bool global) noexcept;
 
@@ -505,6 +513,7 @@ private:
     std::atomic<bool>  distVolDumpOn { true };
     std::atomic<float> distVolDumpDb { 12.0f };
     std::atomic<float> distSmoothSeconds { 0.02f };
+    std::atomic<int>   yLinkSendIndex { -1 };
     std::array<std::array<std::atomic<bool>, static_cast<std::size_t> (maxTracks)>,
                static_cast<std::size_t> (maxLoopers)> sendTapPre;
 

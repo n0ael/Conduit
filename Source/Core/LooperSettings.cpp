@@ -109,6 +109,7 @@ void LooperSettings::loadFromFile()
         (float) xml->getDoubleAttribute ("distSmoothMs", 20.0));
     distanceState.ySens      = juce::jlimit (0.0f, 1.0f,
         (float) xml->getDoubleAttribute ("distYSens", 1.0));
+    yLinkSend = juce::jlimit (-1, 3, xml->getIntAttribute ("yLinkSend", -1));
 
     int looperIndex = 0;
     for (const auto* looperXml : xml->getChildWithTagNameIterator (xmlLooper.toString()))
@@ -190,6 +191,7 @@ void LooperSettings::writeAndNotify()
     xml.setAttribute ("distVolDump", distanceState.volDumpDb);
     xml.setAttribute ("distSmoothMs", distanceState.smoothMs);
     xml.setAttribute ("distYSens", distanceState.ySens);
+    xml.setAttribute ("yLinkSend", yLinkSend);
 
     for (int l = 0; l < maxLoopers; ++l)
     {
@@ -604,6 +606,16 @@ void LooperSettings::setDistance (const DistanceState& state)
         return;
 
     distanceState = clamped;
+    writeAndNotify();
+}
+
+void LooperSettings::setYLinkSend (int sendIndex)
+{
+    const auto clamped = juce::jlimit (-1, 3, sendIndex);
+    if (yLinkSend == clamped)
+        return;
+
+    yLinkSend = clamped;
     writeAndNotify();
 }
 

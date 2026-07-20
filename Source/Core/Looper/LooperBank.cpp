@@ -1234,9 +1234,16 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
             // entscheidet nur, WO dieselbe Rampe anliegt
             std::array<float, static_cast<std::size_t> (maxSends)> sendStart {}, sendEnd {};
             bool anySend = false;
+            const auto yLink = yLinkSendIndex.load (std::memory_order_relaxed);
             for (std::size_t s = 0; s < static_cast<std::size_t> (maxSends); ++s)
             {
-                const auto target = targetSendLevel[l][t][s].load (std::memory_order_relaxed);
+                auto target = targetSendLevel[l][t][s].load (std::memory_order_relaxed);
+
+                // Y-Link: der verlinkte Send folgt der Distanz (Poti-Level
+                // = Untergrenze); currentDistance stammt aus dem Vorblock —
+                // ein Block Versatz ist unter dem 5-ms-Slew unhörbar
+                if (static_cast<int> (s) == yLink)
+                    target = juce::jmax (target, player.currentDistance);
                 const auto start = player.currentSend[s];
                 const auto maxDelta = mixStep * static_cast<float> (numSamples);
                 const auto end = start + juce::jlimit (-maxDelta, maxDelta, target - start);
@@ -1391,11 +1398,14 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
 
             //==============================================================
             // Distanz-Zug (Monolake Distance, 07/2026): High-Shelf +
-            // Tiefpass + M/S-Width + Vol-Kurve — NACH dem Fader, VOR
-            // Meter/Post-Bus/Post-Sends (Meter, Big Out und Master hören
-            // dasselbe distanzierte Signal; Pre-Sends bleiben unberührt).
+            // Tiefpass + M/S-Width — NACH dem Fader; die VOL-KURVE folgt
+            // erst NACH dem Post-Send-Abgriff (Y-Link-Kontrakt: der
+            // verlinkte Send bleibt bei voller Distanz hörbar — gefiltert,
+            // aber nicht weggeduckt). Meter/Post-Bus/Master hören das
+            // komplette distanzierte Signal; Pre-Sends bleiben unberührt.
             // Koeffizienten EINMAL pro Block aus der geslewten Distanz
             // (line~-Muster des Originals); d≈0 = exakter Bypass.
+            auto volStart = 1.0f, volEnd = 1.0f;
             const auto dTarget = targetDistance[l][t].load (std::memory_order_relaxed);
             if (dTarget < 1.0e-4f && player.currentDistance < 1.0e-4f)
             {
@@ -1427,11 +1437,10 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
                 const auto volOn = distVolDumpOn.load (std::memory_order_relaxed);
                 const auto volDb = distVolDumpDb.load (std::memory_order_relaxed);
                 auto w = static_cast<float> (looper::widthFactor (dStart, width));
-                auto v = static_cast<float> (looper::volDumpGain (dStart, volOn, volDb));
                 const auto wStep = (static_cast<float> (looper::widthFactor (dEnd, width)) - w)
                                  / static_cast<float> (numSamples);
-                const auto vStep = (static_cast<float> (looper::volDumpGain (dEnd, volOn, volDb)) - v)
-                                 / static_cast<float> (numSamples);
+                volStart = static_cast<float> (looper::volDumpGain (dStart, volOn, volDb));
+                volEnd   = static_cast<float> (looper::volDumpGain (dEnd, volOn, volDb));
 
                 for (int i = 0; i < numSamples; ++i)
                 {
@@ -1441,16 +1450,39 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
                         looper::processBiquad (player.distLp[1], lpCo, scratch1[i]));
                     const auto mid  = 0.5f * (f0 + f1);
                     const auto side = 0.5f * (f0 - f1) * w;
-                    scratch0[i] = (mid + side) * v;
-                    scratch1[i] = (mid - side) * v;
+                    scratch0[i] = mid + side;
+                    scratch1[i] = mid - side;
                     w += wStep;
-                    v += vStep;
                 }
 
                 for (auto& state : player.distLp)
                     looper::snapStateToZero (state);
                 for (auto& state : player.distShelf)
                     looper::snapStateToZero (state);
+            }
+
+            // Post-Fader-Sends: gefiltert + width, aber VOR der Vol-Kurve
+            // (Y-Link: „je weiter weg, desto mehr Send" — der Send trägt
+            // das Signal auch, wenn der Dry-Pfad in die Stille fährt)
+            if (anySend && ! sendPre)
+                for (std::size_t s = 0; s < static_cast<std::size_t> (maxSends); ++s)
+                    if (sendStart[s] > 1.0e-6f || sendEnd[s] > 1.0e-6f)
+                    {
+                        rampAdd (sendBus[s][0].data(), scratch0, sendStart[s], sendEnd[s]);
+                        rampAdd (sendBus[s][1].data(), scratch1, sendStart[s], sendEnd[s]);
+                    }
+
+            // Vol-Kurve des Distanz-Zugs (Dry-Pfad → Meter/Post-Bus/Master)
+            if (volStart < 1.0f || volEnd < 1.0f)
+            {
+                auto v = volStart;
+                const auto vStep = (volEnd - volStart) / static_cast<float> (numSamples);
+                for (int i = 0; i < numSamples; ++i)
+                {
+                    scratch0[i] *= v;
+                    scratch1[i] *= v;
+                    v += vStep;
+                }
             }
 
             {
@@ -1461,15 +1493,6 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
 
             juce::FloatVectorOperations::add (postBus[l][0].data(), scratch0, numSamples);
             juce::FloatVectorOperations::add (postBus[l][1].data(), scratch1, numSamples);
-
-            // Post-Fader-Sends des Tracks (nach Gain/Pan/Mute)
-            if (anySend && ! sendPre)
-                for (std::size_t s = 0; s < static_cast<std::size_t> (maxSends); ++s)
-                    if (sendStart[s] > 1.0e-6f || sendEnd[s] > 1.0e-6f)
-                    {
-                        rampAdd (sendBus[s][0].data(), scratch0, sendStart[s], sendEnd[s]);
-                        rampAdd (sendBus[s][1].data(), scratch1, sendStart[s], sendEnd[s]);
-                    }
         }
 
     // Master-Mix = Summe der Post-Fader-Busse aller Looper mit

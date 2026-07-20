@@ -446,6 +446,46 @@ TEST_CASE ("LooperBank: Distanz-Zug — Width-Kollaps und Vol-Stille", "[looper]
             REQUIRE (juce::exactlyEqual (view.track[0][0][0][i], view.track[0][0][1][i]));
     }
 
+    SECTION ("Y-Link: Poti-Level ist Untergrenze, Distanz hebt darüber an")
+    {
+        conduit::looper::DistanceGlobals globals;
+        globals.volDumpOn = false;   // Post-Bus == gefiltertes Signal (exakt vergleichbar)
+        rig.bank.setDistanceGlobals (globals, 0.0f);
+        rig.bank.setYLinkSend (0);
+
+        // Level 0.8 > Distanz 0.3 → das Poti gewinnt
+        rig.bank.setTrackSendLevel (0, 0, 0, 0.8f);
+        rig.bank.setTrackDistance (0, 0, 0.3f);
+        rig.feedBlocks (4);
+
+        auto view = rig.bank.getAudioView();
+        for (int i = 0; i < blockSize; ++i)
+            REQUIRE (juce::exactlyEqual (view.send[0][0][i], 0.8f * view.post[0][0][i]));
+
+        // Distanz 0.95 > Level 0.8 → die Y-Achse gewinnt
+        rig.bank.setTrackDistance (0, 0, 0.95f);
+        rig.feedBlocks (4);
+
+        view = rig.bank.getAudioView();
+        for (int i = 0; i < blockSize; ++i)
+            REQUIRE (juce::exactlyEqual (view.send[0][0][i], 0.95f * view.post[0][0][i]));
+
+        // Nicht verlinkte Sends bleiben still
+        REQUIRE (juce::exactlyEqual (rms (view.send[1][0], blockSize), 0.0));
+    }
+
+    SECTION ("Y-Link + VolDump: Dry fährt in die Stille, der Send bleibt hörbar")
+    {
+        rig.bank.setDistanceGlobals (conduit::looper::DistanceGlobals {}, 0.0f);
+        rig.bank.setYLinkSend (0);
+        rig.bank.setTrackDistance (0, 0, 1.0f);
+        rig.feedBlocks (4);
+
+        const auto view = rig.bank.getAudioView();
+        REQUIRE (juce::exactlyEqual (rms (view.post[0][0], blockSize), 0.0));
+        REQUIRE (rms (view.send[0][0], blockSize) > 0.001);
+    }
+
     SECTION ("d=1 + VolDump an (Default): komplette Stille — Y ersetzt den Fader")
     {
         rig.bank.setDistanceGlobals (conduit::looper::DistanceGlobals {}, 0.0f);

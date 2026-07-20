@@ -193,6 +193,12 @@ public:
     [[nodiscard]] DistanceState getDistance() const noexcept { return distanceState; }
     void setDistance (const DistanceState& state);
 
+    /** Y-Link: GENAU EIN Send (0..3) folgt der Distanz-Y-Achse — Puck
+        nach oben = mehr Send (Poti-Level wirkt als Untergrenze);
+        −1 = kein Send verlinkt (Default). */
+    [[nodiscard]] int getYLinkSend() const noexcept { return yLinkSend; }
+    void setYLinkSend (int sendIndex);
+
     //==========================================================================
     /** [Message Thread] Ausstehende Änderungen sofort auf Platte schreiben. */
     void flush();
@@ -247,6 +253,7 @@ private:
 
     std::array<LooperState, static_cast<std::size_t> (maxLoopers)> loopers;
     DistanceState distanceState;
+    int yLinkSend = -1;
 
     bool storedStateLoaded = false;
 

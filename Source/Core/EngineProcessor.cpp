@@ -336,6 +336,7 @@ void EngineProcessor::applyLooperSettings()
         globals.volDumpOn  = dist.volDumpOn;
         globals.volDumpDb  = dist.volDumpDb;
         looperBank.setDistanceGlobals (globals, dist.smoothMs / 1000.0f);
+        looperBank.setYLinkSend (looperSettings.getYLinkSend());
     }
 
     for (int l = 0; l < LooperBank::maxLoopers; ++l)
