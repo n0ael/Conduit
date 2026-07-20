@@ -440,7 +440,13 @@ private:
     TrackTabsStrip trackTabs;
     MasterDeviceSwitch masterSwitch;
     push::TextTile armButton { "Arm", push::colours::ledRed };
-    push::TextTile releaseAllButton { "Release All", push::colours::ledRed };
+    // Release All ist ein HoldTile (User 20.07.2026): Halten + Tap auf
+    // einen belegten Akkord-Slot löscht diesen; das Loslassen feuert dann
+    // KEIN allNotesOff (Modifier-Nutzung ≠ Klick). Ohne Slot-Löschung
+    // feuert die Panik-Aktion beim Loslassen.
+    push::HoldTile releaseAllButton { "Release All", push::colours::ledRed };
+    bool releaseAllHeld = false;
+    bool chordSlotDeletedDuringHold = false;
     push::TextTile octaveUpTile   { "Oct +" };
     push::TextTile octaveDownTile { "Oct -" };
     ExpressionRibbon atOffsetRibbon      { "Pressure", true };  // bipolar

@@ -1,9 +1,37 @@
 # Conduit Alpha — Projektstatus
 
-> Letzte Aktualisierung: 2026-07-19 | wird nach jedem Meilenstein gepflegt
+> Letzte Aktualisierung: 2026-07-20 | wird nach jedem Meilenstein gepflegt
 > Architektur-Referenz: [CLAUDE.md](CLAUDE.md) | Repo: n0ael/Conduit
 
-## Aktueller Meilenstein (19.07.2026) — Patch-OUT-Kachel: Stereo-Meter, 4er-Raster-Nummerierung, Clip-Farben (User-Skizzen)
+## Aktueller Meilenstein (20.07.2026) — Grid M0 + M0-Fix: PlayTargets-Inventur, Mond-Reakquisition, grabbare Latch-Sonnen
+
+- **M0-Inventur-Dossier** `docs/GridPlayTargets-M0.md` (PlayTargets-
+  Masterplan): Pipeline-Karte Touch→MIDI, B-Readiness-Befund (die
+  IMidiSink-Naht existiert bereits als IVoiceSink/IMidiOutputTarget +
+  Rollen-Fassaden, ADR 003), MPE-Allocator-Status (per-Target =
+  Instanziierung), RigDevice-Andockpunkt für preferredGridMode/Farbe,
+  AbletonOSC-Gap (Command-only — kein Routing-/Namens-Lesepfad).
+- **Slide-Reacquisition-Bug BEHOBEN (Block M2):** Drone-Grab sendete nie
+  Slide und das RingTouchModel vergisst die Sonne beim Drone-Start —
+  jetzt Mond-Reakquisition: Finger auf dem eingefrorenen Mond einer
+  fingerlosen Sonne (Drone ODER latched) wird wieder Mond (Radius →
+  Slide, `slideFromOrbitRadius`), auch parallel zum Sonnen-Grab;
+  Präzedenz Sonnen-Grab → Mond-Grab → ring.onDown.
+- **Latch-Sonnen voll grabbar** (User-Entscheidung): Antippen + Ziehen =
+  relativer Bend/Pressure, kurzer Tap beendet die EINZELNE Note (Slot
+  bleibt), lineare moveLatchedBy-Anker werden re-verankert; gemeinsame
+  Basis `HeldSun` (hasVoice-Guard für Sonnen außerhalb des Rasters),
+  `releaseStaleGrabs()` als Zombie-Grab-Schutz nach Clear/Re-Recall.
+- **Release All als HoldTile:** Halten + Tap auf belegten Akkord-Slot
+  löscht ihn (ChordMemoryStrip `isReleaseAllHeld`/`onSlotDeleted`); das
+  Loslassen feuert dann KEIN allNotesOff (Panik-Aktion feuert sonst beim
+  Loslassen).
+- Tests: 8 neue Cases (`[drone]`/`[latch]`/Strip) + Slide-Assertion im
+  bestehenden Grab-Test; volle Suite 1011 Cases / 38 189 Assertions
+  grün, ASan `[grid]` grün.
+- Offen: Feldtest (Drone-Mond greifen, Akkord-Einzelnoten, Slot-Löschen).
+
+## Davor (19.07.2026) — Patch-OUT-Kachel: Stereo-Meter, 4er-Raster-Nummerierung, Clip-Farben (User-Skizzen)
 
 - **Stereo-Meter pro Slot-Zeile** (LooperPatchOutPanel): LevelMeterBar
   um 2-Lane-Modus erweitert (gleiche Ableton-Optik/Ballistik wie die

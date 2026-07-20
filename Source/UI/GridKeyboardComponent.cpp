@@ -121,27 +121,59 @@ void GridKeyboardComponent::mouseUp (const juce::MouseEvent& event)
 
 void GridKeyboardComponent::touchDown (int fingerId, juce::Point<float> position)
 {
-    // Drone-Grab (Block M): Aufsetzen auf eine Drone-Sonne übernimmt die
-    // Stimme nahtlos — VOR der Ring-Zuordnung (der Finger darf weder Sonne
-    // noch Mond werden) und ohne Neuanschlag; Bend/Pressure wirken RELATIV
-    // ab dem Aufsetzpunkt. Ein kurzer Tap (touchUp) beendet den Drone.
-    if (const auto droneIndex = droneIndexAt (position); droneIndex >= 0)
+    // Grab (Block M/M2): Aufsetzen auf eine fingerlose Sonne (Drone ODER
+    // latched) übernimmt die Stimme nahtlos — VOR der Ring-Zuordnung (der
+    // Finger darf weder Sonne noch Mond werden) und ohne Neuanschlag;
+    // Bend/Pressure wirken RELATIV ab dem Aufsetzpunkt. Ein kurzer Tap
+    // (touchUp) beendet die einzelne Note. Der Sonnen-Check kommt VOR dem
+    // Mond-Check: das 90-px-Mond-Griffband überdeckt bei kleinem Orbit die
+    // 40-px-Sonnenzone vollständig — der kleinere, spezifischere Treffer
+    // gewinnt (sonst wäre die Tap-zum-Beenden-Geste unerreichbar).
+    if (auto* grabbedSun = grabbableSunAt (position); grabbedSun != nullptr)
     {
-        auto& drone = drones[(size_t) droneIndex];
         const auto pos = normalisedPosition (position);
 
         FingerState state;
         state.currentNormX = pos.x;
         state.currentNormY = pos.y;
-        state.anchorNormX  = drone.anchorNormX;
-        state.grabbedDroneId    = drone.voiceFingerId;
+        state.anchorNormX  = grabbedSun->anchorNormX;
+        state.grabbedSunId      = grabbedSun->voiceFingerId;
         state.grabNormX         = pos.x;
         state.grabNormY         = pos.y;
-        state.grabBendSemitones = drone.lastBendSemitones;
-        state.grabPressure01    = drone.lastPressure01;
+        state.grabBendSemitones = grabbedSun->lastBendSemitones;
+        state.grabPressure01    = grabbedSun->lastPressure01;
         state.downPx     = position;
         state.downTimeMs = juce::Time::getMillisecondCounterHiRes();
         fingers[fingerId] = state;
+
+        repaint();
+        return;
+    }
+
+    // Mond-Reakquisition (Block M2): ein Finger auf dem eingefrorenen Mond
+    // einer fingerlosen Sonne wird wieder deren Mond (Radius → Slide) —
+    // VOR ring.onDown, sonst stiehlt eine lebende Sonne im 90-px-Umkreis
+    // die Reakquisition und der Drone-/Latch-Mond bliebe unerreichbar.
+    if (auto* moonSun = grabbableMoonAt (position); moonSun != nullptr)
+    {
+        const auto pos = normalisedPosition (position);
+
+        FingerState state;
+        state.currentNormX = pos.x;
+        state.currentNormY = pos.y;
+        state.grabbedMoonOfId = moonSun->voiceFingerId;
+        state.downPx     = position;
+        state.downTimeMs = juce::Time::getMillisecondCounterHiRes();
+        fingers[fingerId] = state;
+
+        // Der Mond dockt sofort an der Finger-Position an (RingTouchModel-
+        // Semantik: nur ein aktiv bewegter Mond verändert die Umlaufbahn).
+        moonSun->orbitOffset = position - moonSun->centre;
+        moonSun->hasOrbit    = true;
+
+        if (moonSun->hasVoice)
+            engine.setSlide (moonSun->voiceFingerId,
+                             slideFromOrbitRadius (moonSun->orbitOffset.getDistanceFromOrigin()));
 
         repaint();
         return;
@@ -202,32 +234,66 @@ void GridKeyboardComponent::touchDown (int fingerId, juce::Point<float> position
 
 void GridKeyboardComponent::touchMove (int fingerId, juce::Point<float> position)
 {
-    // Drone-Grab (Block M): der Finger steuert die Drone-Stimme RELATIV —
-    // Bend/Pressure setzen an den eingefrorenen Werten an (nie zur
-    // Fingerposition springen), die Sonne folgt dem Finger.
+    // Grab (Block M/M2): der Finger steuert die gehaltene Stimme (Drone
+    // oder latched) RELATIV — Bend/Pressure setzen an den eingefrorenen
+    // Werten an (nie zur Fingerposition springen), die Sonne folgt dem
+    // Finger. Bewusst KEIN setSlide hier: der Mond klebt starr an der
+    // Sonne, sein Radius ändert sich nicht (RingTouchModel-Semantik) —
+    // Slide ändert nur ein eigener Mond-Finger (Reakquisition unten).
     if (const auto grabIt = fingers.find (fingerId);
-        grabIt != fingers.end() && grabIt->second.grabbedDroneId != 0)
+        grabIt != fingers.end() && grabIt->second.grabbedSunId != 0)
     {
         auto& state = grabIt->second;
         state.maxMovePx = juce::jmax (state.maxMovePx, position.getDistanceFrom (state.downPx));
 
-        auto* drone = droneById (state.grabbedDroneId);
-        if (drone == nullptr)
+        auto* sun = heldSunById (state.grabbedSunId);
+        if (sun == nullptr)
             return;
 
         const auto pos = normalisedPosition (position);
         state.currentNormX = pos.x;
         state.currentNormY = pos.y;
 
-        drone->centre = position;
-        drone->lastBendSemitones = state.grabBendSemitones
+        sun->centre = position;
+        sun->lastBendSemitones = state.grabBendSemitones
             + layout.pitchBendFromAnchor (state.anchorNormX, pos.x)
             - layout.pitchBendFromAnchor (state.anchorNormX, state.grabNormX);
-        drone->lastPressure01 = state.grabPressure01
+        sun->lastPressure01 = state.grabPressure01
             + layout.expressionFromDrag (state.grabNormY, pos.y) - 0.5f;
 
-        engine.setPitchBend (drone->voiceFingerId, drone->lastBendSemitones);
-        engine.setPressure (drone->voiceFingerId, drone->lastPressure01);
+        if (sun->hasVoice)
+        {
+            engine.setPitchBend (sun->voiceFingerId, sun->lastBendSemitones);
+            engine.setPressure (sun->voiceFingerId, sun->lastPressure01);
+        }
+
+        repaint();
+        return;
+    }
+
+    // Mond-Grab (Block M2): der Finger definiert die Umlaufbahn der
+    // gehaltenen Sonne neu — relativ zum AKTUELLEN Zentrum, funktioniert
+    // damit auch parallel zu einem gleichzeitigen Sonnen-Grab.
+    if (const auto moonIt = fingers.find (fingerId);
+        moonIt != fingers.end() && moonIt->second.grabbedMoonOfId != 0)
+    {
+        auto& state = moonIt->second;
+        state.maxMovePx = juce::jmax (state.maxMovePx, position.getDistanceFrom (state.downPx));
+
+        auto* sun = heldSunById (state.grabbedMoonOfId);
+        if (sun == nullptr)
+            return;
+
+        const auto pos = normalisedPosition (position);
+        state.currentNormX = pos.x;
+        state.currentNormY = pos.y;
+
+        sun->orbitOffset = position - sun->centre;
+
+        if (sun->hasVoice)
+            engine.setSlide (sun->voiceFingerId,
+                             slideFromOrbitRadius (sun->orbitOffset.getDistanceFromOrigin()));
+
         repaint();
         return;
     }
@@ -265,27 +331,68 @@ void GridKeyboardComponent::touchMove (int fingerId, juce::Point<float> position
 
 void GridKeyboardComponent::touchUp (int fingerId, juce::Point<float> position)
 {
-    // Drone-Grab-Ende (Block M): kurzer, unbewegter Tap beendet den Drone
-    // (noteOff); alles andere legt ihn an neuer Position/Werten wieder ab.
+    // Grab-Ende (Block M/M2): kurzer, unbewegter Tap beendet die EINZELNE
+    // Note (Drone wie latched — der ChordMemory-Slot bleibt unberührt,
+    // ChordMemory hält eine eigene Kopie); alles andere legt die Sonne an
+    // neuer Position/Werten wieder ab.
     if (const auto grabIt = fingers.find (fingerId);
-        grabIt != fingers.end() && grabIt->second.grabbedDroneId != 0)
+        grabIt != fingers.end() && grabIt->second.grabbedSunId != 0)
     {
         auto& state = grabIt->second;
         state.maxMovePx = juce::jmax (state.maxMovePx, position.getDistanceFrom (state.downPx));
 
         const auto elapsedMs = juce::Time::getMillisecondCounterHiRes() - state.downTimeMs;
-        const auto isTap = elapsedMs < (double) kDroneTapMaxMs
-                           && state.maxMovePx < kDroneTapTolerancePx;
+        const auto isTap = elapsedMs < (double) kGrabTapMaxMs
+                           && state.maxMovePx < kGrabTapTolerancePx;
+        const auto sunId = state.grabbedSunId;
 
         if (isTap)
         {
-            engine.noteOff (state.grabbedDroneId, 0);
-            drones.erase (std::remove_if (drones.begin(), drones.end(),
-                              [id = state.grabbedDroneId] (const DroneSun& d)
-                              { return d.voiceFingerId == id; }),
-                          drones.end());
+            if (const auto* sun = heldSunById (sunId); sun != nullptr && sun->hasVoice)
+                engine.noteOff (sun->voiceFingerId, 0);
+
+            // Entfernt die Sonne und löst evtl. fremde Mond-Grabs auf sie
+            // (state kann dabei mit-erased werden — danach nicht mehr
+            // anfassen, nur noch über sunId/fingerId arbeiten).
+            removeHeldSunById (sunId);
+        }
+        else if (sunId >= kLatchedFingerBase && sunId < kDroneFingerBase)
+        {
+            // Latched Sonne nach einem Grab: die Anker der LINEAREN
+            // moveLatchedBy-Kennlinie re-verankern (Inverse der linearen
+            // Bend-/Pressure-Formeln), damit ein folgender Strip-Drag am
+            // Release-Punkt sprungfrei fortsetzt.
+            const auto bounds = getLocalBounds().toFloat();
+
+            for (auto& sun : latched)
+            {
+                if (sun.voiceFingerId != sunId)
+                    continue;
+
+                if (bounds.getWidth() > 0.0f && bounds.getHeight() > 0.0f)
+                {
+                    sun.startNormX = sun.centre.x / bounds.getWidth()
+                        - sun.lastBendSemitones
+                              / (layout.semitonesPerPadWidth() * (float) layout.cols());
+                    sun.startNormY = sun.centre.y / bounds.getHeight()
+                        + (sun.lastPressure01 - 0.5f) * layout.yRangeNorm();
+                }
+
+                break;
+            }
         }
 
+        fingers.erase (fingerId);
+        repaint();
+        return;
+    }
+
+    // Mond-Grab-Ende (Block M2): der neue Orbit ist bereits in der Sonne
+    // eingefroren — kein Tap-Kill auf dem Mond (Beenden bleibt exklusiv
+    // die Sonnen-Geste).
+    if (const auto moonIt = fingers.find (fingerId);
+        moonIt != fingers.end() && moonIt->second.grabbedMoonOfId != 0)
+    {
         fingers.erase (fingerId);
         repaint();
         return;
@@ -340,28 +447,139 @@ void GridKeyboardComponent::touchUp (int fingerId, juce::Point<float> position)
 }
 
 //==============================================================================
-// Hold/Drone (Block M)
+// Hold/Drone + fingerlose Sonnen (Block M/M2)
 
-GridKeyboardComponent::DroneSun* GridKeyboardComponent::droneById (uint32_t voiceFingerId) noexcept
+GridKeyboardComponent::HeldSun* GridKeyboardComponent::heldSunById (uint32_t voiceFingerId) noexcept
 {
+    // Id-Räume sind disjunkt (Drones 0x20000+, latched 0x10000+) — die
+    // Reihenfolge der Suche ist damit egal.
     for (auto& drone : drones)
         if (drone.voiceFingerId == voiceFingerId)
             return &drone;
 
+    for (auto& sun : latched)
+        if (sun.voiceFingerId == voiceFingerId)
+            return &sun;
+
     return nullptr;
 }
 
-int GridKeyboardComponent::droneIndexAt (juce::Point<float> positionPx) const noexcept
+GridKeyboardComponent::HeldSun* GridKeyboardComponent::grabbableSunAt (juce::Point<float> positionPx) noexcept
 {
     // Trefferzone = Sonnen-Zeichnradius (restRadiusPx ~ 40 px, über der
-    // 44-px-Faustregel zusammen mit dem Zentrum-Snapping akzeptiert).
-    const auto hitRadius = ring.restRadiusPx();
+    // 44-px-Faustregel zusammen mit dem Zentrum-Snapping akzeptiert);
+    // nächstgelegener Treffer über Drones UND latched. Bereits gegriffene
+    // Sonnen bleiben ihrem Finger (Analogie ringFinger != 0).
+    const auto isGrabbed = [this] (uint32_t id)
+    {
+        for (const auto& entry : fingers)
+            if (entry.second.grabbedSunId == id)
+                return true;
+        return false;
+    };
 
-    for (int i = 0; i < (int) drones.size(); ++i)
-        if (drones[(size_t) i].centre.getDistanceFrom (positionPx) <= hitRadius)
-            return i;
+    HeldSun* best = nullptr;
+    auto bestDistance = ring.restRadiusPx();
 
-    return -1;
+    const auto consider = [&] (HeldSun& sun)
+    {
+        if (isGrabbed (sun.voiceFingerId))
+            return;
+
+        const auto distance = sun.centre.getDistanceFrom (positionPx);
+        if (distance <= bestDistance)
+        {
+            best = &sun;
+            bestDistance = distance;
+        }
+    };
+
+    for (auto& drone : drones)
+        consider (drone);
+    for (auto& sun : latched)
+        consider (sun);
+
+    return best;
+}
+
+GridKeyboardComponent::HeldSun* GridKeyboardComponent::grabbableMoonAt (juce::Point<float> positionPx) noexcept
+{
+    // Greifpunkt = eingefrorene Mond-Position (centre + orbitOffset),
+    // Bandbreite wie RingTouchModel::onDown (grabRadiusPx). Bereits von
+    // einem Finger gehaltene Monde bleiben diesem.
+    const auto isHeld = [this] (uint32_t id)
+    {
+        for (const auto& entry : fingers)
+            if (entry.second.grabbedMoonOfId == id)
+                return true;
+        return false;
+    };
+
+    HeldSun* best = nullptr;
+    auto bestDistance = ring.grabRadiusPx();
+
+    const auto consider = [&] (HeldSun& sun)
+    {
+        if (! sun.hasOrbit || isHeld (sun.voiceFingerId))
+            return;
+
+        const auto distance = (sun.centre + sun.orbitOffset).getDistanceFrom (positionPx);
+        if (distance <= bestDistance)
+        {
+            best = &sun;
+            bestDistance = distance;
+        }
+    };
+
+    for (auto& drone : drones)
+        consider (drone);
+    for (auto& sun : latched)
+        consider (sun);
+
+    return best;
+}
+
+void GridKeyboardComponent::removeHeldSunById (uint32_t voiceFingerId)
+{
+    drones.erase (std::remove_if (drones.begin(), drones.end(),
+                      [voiceFingerId] (const DroneSun& d)
+                      { return d.voiceFingerId == voiceFingerId; }),
+                  drones.end());
+    latched.erase (std::remove_if (latched.begin(), latched.end(),
+                       [voiceFingerId] (const LatchedSun& s)
+                       { return s.voiceFingerId == voiceFingerId; }),
+                   latched.end());
+
+    // Fremde Finger, die diese Sonne bzw. ihren Mond hielten, werden inert.
+    releaseStaleGrabs();
+}
+
+float GridKeyboardComponent::slideFromOrbitRadius (float radiusPx) const noexcept
+{
+    // Dieselbe Formel wie RingTouchModel::onMove — ungeklemmt, die
+    // slideAxis klemmt am Ausgang (ADR 003).
+    const auto range = ring.maxRadiusPx() - ring.restRadiusPx();
+    return range > 0.0f ? (radiusPx - ring.restRadiusPx()) / range : 0.0f;
+}
+
+void GridKeyboardComponent::releaseStaleGrabs()
+{
+    // Nach Re-Recall vergibt latchConstellation IDENTISCHE Ids
+    // (kLatchedFingerBase + i) neu — ohne diese Bereinigung steuerte ein
+    // liegen gebliebener Grab-Finger die Sonne eines FREMDEN Akkords.
+    for (auto it = fingers.begin(); it != fingers.end();)
+    {
+        const auto& state = it->second;
+        const auto stale =
+            (state.grabbedSunId    != 0 && heldSunById (state.grabbedSunId)    == nullptr)
+         || (state.grabbedMoonOfId != 0 && heldSunById (state.grabbedMoonOfId) == nullptr);
+
+        if (stale)
+            it = fingers.erase (it);   // Finger wird inert — sein Move/Up
+                                       // ist ab jetzt ein No-op
+        else
+            ++it;
+    }
 }
 
 void GridKeyboardComponent::clearDrones()
@@ -373,6 +591,7 @@ void GridKeyboardComponent::clearDrones()
         engine.noteOff (drone.voiceFingerId, 0);
 
     drones.clear();
+    releaseStaleGrabs();
     repaint();
 }
 
@@ -396,8 +615,8 @@ void GridKeyboardComponent::latchConstellation (const std::vector<grid::StoredSu
         const auto& sun = suns[i];
 
         LatchedSun entry;
-        entry.fingerId    = kLatchedFingerBase + (uint32_t) i;
-        entry.centre      = { sun.x * w, sun.y * h };
+        entry.voiceFingerId = kLatchedFingerBase + (uint32_t) i;
+        entry.centre        = { sun.x * w, sun.y * h };
         // ox/oy sind BEIDE über die Flächen-BREITE normalisiert
         // (ChordMemory-Konvention — der Orbit bleibt beim Rescale rund).
         entry.orbitOffset = { sun.ox * w, sun.oy * w };
@@ -406,27 +625,30 @@ void GridKeyboardComponent::latchConstellation (const std::vector<grid::StoredSu
         entry.startNormY  = sun.y;
 
         const auto pad = layout.padIndexAt (sun.x, sun.y);
+        entry.hasVoice = pad >= 0;
 
         if (pad >= 0)
         {
             entry.note = layout.noteForPad (pad);
 
+            // Grab-Referenzen wie beim physischen Touch (Block M2): der
+            // In-Tune-Anker folgt dem aktuellen Modus, Bend startet bei 0,
+            // Pressure neutral am Aufsetzpunkt.
+            entry.anchorNormX = inTuneLocation == grid::InTuneLocation::pad
+                                    ? layout.padCentreNormX (pad)
+                                    : sun.x;
+            entry.lastBendSemitones = 0.0f;
+            entry.lastPressure01    = layout.expressionFromDrag (sun.y, sun.y);
+
             // Startwerte wie beim physischen Touch (Fund 06.07.2026, s.
             // mouseDown): Bend 0, Pressure neutral am Aufsetzpunkt.
-            engine.noteOn (entry.fingerId, entry.note, 100);
-            engine.setPitchBend (entry.fingerId, 0.0f);
-            engine.setPressure (entry.fingerId, layout.expressionFromDrag (sun.y, sun.y));
+            engine.noteOn (entry.voiceFingerId, entry.note, 100);
+            engine.setPitchBend (entry.voiceFingerId, 0.0f);
+            engine.setPressure (entry.voiceFingerId, entry.lastPressure01);
 
             if (sun.hasOrbit)
-            {
-                // Mond-Offset → Slide mit derselben Formel wie
-                // RingTouchModel::onMove (Ring-Config-Werte, ungeklemmt —
-                // die slideAxis klemmt am Ausgang).
-                const auto radius = entry.orbitOffset.getDistanceFromOrigin();
-                const auto range  = ring.maxRadiusPx() - ring.restRadiusPx();
-                const auto slide  = range > 0.0f ? (radius - ring.restRadiusPx()) / range : 0.0f;
-                engine.setSlide (entry.fingerId, slide);
-            }
+                engine.setSlide (entry.voiceFingerId,
+                                 slideFromOrbitRadius (entry.orbitOffset.getDistanceFromOrigin()));
         }
 
         // Pad ungültig (außerhalb): kein noteOn, Sonne trotzdem visuell
@@ -455,11 +677,13 @@ void GridKeyboardComponent::moveLatchedBy (float dxPx, float dyPx)
         if (sun.note >= 0 && w > 0.0f && h > 0.0f)
         {
             // X = Pitch, Y = Ausdruck — exakt wie ein Finger-Drag; der
-            // Mond-Offset (Slide) bleibt starr.
-            engine.setPitchBend (sun.fingerId,
-                                 layout.pitchBendSemitones (sun.startNormX, sun.centre.x / w));
-            engine.setPressure (sun.fingerId,
-                                layout.expressionFromDrag (sun.startNormY, sun.centre.y / h));
+            // Mond-Offset (Slide) bleibt starr. Die gesendeten Werte
+            // reisen in last* mit — ein folgender Einzel-Grab (Block M2)
+            // setzt sonst an veralteten eingefrorenen Werten an (Sprung).
+            sun.lastBendSemitones = layout.pitchBendSemitones (sun.startNormX, sun.centre.x / w);
+            sun.lastPressure01    = layout.expressionFromDrag (sun.startNormY, sun.centre.y / h);
+            engine.setPitchBend (sun.voiceFingerId, sun.lastBendSemitones);
+            engine.setPressure (sun.voiceFingerId, sun.lastPressure01);
         }
     }
 
@@ -473,9 +697,10 @@ void GridKeyboardComponent::clearLatched()
 
     for (const auto& sun : latched)
         if (sun.note >= 0)
-            engine.noteOff (sun.fingerId, 0);
+            engine.noteOff (sun.voiceFingerId, 0);
 
     latched.clear();
+    releaseStaleGrabs();
     repaint();
 }
 
@@ -603,8 +828,9 @@ void GridKeyboardComponent::paint (juce::Graphics& g)
 
         for (const auto& [fingerId, state] : fingers)
         {
-            if (state.grabbedDroneId != 0)
-                continue;   // Block M: Grab-Finger steuern Drones, kein eigener Schatten
+            if (state.grabbedSunId != 0 || state.grabbedMoonOfId != 0)
+                continue;   // Block M/M2: Grab-/Mond-Finger steuern fingerlose
+                            // Sonnen, kein eigener Schatten
 
             const auto bend = layout.pitchBendFromAnchor (state.anchorNormX,
                                                           effectiveNormX (fingerId, state.currentNormX));
@@ -746,7 +972,7 @@ void GridKeyboardComponent::gravityTick()
     // relativ über die Drone-Stimme, der Magnet greift nicht.
     for (auto& [fingerId, state] : fingers)
     {
-        if (state.grabbedDroneId != 0)
+        if (state.grabbedSunId != 0 || state.grabbedMoonOfId != 0)
             continue;
 
         state.lastBendSemitones = layout.pitchBendFromAnchor (

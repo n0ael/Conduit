@@ -82,6 +82,10 @@ public:
         des klingenden Pitch für den Pitch-Schatten). */
     [[nodiscard]] float semitonesPerPadWidth() const noexcept { return config.semitonesPerPadWidth; }
 
+    /** Aktuelle Ausdrucks-Wischstrecke (Rückrechnung Pressure → Y-Position
+        für die Latch-Re-Verankerung nach einem Einzel-Grab). */
+    [[nodiscard]] float yRangeNorm() const noexcept { return config.yRangeNorm; }
+
     /** Laufzeit-Setter fuer die Sensitivity-Regler (Block A2/A3). Wirkt
         SOFORT auf laufende Drags -- ein Wert, der waehrend eines gehaltenen
         Touches geaendert wird, re-mapt die naechste Bewegung relativ zum

@@ -141,8 +141,26 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
                                                        (juce::int32) (armed ? 0 : 1)));
     };
 
-    releaseAllButton.onClick = [this]
+    // Release All als HoldTile (User 20.07.2026): Halten + Slot-Tap löscht
+    // Akkord-Slots (chordStrip unten); die Panik-Aktion feuert beim
+    // LOSLASSEN — und nur, wenn während des Haltens KEIN Slot gelöscht
+    // wurde (Modifier-Nutzung ≠ Klick). Bewusst onHoldChanged statt
+    // onClick/onShortClick (TextTile::mouseUp würde ein onClick zusätzlich
+    // feuern — Doppelauslösung).
+    releaseAllButton.onHoldChanged = [this] (bool holding)
     {
+        if (holding)
+        {
+            releaseAllHeld = true;
+            chordSlotDeletedDuringHold = false;   // Reset pro Halte-Beginn
+            return;
+        }
+
+        releaseAllHeld = false;
+
+        if (chordSlotDeletedDuringHold)
+            return;
+
         engine.allNotesOff();
         keyboard.clearLatched();   // latched Akkord mit beenden (dessen
                                    // noteOffs verpuffen nach allNotesOff)
@@ -159,6 +177,12 @@ GridPage::GridPage (juce::ValueTree rootStateToUse,
     chordStrip.onRecall = [this] (int slot) { keyboard.latchConstellation (chordMemory.slot (slot)); };
     chordStrip.onMoveBy = [this] (float dx, float dy) { keyboard.moveLatchedBy (dx, dy); };
     chordStrip.isCcMode = [this] { return ccLayer.isCcMode(); };
+    chordStrip.isReleaseAllHeld = [this] { return releaseAllHeld; };
+    chordStrip.onSlotDeleted = [this] (int)
+    {
+        if (releaseAllHeld)
+            chordSlotDeletedDuringHold = true;
+    };
 
     // Session-Skala (Schema 6.2): GridPage liest weiterhin für die
     // Keyboard-Einfärbung mit -- die Anzeige-Kacheln selbst leben seit

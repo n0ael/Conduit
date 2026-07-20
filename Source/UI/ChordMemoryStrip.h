@@ -57,6 +57,16 @@ public:
     /** CC-Modus (Bearbeiten) aktiv? — Tap auf belegten Slot löscht dann. */
     std::function<bool()> isCcMode;
 
+    /** Release-All-Button wird gerade GEHALTEN (User 20.07.2026)? — Tap auf
+        belegten Slot löscht dann ebenfalls (Modifier-Geste, Muster
+        TARGET/DELETE-HoldTiles). */
+    std::function<bool()> isReleaseAllHeld;
+
+    /** Ein belegter Slot wurde gelöscht (CC-Modus ODER Release-All-Halten)
+        — die GridPage unterdrückt damit das allNotesOff beim Loslassen des
+        gehaltenen Release-All-Buttons. */
+    std::function<void (int slot)> onSlotDeleted;
+
     void paint (juce::Graphics& g) override;
 
     void mouseDown (const juce::MouseEvent& event) override;

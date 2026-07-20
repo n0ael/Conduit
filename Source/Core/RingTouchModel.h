@@ -88,6 +88,11 @@ public:
         Mond-Offsets mit derselben Formel wie onMove in Slide um. */
     [[nodiscard]] float maxRadiusPx() const noexcept { return config.maxRadiusPx; }
 
+    /** Greifband um einen Mond-Aufnahmepunkt — die Mond-Reakquisition
+        fingerloser Sonnen (GridKeyboardComponent, Drone/Latch) nutzt
+        dieselbe Bandbreite wie onDown. */
+    [[nodiscard]] float grabRadiusPx() const noexcept { return config.grabRadiusPx; }
+
     /** Laufzeit-Setter fuer die Slide-Sensitivity (Block A2). grabRadiusPx
         bleibt unangetastet -- nur die Slide-Spanne aendert sich. Erzwingt
         maxPx > minPx (Mindestabstand 1 px). Aufrufer (GridKeyboardComponent)

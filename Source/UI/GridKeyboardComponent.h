@@ -70,7 +70,11 @@ public:
     //==========================================================================
     // Akkord-Speicher (Grid-Page v2, Feature 6): eine abgerufene
     // Konstellation liegt "latched" auf dem Grid — ohne physische Finger —
-    // und wird wie Sonnen/Monde gerendert (inkl. Pad-Glow). Message Thread.
+    // und wird wie Sonnen/Monde gerendert (inkl. Pad-Glow). Seit Block M2
+    // (User 20.07.2026) sind latched Sonnen voll grabbar wie Drones:
+    // Antippen + Ziehen = relativer Bend/Pressure, kurzer Tap beendet die
+    // EINZELNE Note (der ChordMemory-Slot bleibt unverändert), Antippen des
+    // eingefrorenen Monds reaktiviert Slide. Message Thread.
 
     /** Ruft eine gespeicherte Konstellation ab: beendet zuerst den evtl.
         liegenden Akkord (clearLatched), dann pro Sonne noteOn +
@@ -174,8 +178,12 @@ public:
     // die Drone-Sonne beendet sie (noteOff); Aufsetzen + Halten/Bewegen
     // ÜBERNIMMT die Stimme nahtlos (kein Neuanschlag, Bend/Pressure wirken
     // RELATIV ab dem Aufsetzpunkt — nie zur Fingerposition springen);
-    // Loslassen nach einem Grab legt den Drone wieder ab. Release-All
-    // beendet auch alle Drones (clearDrones). Message Thread.
+    // Loslassen nach einem Grab legt den Drone wieder ab. Block M2
+    // (User 20.07.2026): ein Finger auf dem EINGEFRORENEN MOND wird wieder
+    // Mond (Radius → Slide, gleiche Formel wie der Latch-Abruf) — auch
+    // parallel zu einem laufenden Sonnen-Grab; Loslassen friert den neuen
+    // Orbit ein. Release-All beendet auch alle Drones (clearDrones).
+    // Message Thread.
 
     /** Beendet alle Drones (noteOff) — Release-All ruft dies zusätzlich zu
         engine.allNotesOff (idempotent). */
@@ -198,10 +206,14 @@ private:
         float lastBendSemitones = 0.0f;
         float lastPressure01    = 0.5f;
 
-        // Block M: Drone-Grab (Finger hat eine Drone-Sonne aufgenommen) —
+        // Block M/M2: Grab einer fingerlosen Sonne (Drone ODER latched) —
         // 0 = normaler Spiel-Finger. Bend/Pressure wirken RELATIV ab dem
         // Aufsetzpunkt (grab*-Referenzen), Tap-Erkennung über Weg + Zeit.
-        uint32_t grabbedDroneId = 0;
+        uint32_t grabbedSunId = 0;
+        // Block M2: Finger steuert den Mond einer fingerlosen Sonne
+        // (Reakquisition der eingefrorenen Umlaufbahn) — schließt sich mit
+        // grabbedSunId gegenseitig aus.
+        uint32_t grabbedMoonOfId = 0;
         float grabNormX = 0.0f, grabNormY = 0.0f;
         float grabBendSemitones = 0.0f;
         float grabPressure01    = 0.5f;
@@ -210,43 +222,67 @@ private:
         double downTimeMs = 0.0;
     };
 
-    /** Fingerlos liegende Drone-Sonne (Block M): die Stimme läuft unter
-        einer synthetischen fingerId weiter (kDroneFingerBase+n — Touch-Ids
-        werden vom OS wiederverwendet, rekeyVoice beim Drone-Start). */
-    struct DroneSun
+    /** Gemeinsame Basis der fingerlosen Sonnen (Drone + latched, Block M2):
+        exakt die Felder, die die Grab-/Mond-Reakquisitions-Pfade brauchen.
+        hasVoice = false nur für latched Sonnen außerhalb des Rasters
+        (note == -1) — guarded ALLE Engine-Aufrufe der Grab-Pfade. */
+    struct HeldSun
     {
         juce::Point<float> centre;        // px, folgt einem Grab
-        juce::Point<float> orbitOffset;   // px, eingefroren (starr, wie Latch)
+        juce::Point<float> orbitOffset;   // px, eingefroren, bis ein Finger
+                                          // den Mond wieder aufgreift
         bool hasOrbit = false;
         uint32_t voiceFingerId = 0;
         float anchorNormX = 0.0f;         // In-Tune-Anker der Original-Note
         float lastBendSemitones = 0.0f;
         float lastPressure01    = 0.5f;
+        bool hasVoice = true;
     };
 
-    static constexpr uint32_t kDroneFingerBase = 0x20000u;
-    static constexpr int   kDroneTapMaxMs        = 250;
-    static constexpr float kDroneTapTolerancePx  = 8.0f;
-
-    [[nodiscard]] DroneSun* droneById (uint32_t voiceFingerId) noexcept;
-    [[nodiscard]] int droneIndexAt (juce::Point<float> positionPx) const noexcept;
+    /** Fingerlos liegende Drone-Sonne (Block M): die Stimme läuft unter
+        einer synthetischen fingerId weiter (kDroneFingerBase+n — Touch-Ids
+        werden vom OS wiederverwendet, rekeyVoice beim Drone-Start). */
+    struct DroneSun : HeldSun {};
 
     /** Latched Sonne (Akkord-Abruf): Pixel-Positionen wie die Live-Kreise,
-        note = -1, wenn die Sonne außerhalb des Rasters lag (kein noteOn). */
-    struct LatchedSun
+        note = -1, wenn die Sonne außerhalb des Rasters lag (kein noteOn,
+        hasVoice = false). startNorm* sind die Anker der LINEAREN
+        moveLatchedBy-Kennlinie — ein Einzel-Grab re-verankert sie. */
+    struct LatchedSun : HeldSun
     {
-        juce::Point<float> centre;
-        juce::Point<float> orbitOffset;
-        bool hasOrbit = false;
-        uint32_t fingerId = 0;
         float startNormX = 0.0f;
         float startNormY = 0.0f;
         int note = -1;
     };
 
+    static constexpr uint32_t kDroneFingerBase = 0x20000u;
+    static constexpr int   kGrabTapMaxMs       = 250;
+    static constexpr float kGrabTapTolerancePx = 8.0f;
+
     // Synthetische fingerIds der latched Sonnen — kollidiert nie mit
-    // Touch-Ids (= sourceIndex + 1, kleine Werte).
+    // Touch-Ids (= sourceIndex + 1, kleine Werte) und nie mit den
+    // Drone-Ids (0x20000+) — die Id-Räume sind disjunkt.
     static constexpr uint32_t kLatchedFingerBase = 0x10000u;
+
+    /** Fingerlose Sonne (Drone oder latched) zur Voice-Id — nullptr, wenn
+        entfernt (Zombie-Grab-Schutz). */
+    [[nodiscard]] HeldSun* heldSunById (uint32_t voiceFingerId) noexcept;
+    /** Nächstgelegene grabbare Sonne im Sonnen-Radius (restRadiusPx) über
+        BEIDE Listen; bereits gegriffene Sonnen sind übersprungen. */
+    [[nodiscard]] HeldSun* grabbableSunAt (juce::Point<float> positionPx) noexcept;
+    /** Nächstgelegener grabbarer Mond (eingefrorene Umlaufbahn) im
+        Greifband (grabRadiusPx um centre + orbitOffset); nur Sonnen mit
+        hasOrbit, bereits gehaltene Monde sind übersprungen. */
+    [[nodiscard]] HeldSun* grabbableMoonAt (juce::Point<float> positionPx) noexcept;
+    /** Entfernt die Sonne aus der richtigen Liste (Tap-Kill). */
+    void removeHeldSunById (uint32_t voiceFingerId);
+    /** Orbit-Radius → Slide, ungeklemmt (die slideAxis klemmt am Ausgang,
+        ADR 003) — die EINE Formel für Latch-Abruf und Mond-Reakquisition. */
+    [[nodiscard]] float slideFromOrbitRadius (float radiusPx) const noexcept;
+    /** Löst Grab-/Mond-Referenzen aller Finger auf nicht mehr existierende
+        Sonnen (nach clearLatched/clearDrones — verhindert Zombie-Grabs auf
+        neu vergebene identische Latch-Ids). */
+    void releaseStaleGrabs();
 
     [[nodiscard]] juce::Point<float> normalisedPosition (juce::Point<float> positionPx) const noexcept;
     [[nodiscard]] static int fingerIdFor (const juce::MouseEvent& event) noexcept;

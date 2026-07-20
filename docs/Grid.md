@@ -88,11 +88,22 @@
     außerhalb des Rasters nur visuell) und Ziehen verschiebt den Akkord
     starr (moveLatchedBy: X = Pitch-Bend, Y = Ausdruck wie ein Finger-Drag,
     kein Clamping). CC-Modus: Tap löscht den Slot (belegte Slots werden nie
-    überschrieben). Release-All beendet auch den latched Akkord
-    (clearLatched). Mini-Ansicht pro Slot: Sonne 6 px/Mond 4 px ledWhite +
-    Orbit-Ellipse (y-Radius über den Spielflächen-Aspekt gestaucht).
-    Offen: Persistenz der Slots (TODO(design)), Save/Load-Browser +
-    Factory-Sets (Meilensteinleiter).
+    überschrieben). **Slot-Löschen per Modifier (Block M2, User
+    20.07.2026):** Release-All ist ein HoldTile — solange er GEHALTEN wird,
+    löscht ein Tap auf einen belegten Slot diesen (onSlotDeleted); das
+    Loslassen feuert dann KEIN allNotesOff (Modifier-Nutzung ≠ Klick, die
+    Panik-Aktion feuert beim Loslassen statt beim Klick). **Latched Sonnen
+    sind voll grabbar wie Drones (Block M2):** Antippen + Ziehen =
+    relativer Bend/Pressure über die Grab-Kennlinie (die LINEAREN
+    moveLatchedBy-Anker werden beim Loslassen re-verankert — Strip-Drag
+    setzt sprungfrei fort), kurzer Tap beendet die EINZELNE Note (der
+    gespeicherte Slot bleibt unverändert), Antippen des eingefrorenen
+    Monds reaktiviert Slide (Reakquisition, s. Block M). Ein Touch auf
+    eine latched Sonne startet damit keinen neuen Ton mehr. Release-All
+    beendet auch den latched Akkord (clearLatched). Mini-Ansicht pro
+    Slot: Sonne 6 px/Mond 4 px ledWhite + Orbit-Ellipse (y-Radius über
+    den Spielflächen-Aspekt gestaucht). Offen: Persistenz der Slots
+    (TODO(design)), Save/Load-Browser + Factory-Sets (Meilensteinleiter).
   - **Sensitivity + Bend-Range (Masterplan Block A, 07/2026):**
     NumberFieldBracket (Source/UI, wiederverwendbares Zahlenfeld: Swipe,
     Doppeltipp = Default, eckige Klammern in Akzentfarbe) trägt je ein
@@ -350,7 +361,7 @@
     lädt als majorPentatonic). **Dabei Altbestand-Bugfix: die alte
     Minor-Maske kodierte den Tritonus statt der Quinte** ({0,2,3,5,6,8,10}
     → korrekt {0,2,3,5,7,8,10}). ClockState-`scaleTypeIndex` bleibt
-    int-kompatibel; StepSequencer-Clamp via `scale::clampedIndex`.
+    int-kompatibel; Index-Clamp der Konsumenten via `scale::clampedIndex`.
     UI: TransportBar-Combo listet alle 26 (displayName); die
     Skala-Kachel im Settings-Slide-Out öffnet ein PopupMenu (async,
     Häkchen = aktuell) statt des 26er-Tap-Zyklus (`nextScaleType` bleibt
@@ -531,6 +542,24 @@
     (Block J) und Pitch-Schatten außen vor. Release-All ruft zusätzlich
     `clearDrones()`; Drones reisen in `constellationNormalized()` mit
     (Akkord-Speicher sieht die klingende Konstellation).
+    **Mond-Reakquisition (Block M2, User 20.07.2026 — Fix des
+    Slide-tot-Befunds):** ein Finger auf dem EINGEFRORENEN Mond einer
+    fingerlosen Sonne (Drone ODER latched) wird wieder deren Mond —
+    Greifband `grabRadiusPx` (90 px) um die Mond-Position, Radius zum
+    AKTUELLEN Zentrum → Slide (gleiche Formel wie der Latch-Abruf,
+    `slideFromOrbitRadius`), funktioniert auch parallel zu einem
+    laufenden Sonnen-Grab; Loslassen friert den neuen Orbit ein, kein
+    Tap-Kill auf dem Mond. Präzedenz in touchDown: Sonnen-Grab
+    (restRadiusPx) VOR Mond-Grab VOR ring.onDown — der kleinere,
+    spezifischere Treffer gewinnt, sonst wäre Tap-zum-Beenden
+    unerreichbar bzw. eine lebende Sonne stähle die Reakquisition.
+    Drone + latched teilen dafür die Basis `HeldSun` (hasVoice = false
+    nur für latched Sonnen außerhalb des Rasters — guarded alle
+    Engine-Aufrufe); nach clearLatched/clearDrones/Tap-Kill löst
+    `releaseStaleGrabs()` liegen gebliebene Grab-/Mond-Finger (Re-Recall
+    vergibt IDENTISCHE Latch-Ids neu — Zombie-Grab-Schutz).
+    Randfall (akzeptiert): das 90-px-Griffband um eingefrorene Monde
+    schluckt Spielfläche — derselbe Tradeoff wie bei lebenden Sonnen.
     **Refactor dafür:** Maus-Handler delegieren an testbare Kernpfade
     `touchDown/touchMove/touchUp (fingerId, position)` (Muster
     HoldIconTile/TrackTabsStrip — Multi-Finger headless testbar);

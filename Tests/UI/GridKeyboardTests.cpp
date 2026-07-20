@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "UI/ChordMemoryStrip.h"
 #include "UI/GridKeyboardComponent.h"
 #include "UI/GridPage.h"
 #include "UI/PushLookAndFeel.h"
@@ -524,6 +525,34 @@ namespace
                 ++count;
         return count;
     }
+
+    /// Anzahl Slide-Events im Fake-Sink.
+    int slideCount (const grid::FakeVoiceSink& fake)
+    {
+        int count = 0;
+        for (const auto& call : fake.calls)
+            if (call.kind == grid::FakeVoiceSink::Kind::Slide)
+                ++count;
+        return count;
+    }
+
+    /// Letzter Slide-Wert im Fake-Sink (-1 = keiner).
+    float lastSlide (const grid::FakeVoiceSink& fake)
+    {
+        for (auto it = fake.calls.rbegin(); it != fake.calls.rend(); ++it)
+            if (it->kind == grid::FakeVoiceSink::Kind::Slide)
+                return it->floatValue;
+        return -1.0f;
+    }
+
+    /// Letzter PitchBend-Wert im Fake-Sink (0 = keiner).
+    float lastBend (const grid::FakeVoiceSink& fake)
+    {
+        for (auto it = fake.calls.rbegin(); it != fake.calls.rend(); ++it)
+            if (it->kind == grid::FakeVoiceSink::Kind::PitchBend)
+                return it->floatValue;
+        return 0.0f;
+    }
 } // namespace
 
 TEST_CASE ("Drone: Sonne zuerst loslassen (Mond liegt) -> Note dront, Orbit friert", "[grid][ui][drone]")
@@ -618,6 +647,8 @@ TEST_CASE ("Drone: Grab + Bewegung biegt die Stimme relativ weiter (kein Neuansc
         return 0.0f;
     }();
 
+    const auto slideCallsBefore = slideCount (fake);
+
     // Grab auf der Sonne + ein voller Pad-Schritt nach rechts.
     keyboard.touchDown (1, { 100.0f, 140.0f });
     keyboard.touchMove (1, { 140.0f, 140.0f });
@@ -628,6 +659,11 @@ TEST_CASE ("Drone: Grab + Bewegung biegt die Stimme relativ weiter (kein Neuansc
         if (fake.calls[i].kind == grid::FakeVoiceSink::Kind::VoiceStart)
             ++newStarts;
     REQUIRE (newStarts == 0);
+
+    // Kein Slide durch den Sonnen-Grab (Block M2): der Mond klebt starr an
+    // der Sonne, sein Radius ändert sich nicht — Slide ändert nur ein
+    // eigener Mond-Finger (Reakquisition).
+    REQUIRE (slideCount (fake) == slideCallsBefore);
 
     // Der Bend ist RELATIV um +1 HT weitergewandert (Treppen-Kennlinie:
     // 1 Pad-Breite == 1 Halbton, unabhaengig vom Startpunkt der Zone).
@@ -699,4 +735,278 @@ TEST_CASE ("Drone: neuer Finger mit recycelter Touch-Id kollidiert nicht mit der
     // Nur die neue Note stoppte; der Drone klingt weiter.
     REQUIRE (voiceStops (fake) == 1);
     REQUIRE (keyboard.droneCount() == 1);
+}
+
+//==============================================================================
+// Mond-Reakquisition + grabbare Latch-Sonnen (Block M2, User 20.07.2026)
+
+namespace
+{
+    /// Baut einen Standard-Drone: Sonne (100,140), Mond (150,140), Sonne
+    /// zuerst hoch -> Drone mit eingefrorenem Orbit-Offset (50,0).
+    void buildStandardDrone (conduit::GridKeyboardComponent& keyboard)
+    {
+        keyboard.touchDown (1, { 100.0f, 140.0f });
+        keyboard.touchDown (2, { 150.0f, 140.0f });
+        keyboard.touchUp (1, { 100.0f, 140.0f });
+        keyboard.touchUp (2, { 150.0f, 140.0f });
+    }
+} // namespace
+
+TEST_CASE ("Drone: Finger auf dem eingefrorenen Mond steuert Slide (Reakquisition)", "[grid][ui][drone]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);   // Ring-Defaults min 40 / max 220 -> Range 180
+
+    buildStandardDrone (keyboard);
+    REQUIRE (keyboard.droneCount() == 1);
+
+    const auto startsBefore = fake.calls.size();
+
+    // Finger exakt auf dem eingefrorenen Mond (150,140): 50 px von der
+    // Sonne (> restRadius 40) -> KEIN Sonnen-Grab, sondern Mond-Zweig.
+    keyboard.touchDown (3, { 150.0f, 140.0f });
+    REQUIRE (lastSlide (fake) == Catch::Approx ((50.0 - 40.0) / 180.0));
+
+    keyboard.touchMove (3, { 220.0f, 140.0f });
+    REQUIRE (lastSlide (fake) == Catch::Approx ((120.0 - 40.0) / 180.0));
+
+    // Kein neuer VoiceStart, kein VoiceStop durch die Reakquisition.
+    auto newStarts = 0;
+    for (auto i = startsBefore; i < fake.calls.size(); ++i)
+        if (fake.calls[i].kind == grid::FakeVoiceSink::Kind::VoiceStart)
+            ++newStarts;
+    REQUIRE (newStarts == 0);
+    REQUIRE (voiceStops (fake) == 0);
+
+    // Loslassen friert den neuen Orbit ein (Visuals/Akkord-Speicher).
+    keyboard.touchUp (3, { 220.0f, 140.0f });
+    REQUIRE (keyboard.droneCount() == 1);
+
+    const auto suns = keyboard.constellationNormalized();
+    REQUIRE (suns.size() == 1);
+    REQUIRE (suns[0].ox == Catch::Approx (120.0 / 320.0));
+}
+
+TEST_CASE ("Drone: Mond-Reakquisition parallel zum Sonnen-Grab (relatives Zentrum)", "[grid][ui][drone]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    buildStandardDrone (keyboard);
+
+    // Finger 3 grabbt die Sonne, Finger 4 den eingefrorenen Mond.
+    keyboard.touchDown (3, { 100.0f, 140.0f });
+    keyboard.touchDown (4, { 150.0f, 140.0f });
+
+    const auto bendBefore  = lastBend (fake);
+    const auto slidesBefore = slideCount (fake);
+
+    // Sonnen-Move: relativer Bend +1 HT, aber KEIN Slide-Event (der Mond
+    // klebt starr, sein Radius ist unveraendert).
+    keyboard.touchMove (3, { 140.0f, 140.0f });
+    REQUIRE (lastBend (fake) - bendBefore == Catch::Approx (1.0f).margin (1.0e-3));
+    REQUIRE (slideCount (fake) == slidesBefore);
+
+    // Mond-Move rechnet gegen das NEUE Zentrum (140,140): Offset 90 px.
+    keyboard.touchMove (4, { 230.0f, 140.0f });
+    REQUIRE (lastSlide (fake) == Catch::Approx ((90.0 - 40.0) / 180.0));
+
+    keyboard.touchUp (3, { 140.0f, 140.0f });
+    keyboard.touchUp (4, { 230.0f, 140.0f });
+    REQUIRE (voiceStops (fake) == 0);
+    REQUIRE (keyboard.droneCount() == 1);
+}
+
+TEST_CASE ("Drone: Sonnen-Tap gewinnt ueber das Mond-Griffband (kleiner Orbit)", "[grid][ui][drone]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    // Drone mit kleinem Orbit (45 px) -- das 90-px-Mond-Griffband ueberdeckt
+    // die Sonnenzone vollstaendig.
+    keyboard.touchDown (1, { 100.0f, 140.0f });
+    keyboard.touchDown (2, { 145.0f, 140.0f });
+    keyboard.touchUp (1, { 100.0f, 140.0f });
+    keyboard.touchUp (2, { 145.0f, 140.0f });
+    REQUIRE (keyboard.droneCount() == 1);
+
+    // Tap exakt aufs Zentrum beendet den Drone (statt einen Mond-Grab zu
+    // starten -- der kleinere, spezifischere Treffer gewinnt).
+    keyboard.touchDown (3, { 100.0f, 140.0f });
+    keyboard.touchUp (3, { 100.0f, 140.0f });
+    REQUIRE (voiceStops (fake) == 1);
+    REQUIRE (keyboard.droneCount() == 0);
+}
+
+TEST_CASE ("Latch: Grab biegt relativ weiter -- kein Neuanschlag, Anker re-verankert", "[grid][ui][latch]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    // Eine Sonne in Pad-Mitte (col=2, unterste Reihe) -> Note 50.
+    keyboard.latchConstellation ({ { 100.0f / 320.0f, 300.0f / 320.0f, 0.0f, 0.0f, false } });
+    const auto callsAfterLatch = fake.calls.size();
+
+    // Grab auf der latched Sonne: KEIN neuer Ton (frueher startete hier
+    // eine zweite Note auf demselben Pad).
+    keyboard.touchDown (1, { 100.0f, 300.0f });
+    auto newStarts = 0;
+    for (auto i = callsAfterLatch; i < fake.calls.size(); ++i)
+        if (fake.calls[i].kind == grid::FakeVoiceSink::Kind::VoiceStart)
+            ++newStarts;
+    REQUIRE (newStarts == 0);
+
+    // Ein Pad nach rechts: relativer Bend +1 HT an die Latch-Stimme.
+    keyboard.touchMove (1, { 140.0f, 300.0f });
+    REQUIRE (lastBend (fake) == Catch::Approx (1.0f).margin (1.0e-3));
+
+    // Loslassen nach Bewegung: KEIN Tap -> Note klingt weiter.
+    keyboard.touchUp (1, { 140.0f, 300.0f });
+    REQUIRE (voiceStops (fake) == 0);
+
+    const auto suns = keyboard.constellationNormalized();
+    REQUIRE (suns.size() == 1);
+    REQUIRE (suns[0].x == Catch::Approx (140.0 / 320.0));
+
+    // Re-Verankerung: ein folgender Strip-Drag (LINEARE Kennlinie) setzt
+    // sprungfrei am Release-Punkt an -- +1 Pad ergibt Bend 2.0.
+    keyboard.moveLatchedBy (40.0f, 0.0f);
+    REQUIRE (lastBend (fake) == Catch::Approx (2.0f).margin (1.0e-3));
+}
+
+TEST_CASE ("Latch: kurzer Tap beendet genau EINE Note, der Slot bleibt", "[grid][ui][latch]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    // Zwei Sonnen: Note 50 (col 2) und Note 53 (col 5), unterste Reihe.
+    keyboard.latchConstellation ({ { 100.0f / 320.0f, 300.0f / 320.0f, 0.0f, 0.0f, false },
+                                   { 220.0f / 320.0f, 300.0f / 320.0f, 0.0f, 0.0f, false } });
+
+    keyboard.touchDown (1, { 220.0f, 300.0f });
+    keyboard.touchUp (1, { 220.0f, 300.0f });
+
+    REQUIRE (voiceStops (fake) == 1);
+    REQUIRE (keyboard.constellationNormalized().size() == 1);
+
+    // Die verbliebene Note klingt weiter und bleibt steuerbar.
+    keyboard.touchDown (2, { 100.0f, 300.0f });
+    keyboard.touchMove (2, { 140.0f, 300.0f });
+    keyboard.touchUp (2, { 140.0f, 300.0f });
+    REQUIRE (voiceStops (fake) == 1);
+}
+
+TEST_CASE ("Latch: Mond-Reakquisition am gelatchten Mond steuert Slide", "[grid][ui][latch]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    // Sonne (100,300) mit Mond-Offset 130 px -> Abruf-Slide 0.5.
+    keyboard.latchConstellation ({ { 100.0f / 320.0f, 300.0f / 320.0f,
+                                     130.0f / 320.0f, 0.0f, true } });
+    REQUIRE (lastSlide (fake) == Catch::Approx (0.5));
+
+    // Finger auf dem Mond (230,300): 130 px von der Sonne -> Mond-Zweig.
+    keyboard.touchDown (1, { 230.0f, 300.0f });
+    keyboard.touchMove (1, { 320.0f, 300.0f });   // Offset 220 -> Slide 1.0
+    REQUIRE (lastSlide (fake) == Catch::Approx (1.0));
+
+    keyboard.touchUp (1, { 320.0f, 300.0f });
+    const auto suns = keyboard.constellationNormalized();
+    REQUIRE (suns.size() == 1);
+    REQUIRE (suns[0].ox == Catch::Approx (220.0 / 320.0));
+}
+
+TEST_CASE ("Latch: Sonne ausserhalb des Rasters ist grabbar ohne Engine-Aufrufe", "[grid][ui][latch]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::FakeVoiceSink fake;
+    grid::GridVoiceEngine engine (fake);
+    conduit::GridKeyboardComponent keyboard (engine, conduit::GridPage::padLayoutConfig());
+    keyboard.setSize (320, 320);
+
+    // x = 1.5 liegt rechts ausserhalb -> kein noteOn (hasVoice = false).
+    keyboard.latchConstellation ({ { 1.5f, 0.5f, 0.0f, 0.0f, false } });
+    REQUIRE (fake.calls.empty());
+
+    // Grab + Bewegung: rein visuell, kein einziger Engine-Aufruf.
+    keyboard.touchDown (1, { 480.0f, 160.0f });
+    keyboard.touchMove (1, { 500.0f, 160.0f });
+    keyboard.touchUp (1, { 500.0f, 160.0f });
+    REQUIRE (fake.calls.empty());
+    REQUIRE (keyboard.constellationNormalized().size() == 1);
+
+    // Kurzer Tap entfernt den visuellen Eintrag -- ebenfalls ohne noteOff.
+    keyboard.touchDown (1, { 500.0f, 160.0f });
+    keyboard.touchUp (1, { 500.0f, 160.0f });
+    REQUIRE (fake.calls.empty());
+    REQUIRE (keyboard.constellationNormalized().empty());
+}
+
+//==============================================================================
+// ChordMemoryStrip: Release-All halten + Tap loescht den Slot (User 20.07.2026)
+
+TEST_CASE ("ChordMemoryStrip: Release-All halten + Tap loescht belegten Slot", "[grid][ui]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    grid::ChordMemory memory;
+    conduit::ChordMemoryStrip strip (memory);
+    strip.setSize (40, 320);   // slotHeight 38 px -> Slot 0 bei y ~1..39
+
+    bool releaseAllHeld = false;
+    std::vector<int> recalled, deleted;
+    strip.isReleaseAllHeld = [&releaseAllHeld] { return releaseAllHeld; };
+    strip.onRecall         = [&recalled] (int slot) { recalled.push_back (slot); };
+    strip.onSlotDeleted    = [&deleted] (int slot) { deleted.push_back (slot); };
+    strip.getConstellation = [] { return std::vector<grid::StoredSun> { { 0.3f, 0.9f, 0.0f, 0.0f, false } }; };
+
+    REQUIRE (memory.store (0, { { 0.3f, 0.9f, 0.0f, 0.0f, false } }));
+
+    // Gehalten + Tap auf den belegten Slot: geloescht, KEIN Recall.
+    releaseAllHeld = true;
+    strip.mouseDown (makeEvent (strip, { 20.0f, 10.0f }));
+    REQUIRE_FALSE (memory.isOccupied (0));
+    REQUIRE (deleted == std::vector<int> { 0 });
+    REQUIRE (recalled.empty());
+
+    // Ohne Halten: Recall-Pfad unveraendert.
+    releaseAllHeld = false;
+    REQUIRE (memory.store (0, { { 0.3f, 0.9f, 0.0f, 0.0f, false } }));
+    strip.mouseDown (makeEvent (strip, { 20.0f, 10.0f }));
+    strip.mouseUp (makeEvent (strip, { 20.0f, 10.0f }));
+    REQUIRE (memory.isOccupied (0));
+    REQUIRE (recalled == std::vector<int> { 0 });
+
+    // Gehalten + Tap auf einen LEEREN Slot: speichert unveraendert.
+    releaseAllHeld = true;
+    strip.mouseDown (makeEvent (strip, { 20.0f, 50.0f }));   // Slot 1
+    REQUIRE (memory.isOccupied (1));
+    REQUIRE (deleted == std::vector<int> { 0 });
 }

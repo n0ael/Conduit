@@ -119,11 +119,20 @@ void ChordMemoryStrip::mouseDown (const juce::MouseEvent& event)
 
     const auto occupied = memory.isOccupied (slot);
 
-    if (isCcMode && isCcMode() && occupied)
+    const auto deleteModifier = (isCcMode && isCcMode())
+                             || (isReleaseAllHeld && isReleaseAllHeld());
+
+    if (deleteModifier && occupied)
     {
-        // CC-Modus = Bearbeiten: Tap löscht den Slot (einzige Art, einen
-        // belegten Slot wieder freizugeben — store überschreibt nie).
+        // CC-Modus = Bearbeiten ODER gehaltener Release-All-Button
+        // (User 20.07.2026): Tap löscht den Slot — sonst gäbe es keinen
+        // Weg, einen belegten Slot freizugeben (store überschreibt nie).
+        // Kein Recall, keine Drag-Session beim Modifier-Tap.
         memory.clear (slot);
+
+        if (onSlotDeleted)
+            onSlotDeleted (slot);
+
         repaint();
         return;
     }
