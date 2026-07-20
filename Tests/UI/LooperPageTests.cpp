@@ -499,8 +499,11 @@ TEST_CASE ("LooperDockTabs: LOOPER-Tab schreibt in die LooperSettings", "[looper
 
     {
         conduit::LooperSettings settings { options };
+        auto midiOptions = options;
+        midiOptions.applicationName = "LooperDockMidi";
+        conduit::LooperMidiMap midiMap { midiOptions };
         conduit::EditorDockPanel dock;
-        conduit::LooperDockTabs tabs { dock, settings };
+        conduit::LooperDockTabs tabs { dock, settings, midiMap };
 
         // Tabs registriert, nur auf der Looper-Page sichtbar
         dock.setActivePage (conduit::TransportBar::pageLooper);
@@ -584,8 +587,11 @@ TEST_CASE ("LooperPage/Dock: Kopf-Umbau — MASTER-Sektion, Stop All", "[looper]
 
         {
             conduit::LooperSettings settings { options };
+            auto midiOptions = options;
+            midiOptions.applicationName = "LooperMasterMidi";
+            conduit::LooperMidiMap midiMap { midiOptions };
             conduit::EditorDockPanel dock;
-            conduit::LooperDockTabs tabs { dock, settings };
+            conduit::LooperDockTabs tabs { dock, settings, midiMap };
 
             auto* content = tabs.getMixerTabContent();
             REQUIRE (content != nullptr);
@@ -666,4 +672,82 @@ TEST_CASE ("LooperPage/Dock: Kopf-Umbau — MASTER-Sektion, Stop All", "[looper]
         REQUIRE_FALSE (page.getPanel (0).getViewTile().isActive());
         REQUIRE (page.getPanel (1).getViewTile().isActive());
     }
+}
+
+//==============================================================================
+TEST_CASE ("LooperMidiTargets: Key-Packung + Anzeigenamen", "[looper][ui]")
+{
+    using namespace conduit::loopermidi;
+
+    const auto key = makeKey (Target::sendLevel, 2, 3, 1);
+    REQUIRE (key.layer == kLooperLayer);
+    REQUIRE (targetOf (key) == Target::sendLevel);
+    REQUIRE (looperOf (key) == 2);
+    REQUIRE (trackOf (key) == 3);
+    REQUIRE (indexOf (key) == 1);
+    REQUIRE (isLooperKey (key));
+    REQUIRE_FALSE (isLooperKey ({ 0, 5, 0 }));
+
+    // Globale Track-Nummern im 4er-Raster (Looper 3, Track 4 = Track 12)
+    REQUIRE (globalTrack (key) == 12);
+    REQUIRE (targetName (key).contains ("Send 2"));
+    REQUIRE (targetName (key).contains ("Track 12"));
+    REQUIRE (targetName (makeKey (Target::trackPlay, 3, 1)).contains ("Track 14"));
+    REQUIRE (targetName (makeKey (Target::segment, 0, 0, 3)).contains ("1 Bar"));
+    REQUIRE (targetName (makeKey (Target::stopAll)) == "Stop All");
+
+    // Slot 12 (Index 11) passt in die 4-Bit-Packung
+    const auto slot = makeKey (Target::slotCell, 1, 2, 11);
+    REQUIRE (indexOf (slot) == 11);
+}
+
+TEST_CASE ("LooperMidiMap: Learn-Bindung persistiert ueber Neuinstanz", "[looper][ui]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("ConduitLooperMidiMapTests")
+                            .getChildFile (juce::Uuid().toString());
+    folder.createDirectory();
+
+    juce::PropertiesFile::Options options;
+    options.applicationName = "LooperMidiMapTests";
+    options.filenameSuffix  = ".settings";
+    options.folderName      = folder.getFullPathName();
+
+    const auto key = conduit::loopermidi::makeKey (
+        conduit::loopermidi::Target::mute, 1, 2);
+
+    {
+        conduit::LooperMidiMap map { options };
+        int changes = 0;
+        map.onChanged = [&] { ++changes; };
+
+        // Klassisches Learn: Ziel armieren, Controller bewegen -> gebunden
+        map.getBindings().armLearn (key);
+        REQUIRE (map.getBindings().isLearnArmed());
+        map.getBindings().handleIncomingCc (5, 21, 64);
+
+        const auto* binding = map.getBindings().bindingFor (key);
+        REQUIRE (binding != nullptr);
+        REQUIRE (binding->channel == 5);
+        REQUIRE (binding->cc == 21);
+        REQUIRE (changes == 1);
+        map.flush();
+    }
+
+    conduit::LooperMidiMap reloaded { options };
+    const auto* binding = reloaded.getBindings().bindingFor (key);
+    REQUIRE (binding != nullptr);
+    REQUIRE (binding->channel == 5);
+    REQUIRE (binding->cc == 21);
+    REQUIRE_FALSE (binding->isNote);
+
+    // Loeschen persistiert ebenfalls
+    reloaded.getBindings().unbind (key);
+    reloaded.flush();
+    conduit::LooperMidiMap emptied { options };
+    REQUIRE (emptied.getBindings().count() == 0);
+
+    folder.deleteRecursively();
 }

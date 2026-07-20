@@ -4,6 +4,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "Core/Looper/LooperMidiMap.h"
 #include "Core/LooperSettings.h"
 #include "EditorDockPanel.h"
 
@@ -34,7 +35,8 @@ namespace conduit
 class LooperDockTabs final : private juce::ChangeListener
 {
 public:
-    LooperDockTabs (EditorDockPanel& dockToUse, LooperSettings& settingsToUse);
+    LooperDockTabs (EditorDockPanel& dockToUse, LooperSettings& settingsToUse,
+                    LooperMidiMap& midiMapToUse);
     ~LooperDockTabs() override;
 
     //==========================================================================
@@ -58,6 +60,25 @@ public:
         Struktur anpassen (Zähler, Enable-Zustand der −/+-Kacheln). */
     void refreshLayout();
 
+    //==========================================================================
+    // MIDI-Tab (MAP MODE, 07/2026)
+
+    /** Feuert beim Umschalten des MAP-MODE-Toggles (Editor blendet das
+        Overlay um). */
+    std::function<void (bool active)> onMapModeChanged;
+
+    /** Learn-Kachel der Mappings-Liste bzw. Overlay-Tap (Editor armiert). */
+    std::function<void (const grid::MacroControlKey&)> onLearnRequested;
+
+    [[nodiscard]] bool isMapModeActive() const noexcept;
+    void setMapModeActive (bool active);
+
+    /** Mappings-Liste neu aufbauen (nach Binding-Änderungen). */
+    void refreshMappings();
+
+    /** Learn-scharfe Zeile markieren (hasArmed=false löscht). */
+    void setArmedKey (bool hasArmed, const grid::MacroControlKey& key);
+
     /** Content des LOOPER-/MIXER-Tabs (Tests: Controls via ComponentID). */
     [[nodiscard]] juce::Component* getLooperTabContent() noexcept;
     [[nodiscard]] juce::Component* getMixerTabContent() noexcept;
@@ -67,14 +88,16 @@ private:
 
     class LooperTabView;
     class MixerTabView;
-    class PlaceholderView;
+    class MidiTabView;
 
     EditorDockPanel& dock;
     LooperSettings& settings;
+    LooperMidiMap& midiMap;
 
     // Vom Dock besessen (addTab) — Pointer gültig bis removeTab im Dtor
     LooperTabView* looperView = nullptr;
     MixerTabView* mixerView = nullptr;
+    MidiTabView* midiView = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LooperDockTabs)
 };

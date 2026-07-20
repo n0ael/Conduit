@@ -1,7 +1,9 @@
 #include "LooperDockTabs.h"
 
 #include "Core/LaunchQuantization.h"
+#include "Core/Looper/LooperMidiTargets.h"
 #include "LooperTrackStrip.h"   // looperui::sendColour (Send-Farben S1–S4)
+#include "MappingsListComponent.h"
 #include "PushSection.h"
 #include "PushTiles.h"
 #include "TransportBar.h"
@@ -15,27 +17,6 @@ namespace
     constexpr int rowPadding = 8;
     constexpr int tileWidth = 34;
 }
-
-//==============================================================================
-class LooperDockTabs::PlaceholderView final : public juce::Component
-{
-public:
-    explicit PlaceholderView (const juce::String& hintToUse) : hint (hintToUse) {}
-
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (push::colours::panel);
-        g.setColour (push::colours::textDim);
-        g.setFont (push::scaledFont (13.0f));
-        g.drawFittedText (hint, getLocalBounds().reduced (16),
-                          juce::Justification::centredTop, 6, 1.0f);
-    }
-
-private:
-    juce::String hint;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PlaceholderView)
-};
 
 //==============================================================================
 class LooperDockTabs::LooperTabView final : public juce::Component
@@ -762,8 +743,83 @@ private:
 };
 
 //==============================================================================
-LooperDockTabs::LooperDockTabs (EditorDockPanel& dockToUse, LooperSettings& settingsToUse)
-    : dock (dockToUse), settings (settingsToUse)
+class LooperDockTabs::MidiTabView final : public juce::Component
+{
+public:
+    MidiTabView (LooperDockTabs& ownerToUse, LooperMidiMap& midiMapToUse)
+        : owner (ownerToUse), mappings (midiMapToUse.getBindings())
+    {
+        setName ("looperMidiTab");
+
+        mapTile.setComponentID ("mapMode");
+        mapTile.onClick = [this]
+        {
+            mapActive = ! mapActive;
+            mapTile.setActive (mapActive);
+            if (owner.onMapModeChanged != nullptr)
+                owner.onMapModeChanged (mapActive);
+        };
+
+        hint.setText (juce::String::fromUTF8 (
+                          "Like Ableton: enable MAP \xe2\x80\x94 everything glows "
+                          "cyan. Tap an element, then move your controller to "
+                          "bind its CC/note."),
+                      juce::dontSendNotification);
+        hint.setColour (juce::Label::textColourId, push::colours::textDim);
+        hint.setFont (push::scaledFont (11.0f));
+        hint.setJustificationType (juce::Justification::topLeft);
+
+        mappings.controlNameFor = [] (const grid::MacroControlKey& key)
+        { return loopermidi::targetName (key); };
+        mappings.onLearnRequested = [this] (const grid::MacroControlKey& key)
+        {
+            if (owner.onLearnRequested != nullptr)
+                owner.onLearnRequested (key);
+        };
+
+        addAndMakeVisible (mapTile);
+        addAndMakeVisible (hint);
+        addAndMakeVisible (mappings);
+        mappings.refresh();
+    }
+
+    void resized() override
+    {
+        auto bounds = getLocalBounds().reduced (rowPadding);
+        mapTile.setBounds (bounds.removeFromTop (44).reduced (2));
+        hint.setBounds (bounds.removeFromTop (52));
+        mappings.setBounds (bounds);
+    }
+
+    void paint (juce::Graphics& g) override { g.fillAll (push::colours::panel); }
+
+    [[nodiscard]] bool isMapActive() const noexcept { return mapActive; }
+
+    void setMapActive (bool active)
+    {
+        if (mapActive == active)
+            return;
+        mapActive = active;
+        mapTile.setActive (active);
+    }
+
+    MappingsListComponent& list() noexcept { return mappings; }
+
+private:
+    LooperDockTabs& owner;
+
+    push::TextTile mapTile { "MAP MODE", push::colours::ledCyan };
+    juce::Label hint;
+    MappingsListComponent mappings;
+    bool mapActive = false;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiTabView)
+};
+
+//==============================================================================
+LooperDockTabs::LooperDockTabs (EditorDockPanel& dockToUse, LooperSettings& settingsToUse,
+                                LooperMidiMap& midiMapToUse)
+    : dock (dockToUse), settings (settingsToUse), midiMap (midiMapToUse)
 {
     const auto looperOnly = 1 << TransportBar::pageLooper;
 
@@ -774,11 +830,10 @@ LooperDockTabs::LooperDockTabs (EditorDockPanel& dockToUse, LooperSettings& sett
     auto mixer = std::make_unique<MixerTabView> (*this, settings);
     mixerView = mixer.get();
     dock.addTab ("looperMixer", "MIXER", std::move (mixer), looperOnly);
-    dock.addTab ("looperMidi", "MIDI",
-                 std::make_unique<PlaceholderView> (
-                     juce::String::fromUTF8 ("MAP MODE folgt mit dem MIDI-Map-"
-                                             "Meilenstein.")),
-                 looperOnly);
+
+    auto midi = std::make_unique<MidiTabView> (*this, midiMap);
+    midiView = midi.get();
+    dock.addTab ("looperMidi", "MIDI", std::move (midi), looperOnly);
 
     settings.addChangeListener (this);
 }
@@ -820,6 +875,29 @@ void LooperDockTabs::setMasterState (bool allLoopersToMaster)
 {
     if (mixerView != nullptr)
         mixerView->setMasterState (allLoopersToMaster);
+}
+
+bool LooperDockTabs::isMapModeActive() const noexcept
+{
+    return midiView != nullptr && midiView->isMapActive();
+}
+
+void LooperDockTabs::setMapModeActive (bool active)
+{
+    if (midiView != nullptr)
+        midiView->setMapActive (active);
+}
+
+void LooperDockTabs::refreshMappings()
+{
+    if (midiView != nullptr)
+        midiView->list().refresh();
+}
+
+void LooperDockTabs::setArmedKey (bool hasArmed, const grid::MacroControlKey& key)
+{
+    if (midiView != nullptr)
+        midiView->list().setArmedKey (hasArmed, key);
 }
 
 void LooperDockTabs::changeListenerCallback (juce::ChangeBroadcaster*)
