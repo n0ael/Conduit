@@ -4,6 +4,7 @@ paths:
   - "Source/Core/Metronome.*"
   - "Source/Core/TransportSettings.*"
   - "Source/Core/LaunchQuantization.*"
+  - "Source/Core/TapTempo.h"
   - "Tests/Core/TransportLinkTests.cpp"
   - "Tests/Core/MetronomeTests.cpp"
   - "Tests/Core/LaunchQuantizationTests.cpp"

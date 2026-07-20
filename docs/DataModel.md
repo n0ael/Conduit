@@ -20,25 +20,35 @@ OSC → [Network Thread]
 ```
 
 ```cpp
-// OscController::handleMessage() [Network Thread]
-void onOscMessage(const juce::OSCMessage& msg) {
-    // 1. Sofort in Audio Thread (lock-free)
-    audioQueue.push({ parameterId, value });
+// OscController [Network Thread] — Ist-Implementierung (AsyncUpdater,
+// kein rohes callAsync-Lambda):
+void onParameterMessage (nodeUuid, parameterId, clamped) {
+    audioQueue.push ({ target, clamped });          // 1. sofort in den Audio Thread
 
-    // 2. Async in ValueTree — setzt dirty flag für Serialisierung
-    juce::MessageManager::callAsync([this, parameterId, value] {
-        rootTree.getChildWithProperty("id", parameterId)
-                .setProperty("value", value, nullptr);
-        isDirty.store(false);  // ValueTree ist jetzt aktuell
-    });
+    {   // 2. gesammelt in den ValueTree (Message Thread drained)
+        const juce::ScopedLock lock (treeUpdateLock);
+        pendingTreeUpdates.push_back ({ nodeUuid, parameterId, clamped });
+    }
+    stateDirty.store (true, std::memory_order_release);  // VOR triggerAsyncUpdate
+    triggerAsyncUpdate();
+}
 
-    isDirty.store(true);  // Serialisierung muss warten
+// [Message Thread]
+void handleAsyncUpdate() {
+    // Reset VOR dem Drain: eine Message, die währenddessen eintrifft,
+    // setzt stateDirty danach wieder — schlimmstenfalls ein
+    // überflüssiger Flush, nie ein verlorener Wert.
+    stateDirty.store (false, std::memory_order_release);
+    applyTreeUpdates();   // pendingTreeUpdates → rootTree (swap unter Lock)
 }
 ```
 
-**Serialisierungs-Regel:** Preset-Save und Undo-Snapshot prüfen `isDirty`.
-Wenn `true`: einen `callAsync`-Zyklus warten, dann serialisieren.
-Dadurch gehen keine OSC-Werte beim Speichern verloren.
+**Serialisierungs-Regel (Ist-Kontrakt):** `isDirty`/`stateDirty` guarded
+Preset-Save/getStateInformation über den synchronen `flushPendingUpdates()`.
+Undo-Transaktionen flushen NICHT; OSC-Werte laufen undo-frei und geraten
+nie in Undo-Deltas. Subtree-erfassende Transaktionen (z. B. Modul-Delete)
+können daher einen ≤ 1 Frame alten Stand snapshotten — akzeptierte
+Semantik. Dadurch gehen keine OSC-Werte beim Speichern verloren.
 
 | Pfad | Zweck | Latenz-Anforderung |
 |---|---|---|

@@ -1,4 +1,5 @@
 ---
+# paths bewusst vorausgreifend — CV-Subsystem ist v2.0-Roadmap
 paths:
   - "Source/**/*Calibrat*"
   - "Source/**/*CVTuner*"

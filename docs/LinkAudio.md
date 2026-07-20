@@ -25,8 +25,8 @@
 ## Empfangen (Phase 2) — Spezifikation (Design 08.07.2026)
 
 Status: implementiert 08.07.2026 (LinkReceiveStream + LinkAudioReceiveModule
-+ LinkAudioReceivePanel, Tests grün) — der Ende-zu-Ende-Feldtest gegen
-Ableton Live steht noch aus. WICHTIGER BEFUND: `availableChannels()`
++ LinkAudioReceivePanel, Tests grün). Feldtest bestanden 07/2026:
+iPad + Ableton, kabelgebunden — Latenz spürbar, aber direkt. WICHTIGER BEFUND: `availableChannels()`
 listet NUR Peer-Announcements (SDK `Channels::sawAnnouncement`) — eigene
 Sinks erscheinen nie, ohne Peer ist die Liste leer; Loopback-Tests
 brauchen deshalb einen echten Peer (z. B. Live).

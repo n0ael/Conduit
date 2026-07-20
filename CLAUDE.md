@@ -87,7 +87,7 @@ Regeln (v. a. §3 Audio Thread) bleiben bewusst unconditional hier.
 |---|---|---|
 | Buffer Size | 32–128 Samples (Warnung erst > 256; Untergrenze beurteilt der XRun-Zähler live, keine starre Schwelle) | — |
 | Sample Rate | 48 000 Hz | 44 100 Hz |
-| Audio-Callback RTL | < 2 ms intern | — |
+| Eigene DSP-Module | Low Latency hat Design-Priorität; Ausnahmen nur, wo prinzipbedingt unkritisch (z. B. Reverb) | — |
 | Glass-to-Sound | < 10 ms gesamt | — |
 
 ---
@@ -98,12 +98,13 @@ Regeln (v. a. §3 Audio Thread) bleiben bewusst unconditional hier.
 
 ```
 ConduitModule                    (abstrakte Basis, erbt AudioProcessor)
-├── GeneratorModule              LFO, Envelope, Sequencer, MIDI→CV
+├── GeneratorModule              LFO, Envelope, MIDI→CV
 ├── ProcessorModule             
 │    └── PluginModule            CLAP-Host wrapper (v2.x)
-├── IOModule
-│    ├── HardwareIOModule        ES-3, ES-5, ESX-8GT, ESX-8CV
-│    └── NetworkIOModule         OSC ↔ Ableton M4L
+├── AudioEndpointModule          audio_input/audio_output (ADR 009 — reguläre Browser-Module)
+├── IOModule                     Looper patch IN/OUT (ADR 010/013);
+│                                HardwareIOModule (ES-3/ES-5/ESX-8GT/ESX-8CV)
+│                                und NetworkIOModule (OSC ↔ Ableton M4L): Roadmap
 ├── AnalysisModule               Scope, Tuner, FFT, CVTunerModule
 └── UtilityModule                Mixer, Attenuator, DC Block, Math, Offset
 ```
@@ -126,8 +127,9 @@ Niemals Interface-Methoden vom falschen Thread aufrufen.
 
 ### 4.3 Beispiel: Mehrere Interfaces
 
-`class StepSequencer : public GeneratorModule, public IClockSlave, public IStochastic {};`
-— primärer CV/Trigger-Output via Basisklasse, Takt + Zufall als Mixins [Audio Thread].
+`class TuringModule : public GeneratorModule, public IClockSlave, public IStochastic {};`
+(Roadmap-Beispiel) — primärer CV/Trigger-Output via Basisklasse, Takt + Zufall
+als Mixins [Audio Thread].
 
 ### 4.4 Pflicht-Methoden jedes Moduls
 
@@ -168,6 +170,10 @@ Querschnitts-Invarianten (gelten app-weit, für jede Modul-UI):
   Message Thread**; alle patchbaren Aktionen durch den `UndoManager`.
 - **UI-Component hält niemals einen Pointer auf den Processor — nur auf
   den ValueTree-Subtree** (Zombie-UI-Schutz, Delete-Pfad 5.3).
+- Stille Lebensdauer-Kontrakte: Service-Pointer in UI (LevelMeter,
+  Taps, ChannelNames, UiSettings …) sind EngineProcessor-Member und
+  überleben jede UI; GraphManager-Service-Pointer folgen der
+  Deklarationsreihenfolge im EngineProcessor.
 
 ---
 
@@ -194,10 +200,12 @@ ValueTree ist Single Source of Truth für Zustand — aber **nicht** für
 Echtzeit-Parameter-Updates. OSC-Changes laufen parallel auf zwei Pfaden
 [Network Thread]: SPSC-Queue → Audio Thread (sofort, lock-free, < 1 ms)
 UND `MessageManager::callAsync` → ValueTree (UI + Serialisierung, ~1 Frame).
-**Serialisierungs-Regel:** `isDirty` (`std::atomic<bool>`) guarded
-Preset-Save und Undo-Snapshot — bei `true` einen callAsync-Zyklus warten,
-dann serialisieren; so gehen keine OSC-Werte beim Speichern verloren.
-Code-Muster + Latenz-Tabelle: docs/DataModel.md.
+**Serialisierungs-Regel (Ist-Kontrakt):** `isDirty` guarded
+Preset-Save/getStateInformation (synchroner `flushPendingUpdates`).
+Undo-Transaktionen flushen NICHT; OSC-Werte laufen undo-frei und geraten
+nie in Undo-Deltas. Subtree-erfassende Transaktionen (z. B. Modul-Delete)
+können daher einen ≤ 1 Frame alten Stand snapshotten — akzeptierte
+Semantik. Code-Muster + Latenz-Tabelle: docs/DataModel.md.
 
 ### 6.2 ValueTree Schema
 
@@ -237,7 +245,8 @@ wissen nichts von OSC. Details: Rule `osc-remote`.
 ### 7.2 Link Audio (Audio in der Link-Session)
 
 Send + Clock + Receive implementiert (Receive: beat-aligntes
-Latenzfenster `latency_ms`; Live-Feldtest offen 08.07.2026).
+Latenzfenster `latency_ms`; Feldtest iPad+Ableton kabelgebunden
+bestanden 07/2026).
 Invarianten (LinkAudio ERSETZT Link, int16+TPDF, WeakReference-Pflicht):
 Rule `linkaudio`; Spezifikation + Lektionen: **docs/LinkAudio.md —
 Pflichtlektüre vor jeder LinkAudio-Arbeit.**
@@ -284,7 +293,7 @@ Kalibrierungs-Arbeit.**
 |---|---|---|---|
 | Windows | Primary | ASIO | Dev/DAW |
 | macOS | Primary | CoreAudio | Dev/DAW, 32 Samples problemlos |
-| Linux Desktop | Secondary | JACK + FFADO | FireWire-Interfaces |
+| Linux Desktop | Secondary | JACK/PipeWire | FireWire-Revival (Altgeräte-Reaktivierung) als Option offengehalten |
 | Linux Kiosk (LinkBox) | Secondary | JACK / PipeWire | PREEMPT_RT, Fullscreen |
 | iOS | Secondary | CoreAudio Remote I/O | Touch-first; nativer Build validiert 17.07.2026 (iPad Pro A12X: ~1 % idle, 5–6 % Peak); Distribution erfordert Developer-Account + Apple-Silicon-Dev-Hardware |
 
@@ -333,10 +342,9 @@ Querschnitts-Kern:
   Processor (§5); Animationen via `VBlankAttachment`, kein Blocking
   in `paint()`.
 - **UI-Framerate (User-Regel 14.07.2026):** Anzeige-Refreshes laufen
-  NATIV mit der Monitor-Rate über `UiFramePacer` (global gedeckelt via
-  `UiSettings::uiFpsLimit`: Default 120 „Nativ", Drossel 60/30 im
-  Oberfläche-Menü) — keine festen `startTimerHz`-Refreshes; Details
-  Rule `ui-design`.
+  NATIV mit der Monitor-Rate über `UiFramePacer`, global via
+  `UiSettings::uiFpsLimit` gedeckelt — keine festen
+  `startTimerHz`-Refreshes; Stufen und Details Rule `ui-design`.
 
 Subsystem-Regeln + Spezifikationen (je eigene Rule + Dossier):
 **TransportBar/Metronom** → Rule `transport`, docs/Transport.md ·
@@ -352,33 +360,10 @@ Rule `ui-design`.
 
 ---
 
-## 11. Feature-Roadmap (Scope-Referenz)
+## 11. Feature-Roadmap
 
-Erledigte v2.0-Features stehen nicht mehr hier — sie sind in den Dossiers
-dokumentiert: Link Audio Send, Transport-Header, FX-Chassis, Looper inkl.
-Vollausbau, OSC-Send, M4L-Announce (+ Max-Testdevice ConduitLFO), Grid M1.
-
-| Feature | Version | Notiz |
-|---|---|---|
-| Link Audio Receive | v2.x | implementiert 08.07.2026 (docs/LinkAudio.md) — Live-Feldtest offen |
-| I/O-Konsolidierung (User-Idee 08.07.2026) | v2.x | audio_input/audio_output starten stereo, „+" fügt Hardware- ODER Link-Kanäle hinzu (ein Modul für alle Ins, eins für alle Outs); InputSendButtons entfallen dann; Receive-/Send-Motoren bleiben die Basis |
-| Gate, EQ, Compressor | v2.0 | ProcessorModule, ISidechain |
-| CVTunerModule | v2.0 | AnalysisModule, CalibrationProfile |
-| CLAP-Hosting | v2.x | PluginModule wraps AudioPluginInstance |
-| IPolyphonic | v2.x | Interface vorbereitet, noch nicht implementiert |
-| VST3-Hosting | v3.0+ | Steinberg-Lizenz, nach CLAP |
-| Cardinal/VCV Integration | v3.0+ | Touch-native Modular UI |
-| Expert-Sleepers-Encoder (ES-5/ES-4(0)/8CV/8GT) | v2.x | v1-Port vorhanden (EncoderEngines.hpp, MIT/VCV) — HardwareIOModule-Grundstein |
-| Euclid-/Turing-Module | v2.x | v1-Engines als Referenz (Launch-Quant, parametrischer Swing, Scale-Quantize) |
-| Mixer-Page | v2.x | ∥∥-Icon, Channel-Strips (Capture-Buttons wandern dorthin) |
-| Grid-Page weitere Meilensteine | Ω-Icon | Meilensteinleiter: docs/Grid.md |
-| Clip-Page (Fugue-Machine-Sequencer) | v2.x | ▷▭-Icon, immer aktiv, CV- UND MIDI-Ziele; Slot 2 vorerst an TouchLive abgegeben (09.07.2026) |
-| TouchLive-Page (Ableton-Live-Remote) | v2.x | M1–M4 + M5/EQ-Eight erledigt (GRID/MIXER/DEVICE/BROWSER auf Slot 2, Meter, Fast-Path, bespoke EQ-Kurve), Meilensteinleiter: docs/TouchLive.md |
-| Capture-Netzwerk-Share (Exports für entferntes Ableton) | v2.x | HTTP-Bereitstellung der Capture-Dateien |
-| MIDI-Rig (Hardware-Mapping, NRPN/PC/SysEx) | v2.x | Meilensteinleiter: docs/MidiRig.md |
-| Node-Page Multipage (Canvas-Seiten) | v2.x | M0–M4 UMGESETZT 18.07.2026 (ADR 008/009, Rule `node-editor`, docs/NodeEditor.md) — Feldtest offen; M5 Portal-Badges ZURÜCKGESTELLT (Bedarfsprüfung: lokale Outs pro Seite decken den Hauptfall; Cross-Page-Kabel wirken im Graph, sind nur unsichtbar) |
-| GestureHelper-Spike (separater Prozess) | v2.x, nachrangig | Raw-Trackpad-Multitouch + Systemgesten-Umschaltung je OS; Muster Push-Shuttle (Prozess-Firewall für Private-APIs); NUR falls Modifier-Pfad in der Praxis nicht reicht |
-| AUv3-Hosting (iOS/macOS) | v2.x | JUCE-nativ, lief im Erstversuch (iOS + macOS 17.07.2026); auf iOS einziges Plugin-Format; unabhängig von CLAP-Priorität |
+Die Roadmap lebt in docs/Roadmap.md (frei fortschreibbar, unabhängig vom
+Versionszyklus dieser Datei). Scope-Grenzen: §12.
 
 ---
 
@@ -392,6 +377,9 @@ Vollausbau, OSC-Send, M4L-Announce (+ Max-Testdevice ConduitLFO), Grid M1.
 - Android-Port (Musik-Tablet-Markt ist faktisch iOS; JUCE-fähig,
   bewusst zurückgestellt — Wiedervorlage nur bei belegter Nachfrage)
 
+Lizenz-/Vertriebs-/Pricing-Entscheidungen werden außerhalb des Repos
+geführt und sind hier bewusst nicht dokumentiert.
+
 ---
 
 ## 13. Tooling & Technische Guardrails
@@ -401,7 +389,10 @@ Vollausbau, OSC-Send, M4L-Announce (+ Max-Testdevice ConduitLFO), Grid M1.
 - **C++ Standard:** Strikt C++20 — `set(CMAKE_CXX_STANDARD 20)`, `set(CMAKE_CXX_STANDARD_REQUIRED ON)`
 - **JUCE Version:** Minimum JUCE 8.0.0, via CMake `FetchContent` (kein Submodule, kein System-Install)
 - **Ableton Link:** via `FetchContent` (header-only)
-- **Warnungen als Fehler:** `-Wall -Wextra -Werror` (GCC/Clang), `/W4 /WX` (MSVC)
+- **Warnungen als Fehler:** `-Wall -Wextra -Werror` (GCC/Clang), `/W4 /WX` (MSVC).
+  Werror gilt per `set_source_files_properties` nur auf Conduit-eigenen
+  Quelldateien — JUCE-Sources im selben Target bleiben Werror-frei
+  (begründet in den CMakeLists).
 
 ### 13.2 Preprocessor Defines (RT Safety Guardrails)
 
@@ -420,12 +411,17 @@ und nur mit Steinberg ASIO SDK (separater Download + Lizenz, Pfad via
   Windows) / `tsan` (Clang, NUR Linux/macOS/WSL). TSan + ASan laufen
   außerdem in GitHub Actions (Ubuntu) bei jedem Push auf master
   (`.github/workflows/ci.yml`). Ninja-Variante + Details: docs/Build.md.
+- Drittes/viertes Target: `ConduitAirwindows` (Static Lib,
+  `add_subdirectory Source/DSP/Airwindows`, linkt nur `juce_audio_basics`;
+  Include-Root-Konvention `DSP/Airwindows/...`) + `ConduitAirwindowsTests`.
 
 ### 13.4 Testing & Validierung
 
 - **Framework:** Catch2 v3 via `FetchContent`, eigenes `ConduitTests`-Target
 - **Pflicht-Unit-Tests vor Integration:** SPSC-Queues, ValueTree-Serialisierung/-Migration,
-  Graph-Topologie-Änderungen (Fade-Zyklen, Batch-Coalescing), CalibrationProfile-Matching
+  Graph-Topologie-Änderungen (Fade-Zyklen, Batch-Coalescing),
+  CalibrationProfile-Matching (fällig mit Implementierung des
+  CV-Subsystems, v2.0)
 - **ThreadSanitizer:** Eigene CMake-Preset/Config mit `-fsanitize=thread` (Clang) —
   Pflicht-Lauf für allen Code, der Thread-Grenzen überschreitet (SPSC, atomics, AsyncUpdater)
 - **AddressSanitizer:** `-fsanitize=address` für Graph-Swap- und Delete-Pfade (Zombie-UI, Use-after-free)
@@ -433,8 +429,23 @@ und nur mit Steinberg ASIO SDK (separater Download + Lizenz, Pfad via
 
 ### 13.5 Projektstruktur
 
-`Source/{Core,Modules,Interfaces,UI,Util}` + `Tests/` (spiegelt
-Source/-Struktur), je Modul ein .h/.cpp-Paar; UI nur ValueTree-gebunden.
+`Source/{Core,DSP,Interfaces,Modules,TouchLive,UI,Util}` + `Tests/`
+(spiegelt Source/; Modul-Tests liegen in Tests/Core, Interfaces sind
+header-only ohne Testspiegel). Je Modul ein .h/.cpp-Paar; Ausnahmen:
+Interfaces, Kategorie-Basisklassen, Header-only-Templates/POD (z. B.
+SpscQueue). `target_sources` registriert NUR Übersetzungseinheiten
+(.cpp) — Header werden nicht gelistet.
+
+Soll-Layering (ADR 014): Util → nichts; Interfaces → Util;
+DSP → nichts Projektinternes (isolierte Engine-Lib);
+Core → Interfaces, Util; TouchLive → Core, Util;
+Modules → Core, Interfaces, Util, DSP;
+UI → Util, TouchLive, Core (ValueTree-/Settings-/Service-Header —
+KEINE Processor-/Modul-Header, §5; sanktionierter Laufzeit-Zugriff
+ausschließlich über die NodeUiRegistry).
+Kompositions-Whitelist (dürfen zusätzlich Modules/UI/TouchLive
+inkludieren): EngineProcessor.*, EngineEditor.*, GraphManager.*,
+Main.cpp — abschließend.
 
 ---
 
@@ -457,7 +468,12 @@ Index:
 - 012 — Big Looper Out: Auto-Follow-Outputs, Send-Busse, Papierkorb
 - 013 — Looper patch IN/OUT: Umbenennung (inkl. factoryIds) + Entfall
   des Mini-Out
+- 014 — Soll-Layering & Kompositionsschicht (Source-Verzeichnisse,
+  Include-Richtungen)
+- 015 — Looper-Track-Mixer: XY-Distanz, Send-Level, freies Loop-Fenster
+- 016 — Looper-MIDI-Map: eigene Bindungs-Instanz, Ziel-Kodierung,
+  MAP-Overlay
 
 ---
 
-*Conduit Alpha v3 — Claude Code Instructions v5.6  |  Juli 2026*
+*Conduit Alpha v3 — Claude Code Instructions v5.7  |  Juli 2026*

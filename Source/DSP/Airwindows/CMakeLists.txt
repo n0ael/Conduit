@@ -76,65 +76,6 @@ set(CONDUIT_AIRWINDOWS_CPP_SOURCES
 
 add_library(ConduitAirwindows STATIC
     ${CONDUIT_AIRWINDOWS_CPP_SOURCES}
-    AirwindowsPlugin.h
-    AirwindowsRegistry.h
-    Plugins/Density.h
-    Plugins/Slew.h
-    Plugins/Spiral.h
-    Plugins/Air4.h
-    Plugins/Cans.h
-    Plugins/CansAW.h
-    Plugins/Console0Buss.h
-    Plugins/Console0Channel.h
-    Plugins/ConsoleLABuss.h
-    Plugins/ConsoleMCBuss.h
-    Plugins/DeBess.h
-    Plugins/DeBez.h
-    Plugins/DeRez3.h
-    Plugins/DigitalBlack.h
-    Plugins/Discontapeity.h
-    Plugins/Distance3.h
-    Plugins/DubSub2.h
-    Plugins/Dubly3.h
-    Plugins/FatEQ.h
-    Plugins/Flutter2.h
-    Plugins/Gatelope.h
-    Plugins/GlitchShifter.h
-    Plugins/Hypersoft.h
-    Plugins/Inflamer.h
-    Plugins/Isolator3.h
-    Plugins/Mackity.h
-    Plugins/OneCornerClip.h
-    Plugins/Parametric.h
-    Plugins/PearEQ.h
-    Plugins/Pockey2.h
-    Plugins/PointyGuitar.h
-    Plugins/Pop2.h
-    Plugins/Silken.h
-    Plugins/SingleEndedTriode.h
-    Plugins/Smooth.h
-    Plugins/SmoothEQ3.h
-    Plugins/SoftGate.h
-    Plugins/StoneFireComp.h
-    Plugins/Stonefire.h
-    Plugins/Sweeten.h
-    Plugins/TakeCare.h
-    Plugins/TapeDelay2.h
-    Plugins/TapeDust.h
-    Plugins/TapeHack2.h
-    Plugins/ToneSlant.h
-    Plugins/TremoSquare.h
-    Plugins/Trianglizer.h
-    Plugins/Tube2.h
-    Plugins/Vibrato.h
-    Plugins/Weight.h
-    Plugins/Wider.h
-    Plugins/Chamber.h
-    Plugins/Galactic.h
-    Plugins/VerbTiny.h
-    Plugins/KBeyond.h
-    Plugins/KCathedral5.h
-    Plugins/KWoodRoom.h
 )
 
 # Include-Root ist Source/ — Konsumenten und die Lib selbst inkludieren im
@@ -241,7 +182,6 @@ if(TARGET Catch2::Catch2WithMain)
 
     add_executable(ConduitAirwindowsTests
         ${CONDUIT_AIRWINDOWS_TEST_SOURCES}
-        ${CONDUIT_AIRWINDOWS_TESTS_DIR}/AirwindowsTestHelpers.h
     )
 
     target_link_libraries(ConduitAirwindowsTests

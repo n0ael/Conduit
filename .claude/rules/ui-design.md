@@ -1,6 +1,7 @@
 ---
 paths:
   - "Source/UI/**"
+  - "Source/Core/EngineEditor.*"
 ---
 
 # Rule: ui-design — Push-3-Design-System & Touch-Regeln (CLAUDE.md 10)

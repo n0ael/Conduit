@@ -10,12 +10,14 @@ namespace conduit
     Mixin-Interface: Zufalls-Parameter (CLAUDE.md 4.2) → Audio Thread,
     Seed-Updates → Message Thread.
 
-    Implementierende Module besitzen ihre EIGENE RNG-Instanz (juce::Random)
-    und benutzen sie ausschließlich im Audio Thread — kein globaler/geteilter
-    Zufall. Der GraphManager injiziert beim Materialisieren (vor der
-    Graph-Aufnahme, Muster IClockSlave) einen deterministischen Seed aus der
-    nodeUuid — Patterns sind damit pro Node reproduzierbar; Tests setzen den
-    Seed direkt.
+    RNG-Vorgabe ist der §3.1-inline-LCG (state = 1664525*state +
+    1013904223) mit modul-eigenem uint32-State — kein globaler/geteilter
+    Zufall, keine rand()/<random>-Engines. Seed-Injektion auf dem Message
+    Thread VOR der Graph-Aufnahme (setRandomSeed, Muster IClockSlave):
+    der GraphManager injiziert beim Materialisieren einen deterministischen
+    Seed aus der nodeUuid — Patterns sind damit pro Node reproduzierbar,
+    Tests setzen den Seed direkt. Nutzung ausschließlich [Audio Thread],
+    deterministisch pro Seed.
 */
 class IStochastic
 {

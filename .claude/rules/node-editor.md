@@ -2,11 +2,16 @@
 paths:
   - "Source/UI/NodeCanvas*"
   - "Source/UI/NodeComponent*"
+  - "Source/UI/NodeAttributePanel.*"
+  - "Source/UI/NodeColourDot.*"
+  - "Source/UI/PortComponent.*"
   - "Source/UI/PageOverviewComponent*"
   - "Source/Core/PageManager*"
   - "Source/Core/CanvasGestureRecognizer*"
   - "Source/Core/CanvasViewport*"
   - "Source/Modules/AudioEndpointModule*"
+  - "Tests/UI/NodeCanvasTests.cpp"
+  - "docs/NodeEditor.md"
 ---
 
 # Rule: node-editor — Multipage-Canvas (ADR 008/009)

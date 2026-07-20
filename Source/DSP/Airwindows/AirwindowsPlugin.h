@@ -69,7 +69,7 @@ public:
     }
 
     //==========================================================================
-    // [Message Thread]
+    // [jeder Thread — atomic relaxed; RT-sicher, keine MT-only-Logik ergänzen]
     void setParameter (int index, float value01) noexcept;   // klemmt auf 0..1
     float getParameter (int index) const noexcept;            // Default bei ungültigem Index: 0
 

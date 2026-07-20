@@ -2,6 +2,19 @@
 paths:
   - "Source/Core/Midi*"
   - "Source/Core/HardwareCcDatabase*"
+  - "Source/Core/NrpnAssembler.*"
+  - "Source/Core/RelativeEncoding.h"
+  - "Source/Core/ChannelStripLayers.*"
+  - "Source/Core/PickupLedRouter.*"
+  - "Source/Core/PositionFeedbackRouter.*"
+  - "Source/Core/ControllerProfile*.*"
+  - "Source/Core/HardwarePreset*.*"
+  - "Source/Core/Sysex/**"
+  - "Source/UI/MidiRigSettingsComponent.*"
+  - "Tests/**/*Midi*"
+  - "Tests/**/*Nrpn*"
+  - "Tests/**/*Sysex*"
+  - "Tests/**/HardwarePreset*"
   - "docs/MidiRig.md"
 ---
 
