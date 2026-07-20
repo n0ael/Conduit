@@ -1190,7 +1190,16 @@ float LooperBank::renderClipSample (const LooperClip& clip, int channel,
         return readLinear (static_cast<double> (fade) + contentPosition);
 
     const auto zonePosition = contentPosition - zoneStart;   // [0, fadeEff)
-    const auto alpha = zonePosition / fadeEff;               // 0..1
+
+    // Die Rampe endet fadeGuardSamples VOR dem Wrap-Punkt (Klick-Fix
+    // 20.07.2026): bei Varispeed springt die Leseposition um `rate`
+    // Samples pro Ausgabe-Sample und trifft das Zonenende nie exakt —
+    // der Restanteil des alten Materials (cos(α·π/2) > 0) fiel beim Wrap
+    // abrupt weg und knackte. Mit dem Vorlauf steht α GARANTIERT auf 1,
+    // bevor gewrappt wird; die Blend-Quelle läuft dabei synchron zur
+    // Position NACH dem Wrap weiter — der Übergang bleibt stetig.
+    const auto rampLength = juce::jmax (1.0, fadeEff - fadeGuardSamples);
+    const auto alpha = juce::jmin (1.0, zonePosition / rampLength);
 
     const auto endSample  = readLinear (static_cast<double> (fade) + contentPosition);
     // Blend-Quelle: gleitet auf den Fensterstart zu (bei z = fadeEff exakt
@@ -1198,7 +1207,14 @@ float LooperBank::renderClipSample (const LooperClip& clip, int channel,
     const auto leadSample = readLinear (static_cast<double> (fade) - fadeEff
                                         + windowStart + zonePosition);
 
-    const auto angle = alpha * juce::MathConstants<double>::halfPi;
+    // Smoothstep AUF DEN WINKEL (Klick-Fix 20.07.2026): der Blend bleibt
+    // exakt equal-power (cos² + sin² = 1), erreicht seine Endpunkte aber
+    // mit Steigung 0. Beim linearen Winkel hing der Restanteil des alten
+    // Materials linear am Abstand zum Endpunkt — jeder Positions-Sprung
+    // (Varispeed, Blockraster) ließ ihn hörbar abreißen. Jetzt fällt der
+    // Rest quadratisch, der Wrap ist auch bei groben Schritten sauber.
+    const auto shaped = alpha * alpha * (3.0 - 2.0 * alpha);
+    const auto angle = shaped * juce::MathConstants<double>::halfPi;
     return endSample  * static_cast<float> (std::cos (angle))
          + leadSample * static_cast<float> (std::sin (angle));
 }

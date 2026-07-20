@@ -96,6 +96,11 @@ public:
     // Lese-Sprünge oberhalb dieser Schwelle laufen hinter dem Splice-Duck
     static constexpr double spliceThresholdSamples = 64.0;
 
+    // Vorlauf der Wrap-Crossfade-Rampe (Klick-Fix 20.07.2026): sie muss
+    // ihren Endwert erreichen, BEVOR die Leseposition wrappt — bei
+    // Varispeed überspringt sie das Zonenende um bis zu `rate` Samples
+    static constexpr double fadeGuardSamples = 24.0;
+
     static constexpr double minRate = 0.25, maxRate = 4.0;   // VARI ±2 Oktaven
     static constexpr std::int64_t defaultRamBudgetBytes = 1'500'000'000;
 

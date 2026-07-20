@@ -1557,3 +1557,96 @@ TEST_CASE ("LooperBank: nebenläufige Commits gegen laufendes Audio (Stress)", "
     }
     REQUIRE (rig.bank.getRamBytesUsed() < 3 * 2 * 4 * (2 * 96'000 + 240 + 4096));
 }
+
+//==============================================================================
+TEST_CASE ("LooperBank: LEN/POS — Loop-Wrap bleibt klickfrei", "[looper]")
+{
+    // Glattes Signal (Sinus, Periode = 1 Takt) OHNE eigene Spruenge: jede
+    // Sample-zu-Sample-Diskontinuitaet im Output ist damit ein Artefakt des
+    // Loop-Wraps. User-Fund 20.07.2026: bei manchen LEN/POS-Einstellungen
+    // knackte es hoerbar.
+    const auto smoothSine = [] (std::uint64_t position)
+    {
+        return 0.5f * static_cast<float> (
+            std::sin (juce::MathConstants<double>::twoPi
+                      * static_cast<double> (position) / 96000.0));
+    };
+
+    // Klick-Metrik = zweite Differenz |x[n] - 2x[n-1] + x[n-2]|: ein
+    // Crossfade zwischen weit auseinanderliegenden Stellen DARF eine
+    // steile (aber stetige) Flanke haben — die faellt hier nicht auf,
+    // weil ihre Steigung sich nur langsam aendert. Ein echter Sprung
+    // (Klick) sticht dagegen sofort heraus.
+    const auto maxKinkOver = [] (BankRig& r, int blocks)
+    {
+        auto worst = 0.0f;
+        float previous = 0.0f, beforePrevious = 0.0f;
+        auto haveHistory = 0;
+
+        for (int block = 0; block < blocks; ++block)
+        {
+            r.feedBlocks (1);
+            const auto* data = r.output.getReadPointer (0);
+            for (int i = 0; i < blockSize; ++i)
+            {
+                if (haveHistory >= 2)
+                    worst = juce::jmax (worst,
+                                        std::abs (data[i] - 2.0f * previous + beforePrevious));
+                beforePrevious = previous;
+                previous = data[i];
+                haveHistory = juce::jmin (2, haveHistory + 1);
+            }
+        }
+        return worst;
+    };
+
+    // Referenz: ungestoerter Vollfenster-Loop (bestehendes Verhalten)
+    {
+        BankRig rig;
+        rig.signal = smoothSine;
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+        rig.feedBlocks (4);
+        REQUIRE (maxKinkOver (rig, 120) < 0.002f);
+    }
+
+    // Fenster-Raster quer durch: verkuerzte Laengen, verschobene
+    // Positionen, vorwaerts UND rueckwaerts, bei 1x und Varispeed.
+    // Schwelle STRENG: das glatte Signal aendert sich pro Sample um
+    // ~3e-5, ein Wrap-Artefakt sticht sofort heraus.
+    for (const auto reversed : { false, true })
+    {
+        for (const auto rate : { 1.0, 0.5, 2.0 })
+        {
+            for (const auto lengthBeats : { 2.0, 1.0, 0.5, 1.5, 0.25, 0.1 })   // 0.1 = 50-ms-Untergrenze
+            {
+                for (const auto offsetBeats : { 0.0, 0.5, 1.0, 2.0, 1.75 })
+                {
+                    if (offsetBeats + lengthBeats > 4.0)
+                        continue;
+
+                    BankRig rig;
+                    rig.signal = smoothSine;
+                    rig.feedBars (2.5);
+                    REQUIRE (rig.commit (1).wasOk());
+                    rig.feedBlocks (4);
+
+                    REQUIRE (rig.bank.setClipLengthBeats (
+                                 0, 0, lengthBeats,
+                                 conduit::looper::HalveMode::firstHalf).wasOk());
+                    REQUIRE (rig.bank.setClipWindowOffsetBeats (0, 0, offsetBeats).wasOk());
+                    if (reversed)
+                        REQUIRE (rig.bank.toggleClipReverse (0, 0, false).wasOk());
+                    if (! juce::exactlyEqual (rate, 1.0))
+                        REQUIRE (rig.bank.setClipRate (0, 0, rate).wasOk());
+
+                    rig.feedBlocks (16);   // Apply + Splice-Duck ausklingen lassen
+
+                    INFO ("reversed=" << (reversed ? 1 : 0) << " rate=" << rate
+                          << " length=" << lengthBeats << " offset=" << offsetBeats);
+                    REQUIRE (maxKinkOver (rig, 120) < 0.002f);
+                }
+            }
+        }
+    }
+}
