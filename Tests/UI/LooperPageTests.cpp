@@ -4,7 +4,8 @@
 #include "Core/LooperSettings.h"
 #include "UI/LooperPage.h"
 #include "UI/LooperSendDialog.h"
-#include "UI/LooperSettingsMenu.h"
+#include "UI/LooperDockTabs.h"
+#include "UI/TransportBar.h"
 
 using Catch::Approx;
 
@@ -430,41 +431,84 @@ TEST_CASE ("LooperClipControlsRow: Dispatch nur mit Aktiv-Clip, VARI-Mapping", "
     }
 }
 
-TEST_CASE ("LooperSettingsMenu: Controls schreiben in die LooperSettings", "[looper][ui]")
+TEST_CASE ("LooperDockTabs: LOOPER-Tab schreibt in die LooperSettings", "[looper][ui]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;
 
     const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                            .getChildFile ("ConduitLooperMenuTests")
+                            .getChildFile ("ConduitLooperDockTests")
                             .getChildFile (juce::Uuid().toString());
     folder.createDirectory();
 
     juce::PropertiesFile::Options options;
-    options.applicationName = "LooperMenuTests";
+    options.applicationName = "LooperDockTests";
     options.filenameSuffix  = ".settings";
     options.folderName      = folder.getFullPathName();
 
     {
         conduit::LooperSettings settings { options };
-        conduit::LooperSettingsMenu menu { settings };
+        conduit::EditorDockPanel dock;
+        conduit::LooperDockTabs tabs { dock, settings };
 
-        menu.getQuantCombo().setSelectedId ((int) conduit::LaunchQuant::off + 1,
-                                            juce::sendNotificationSync);
+        // Tabs registriert, nur auf der Looper-Page sichtbar
+        dock.setActivePage (conduit::TransportBar::pageLooper);
+        dock.setActiveTab ("looper");
+        REQUIRE (dock.getActiveTabId() == "looper");
+
+        auto* content = tabs.getLooperTabContent();
+        REQUIRE (content != nullptr);
+        content->setBounds (0, 0, 320, 800);
+
+        // Tiefensuche über die Sektionen/Zeilen-Hierarchie
+        std::function<juce::Component* (juce::Component&, const juce::String&)> deepFind =
+            [&] (juce::Component& parent, const juce::String& id) -> juce::Component*
+        {
+            if (parent.getComponentID() == id)
+                return &parent;
+            for (auto* child : parent.getChildren())
+                if (auto* hit = deepFind (*child, id))
+                    return hit;
+            return nullptr;
+        };
+        const auto comboById = [&] (const juce::String& id)
+        { return deepFind (*content, id); };
+
+        auto* quant = dynamic_cast<juce::ComboBox*> (comboById ("quant"));
+        REQUIRE (quant != nullptr);
+        quant->setSelectedId ((int) conduit::LaunchQuant::off + 1,
+                              juce::sendNotificationSync);
         REQUIRE (settings.getLaunchQuant() == conduit::LaunchQuant::off);
 
-        menu.getTapModeCombo().setSelectedId (2, juce::sendNotificationSync);
-        REQUIRE (settings.getTapMode() == conduit::LooperSettings::TapMode::toggleStop);
+        auto* tap = dynamic_cast<juce::ComboBox*> (comboById ("tapMode"));
+        REQUIRE (tap != nullptr);
+        tap->setSelectedId (3, juce::sendNotificationSync);   // Legato
+        REQUIRE (settings.getTapMode() == conduit::LooperSettings::TapMode::legato);
 
-        menu.getSlotsCombo().setSelectedId (10, juce::sendNotificationSync);
+        auto* reverse = dynamic_cast<juce::ComboBox*> (comboById ("reverse"));
+        REQUIRE (reverse != nullptr);
+        reverse->setSelectedId (3, juce::sendNotificationSync);   // Quantized
+        REQUIRE (settings.getReverseMode()
+                 == conduit::LooperSettings::ReverseMode::quantized);
+
+        auto* display = dynamic_cast<juce::ComboBox*> (comboById ("variDisplay"));
+        REQUIRE (display != nullptr);
+        display->setSelectedId (2, juce::sendNotificationSync);   // Scale Degrees
+        REQUIRE (settings.getVariDisplay()
+                 == conduit::LooperSettings::VariDisplay::scaleDegrees);
+
+        auto* slots = dynamic_cast<juce::ComboBox*> (comboById ("slots"));
+        REQUIRE (slots != nullptr);
+        slots->setSelectedId (10, juce::sendNotificationSync);
         REQUIRE (settings.getVisibleSlots() == 10);
 
-        menu.getDeleteLatchToggle().setToggleState (true, juce::dontSendNotification);
-        menu.getDeleteLatchToggle().onClick();
-        REQUIRE (settings.isDeleteLatchEnabled());
+        auto* stopAll = dynamic_cast<juce::ToggleButton*> (comboById ("showStopAll"));
+        REQUIRE (stopAll != nullptr);
+        stopAll->setToggleState (false, juce::dontSendNotification);
+        stopAll->onClick();
+        REQUIRE_FALSE (settings.isShowStopAll());
 
-        menu.getAutoAdvanceToggle().setToggleState (false, juce::dontSendNotification);
-        menu.getAutoAdvanceToggle().onClick();
-        REQUIRE_FALSE (settings.isAutoAdvanceEnabled());
+        // Es gibt bewusst KEINE ÷2-Hälfte-Zeile mehr (LEN/POS-Potis)
+        REQUIRE (comboById ("halve") == nullptr);
     }
 
     folder.deleteRecursively();
@@ -515,23 +559,19 @@ TEST_CASE ("LooperPage: Kopfzeile — Output-Paare, Spectrum, Hooks", "[looper][
         REQUIRE (toggled);   // aktiver Zustand → Toggle meldet false
     }
 
-    SECTION ("−/+/⚙/Stop-Hooks feuern")
+    SECTION ("−/+/Stop-Hooks feuern (⚙ ersetzt durch das Seitenpanel)")
     {
-        int added = 0, removed = 0, settingsOpened = 0, stopped = 0;
+        int added = 0, removed = 0, stopped = 0;
         page.onAddLooper = [&] { ++added; };
         page.onRemoveLooper = [&] { ++removed; };
-        page.onOpenSettings = [&] { ++settingsOpened; };
         page.onStop = [&] { ++stopped; };
 
         page.getAddLooperTile().onClick();
         page.getRemoveLooperTile().onClick();
-        page.getSettingsTile().onClick();
         page.getStopTile().onClick();
-        
 
         REQUIRE (added == 1);
         REQUIRE (removed == 1);
-        REQUIRE (settingsOpened == 1);
         REQUIRE (stopped == 1);
     }
 }

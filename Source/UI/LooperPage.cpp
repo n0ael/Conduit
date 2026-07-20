@@ -96,7 +96,6 @@ LooperPage::LooperPage()
     removeTile.onClick = [this] { if (onRemoveLooper) onRemoveLooper(); };
     addTile.onClick = [this] { if (onAddLooper) onAddLooper(); };
     trashTile.onClick = [this] { if (onRestoreTrash) onRestoreTrash(); };
-    settingsTile.onClick = [this] { if (onOpenSettings) onOpenSettings(); };
     stopTile.onClick = [this] { if (onStop) onStop(); };
 
     spectrumTile.onClick = [this]
@@ -128,7 +127,6 @@ LooperPage::LooperPage()
     addAndMakeVisible (outputCombo);
     addAndMakeVisible (spectrumTile);
     addChildComponent (trashTile);   // sichtbar erst mit Papierkorb-Bestand
-    addAndMakeVisible (settingsTile);
     addAndMakeVisible (stopTile);
     addAndMakeVisible (statusLabel);
 
@@ -226,7 +224,6 @@ void LooperPage::resized()
 
     stopTile.setBounds (header.removeFromRight (72).reduced (2));
     spectrumTile.setBounds (header.removeFromRight (92).reduced (2));
-    settingsTile.setBounds (header.removeFromRight (44).reduced (2));
     trashTile.setBounds (header.removeFromRight (72).reduced (2));
     outputCombo.setBounds (header.removeFromRight (190).reduced (2, 6));
     outputCaption.setBounds (header.removeFromRight (60));

@@ -16,6 +16,7 @@
 
 #include "UI/EditorDockPanel.h"
 #include "UI/GridPage.h"
+#include "UI/LooperDockTabs.h"
 #include "UI/LooperPage.h"
 #include "UI/NodeCanvas.h"
 #include "UI/PageHost.h"
@@ -222,6 +223,11 @@ private:
     // kommen als Referenzen vom EngineProcessor — VOR dem PageHost
     // deklariert (der hält eine Referenz darauf), Init in der Ctor-Liste.
     TouchLivePage touchLivePage;
+
+    // Looper-Seitenpanel (LOOPER · MIXER · MIDI, 07/2026): registriert
+    // seine Tabs im Ctor und entfernt sie im Dtor — NACH editorDock
+    // deklariert (Zerstörung rückwärts, Muster gridPage)
+    std::unique_ptr<LooperDockTabs> looperDockTabs;
 
     // TARGET-Halten pro Looper (Aktiv-Auswahl statt Launch, Übergabe §2)
     std::array<bool, 4> looperTargetHold {};

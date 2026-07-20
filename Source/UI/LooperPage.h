@@ -88,7 +88,6 @@ public:
     std::function<void()> onAddLooper;
     std::function<void()> onRemoveLooper;
     std::function<void()> onRestoreTrash;      // ↺ Papierkorb-Kachel (Big Out)
-    std::function<void()> onOpenSettings;      // ⚙ → LooperSettingsMenu (Editor)
     std::function<void()> onStop;              // Stop = alle Tracks
     std::function<void (bool spectrum)> onViewToggled;
     std::function<void (int pairIndex)> onOutputPairSelected;
@@ -110,7 +109,6 @@ public:
     [[nodiscard]] juce::ComboBox& getOutputCombo() noexcept { return outputCombo; }
     [[nodiscard]] push::TextTile& getSpectrumTile() noexcept { return spectrumTile; }
     [[nodiscard]] push::TextTile& getStopTile() noexcept { return stopTile; }
-    [[nodiscard]] push::TextTile& getSettingsTile() noexcept { return settingsTile; }
     [[nodiscard]] push::TextTile& getAddLooperTile() noexcept { return addTile; }
     [[nodiscard]] push::TextTile& getRemoveLooperTile() noexcept { return removeTile; }
     [[nodiscard]] LooperTrashTile& getTrashTile() noexcept { return trashTile; }
@@ -124,7 +122,6 @@ private:
     juce::Label outputCaption;
     juce::ComboBox outputCombo;
     push::TextTile spectrumTile { "Spectrum", push::colours::ledOrange };
-    push::TextTile settingsTile { juce::String::fromUTF8 ("⚙") };
     LooperTrashTile trashTile;
     push::TextTile stopTile { "Stop", push::colours::ledRed };
     juce::Label statusLabel;

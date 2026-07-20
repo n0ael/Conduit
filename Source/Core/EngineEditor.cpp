@@ -13,7 +13,7 @@
 #include "Core/Looper/LooperClipExporter.h"
 #include "UI/LooperDeleteConfirmDialog.h"
 #include "UI/LooperSendDialog.h"
-#include "UI/LooperSettingsMenu.h"
+#include "UI/LooperDockTabs.h"
 #include "UI/LooperTrashDialog.h"
 #include "UI/SettingsWindow.h"
 #include "UI/TrackSelectorPanel.h"
@@ -453,12 +453,31 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
         return colour.isTransparent() ? 0u : (colour.getARGB() & 0x00ffffffu);
     };
 
-    looperPage.onOpenSettings = [this]
+    // Seitenpanel LOOPER · MIXER · MIDI (ersetzt das ⚙-CallOutBox-Menü):
+    // Struktur-Hooks laufen über die Delete-Gating-Pfade der Page-Hooks
+    looperDockTabs = std::make_unique<LooperDockTabs> (editorDock,
+                                                       engine.getLooperSettings());
+    looperDockTabs->onAddLooper = [this]
     {
-        auto menu = std::make_unique<LooperSettingsMenu> (engine.getLooperSettings());
-        juce::CallOutBox::launchAsynchronously (
-            std::move (menu),
-            looperPage.getSettingsTile().getScreenBounds(), nullptr);
+        if (looperPage.onAddLooper != nullptr)
+            looperPage.onAddLooper();
+    };
+    looperDockTabs->onRemoveLooper = [this]
+    {
+        if (looperPage.onRemoveLooper != nullptr)
+            looperPage.onRemoveLooper();
+    };
+    looperDockTabs->onAddTrack = [this] (int looperIndex)
+    {
+        if (looperIndex >= 0 && looperIndex < looperPage.getLooperCount())
+            if (auto& hook = looperPage.getPanel (looperIndex).onAddTrack; hook != nullptr)
+                hook();
+    };
+    looperDockTabs->onRemoveTrack = [this] (int looperIndex)
+    {
+        const auto tracks = engine.getLooperSession().getNumTracks (looperIndex);
+        if (tracks > 1)
+            removeLooperTrack (looperIndex, tracks - 1);
     };
 
     looperPage.onStop = [this] { engine.stopLooper(); };
@@ -908,6 +927,8 @@ void EngineEditor::refreshLooperStructure()
     }
 
     looperPage.setSpectrumView (settings.isSpectrumView (0));
+    if (looperDockTabs != nullptr)
+        looperDockTabs->refreshLayout();
     rebuildLooperSources();
 }
 
