@@ -33,7 +33,7 @@ public:
     //==========================================================================
     // Hooks [Editor]
     std::function<void (const juce::String& sourceKey)> onSourceSelected;
-    std::function<void (bool enabled)> onSendMasterToggled;   // „MST" (ADR 010)
+    std::function<void (bool spectrum)> onViewToggled;   // FFT/WAVE pro Looper (07/2026)
     std::function<void (int bars)> onSegmentClicked;
     std::function<void (int trackIndex, int slotIndex)> onSlotTapped;
     std::function<void (int trackIndex, float gain01)> onTrackGain;
@@ -72,9 +72,10 @@ public:
     /** [Editor-Timer] LED der Kopfzeile (irgendein Track hörbar). */
     void setAudible (bool audible);
 
-    /** „An Master senden" (Looper-I/O, ADR 010): LED-Zustand der
-        MST-Kachel — Zustand kommt aus den LooperSettings (Editor). */
-    void setSendMaster (bool enabled);
+    /** Spektrum-Ansicht dieses Loopers (FFT-Kachel + Strip) — Zustand
+        kommt aus den LooperSettings (Editor); die frühere MST-Kachel
+        lebt als globaler Toggle im MIXER-Tab (User 20.07.2026). */
+    void setSpectrumView (bool spectrum);
 
     /** Gemeinsame Puls-Phase der Target-Zellen. */
     void setPulsePhase (float phase01);
@@ -82,8 +83,7 @@ public:
     [[nodiscard]] LooperWaveformStrip& getStrip() noexcept { return strip; }
     [[nodiscard]] LooperClipControlsRow& getControls() noexcept { return controls; }
     [[nodiscard]] juce::ComboBox& getSourceCombo() noexcept { return sourceCombo; }
-    [[nodiscard]] push::TextTile& getAddTrackTile() noexcept { return addTrackTile; }
-    [[nodiscard]] push::TextTile& getSendMasterTile() noexcept { return sendMasterTile; }
+    [[nodiscard]] push::TextTile& getViewTile() noexcept { return viewTile; }
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -96,13 +96,12 @@ private:
     bool audible = false;
 
     juce::ComboBox sourceCombo;
-    push::TextTile sendMasterTile { "MST", push::colours::ledOrange };
+    push::TextTile viewTile { "FFT", push::colours::ledCyan };
     std::vector<Source> currentSources;
 
     LooperWaveformStrip strip;
     LooperClipControlsRow controls;
     std::vector<std::unique_ptr<LooperTrackStrip>> tracks;
-    push::TextTile addTrackTile { "+" };
     int visibleSlots = 8;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LooperPanel)

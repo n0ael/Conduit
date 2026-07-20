@@ -355,6 +355,115 @@ private:
 };
 
 //==============================================================================
+class LooperDockTabs::MixerTabView final : public juce::Component
+{
+public:
+    MixerTabView (LooperDockTabs& ownerToUse, LooperSettings& settingsToUse)
+        : owner (ownerToUse), settings (settingsToUse),
+          masterSection ("Master", masterRows)
+    {
+        setName ("looperMixerTab");
+
+        outputCombo.setComponentID ("masterOutput");
+        outputCombo.onChange = [this]
+        {
+            // Item-ID 1 = „Kein Master-Out" (pairIndex −1, ADR 010),
+            // Paare folgen ab ID 2 — Mapping pairIndex = ID − 2
+            if (owner.onOutputPairSelected != nullptr && outputCombo.getSelectedId() > 0)
+                owner.onOutputPairSelected (outputCombo.getSelectedId() - 2);
+        };
+
+        // Globaler MST: EIN Toggle setzt sendMaster ALLER Looper
+        // (User 20.07.2026); an = alle an
+        masterTile.setComponentID ("mst");
+        masterTile.onClick = [this]
+        {
+            if (owner.onMasterToggled != nullptr)
+                owner.onMasterToggled (! masterTile.isActive());
+        };
+
+        hint.setText (juce::String::fromUTF8 (
+                          "Master output \xe2\x80\x94 MST sends all loopers "
+                          "to the master bus"),
+                      juce::dontSendNotification);
+        hint.setColour (juce::Label::textColourId, push::colours::textDim);
+        hint.setFont (push::scaledFont (11.0f));
+        hint.setJustificationType (juce::Justification::topLeft);
+
+        masterRows.addAndMakeVisible (outputCombo);
+        masterRows.addAndMakeVisible (masterTile);
+        masterRows.addAndMakeVisible (hint);
+        masterSection.setContentHeight (rowPadding + rowHeight + 34);
+
+        column.addAndMakeVisible (masterSection);
+        viewport.setViewedComponent (&column, false);
+        viewport.setScrollBarsShown (true, false);
+        addAndMakeVisible (viewport);
+
+        const auto mask = settings.getPanelCollapsedMask();
+        masterSection.setCollapsed ((mask & 0b100) != 0, false);
+        masterSection.onToggled = [this] (bool collapsed)
+        {
+            settings.setPanelCollapsedMask (
+                collapsed ? settings.getPanelCollapsedMask() | 0b100
+                          : settings.getPanelCollapsedMask() & ~0b100);
+            relayout();
+        };
+    }
+
+    void resized() override
+    {
+        viewport.setBounds (getLocalBounds());
+        relayout();
+    }
+
+    void paint (juce::Graphics& g) override { g.fillAll (push::colours::panel); }
+
+    void setOutputPairs (const juce::StringArray& pairLabels, int selectedPair)
+    {
+        outputCombo.clear (juce::dontSendNotification);
+        outputCombo.addItem ("Kein Master-Out", 1);
+        for (int i = 0; i < pairLabels.size(); ++i)
+            outputCombo.addItem (pairLabels[i], i + 2);
+
+        outputCombo.setSelectedId (
+            juce::jlimit (-1, pairLabels.size() - 1, selectedPair) + 2,
+            juce::dontSendNotification);
+    }
+
+    void setMasterState (bool allToMaster) { masterTile.setActive (allToMaster); }
+
+private:
+    void relayout()
+    {
+        const auto width = juce::jmax (0, viewport.getWidth()
+                                              - viewport.getScrollBarThickness());
+        masterSection.setBounds (0, 0, width, masterSection.getPreferredHeight());
+        column.setSize (width, masterSection.getPreferredHeight());
+
+        auto rows = masterRows.getLocalBounds().reduced (rowPadding, 0);
+        rows.removeFromTop (rowPadding / 2);
+        auto line = rows.removeFromTop (rowHeight);
+        masterTile.setBounds (line.removeFromRight (52).reduced (2));
+        outputCombo.setBounds (line.reduced (0, 4));
+        hint.setBounds (rows.removeFromTop (30));
+    }
+
+    LooperDockTabs& owner;
+    LooperSettings& settings;
+
+    juce::Viewport viewport;
+    juce::Component column, masterRows;
+    push::CollapsibleSection masterSection;
+
+    juce::ComboBox outputCombo;
+    push::TextTile masterTile { "MST", push::colours::ledOrange };
+    juce::Label hint;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MixerTabView)
+};
+
+//==============================================================================
 LooperDockTabs::LooperDockTabs (EditorDockPanel& dockToUse, LooperSettings& settingsToUse)
     : dock (dockToUse), settings (settingsToUse)
 {
@@ -364,12 +473,9 @@ LooperDockTabs::LooperDockTabs (EditorDockPanel& dockToUse, LooperSettings& sett
     looperView = looper.get();
     dock.addTab ("looper", "LOOPER", std::move (looper), looperOnly);
 
-    dock.addTab ("looperMixer", "MIXER",
-                 std::make_unique<PlaceholderView> (
-                     juce::String::fromUTF8 ("MASTER \xc2\xb7 SENDS \xc2\xb7 DISTANCE "
-                                             "\xc2\xb7 DISPLAY folgen mit dem Mixer-"
-                                             "Meilenstein.")),
-                 looperOnly);
+    auto mixer = std::make_unique<MixerTabView> (*this, settings);
+    mixerView = mixer.get();
+    dock.addTab ("looperMixer", "MIXER", std::move (mixer), looperOnly);
     dock.addTab ("looperMidi", "MIDI",
                  std::make_unique<PlaceholderView> (
                      juce::String::fromUTF8 ("MAP MODE folgt mit dem MIDI-Map-"
@@ -399,6 +505,23 @@ void LooperDockTabs::refreshLayout()
 juce::Component* LooperDockTabs::getLooperTabContent() noexcept
 {
     return looperView;
+}
+
+juce::Component* LooperDockTabs::getMixerTabContent() noexcept
+{
+    return mixerView;
+}
+
+void LooperDockTabs::setOutputPairs (const juce::StringArray& pairLabels, int selectedPair)
+{
+    if (mixerView != nullptr)
+        mixerView->setOutputPairs (pairLabels, selectedPair);
+}
+
+void LooperDockTabs::setMasterState (bool allLoopersToMaster)
+{
+    if (mixerView != nullptr)
+        mixerView->setMasterState (allLoopersToMaster);
 }
 
 void LooperDockTabs::changeListenerCallback (juce::ChangeBroadcaster*)

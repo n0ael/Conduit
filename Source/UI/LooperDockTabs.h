@@ -44,17 +44,29 @@ public:
     std::function<void (int looperIndex)> onAddTrack;
     std::function<void (int looperIndex)> onRemoveTrack;
 
+    //==========================================================================
+    // MIXER · MASTER [Editor] — Output-Paar (aus der alten Kopfzeile) +
+    // globaler MST-Toggle (setzt sendMaster ALLER Looper, User 20.07.2026)
+
+    std::function<void (int pairIndex)> onOutputPairSelected;   // −1 = Kein Master-Out
+    std::function<void (bool toMaster)> onMasterToggled;
+
+    void setOutputPairs (const juce::StringArray& pairLabels, int selectedPair);
+    void setMasterState (bool allLoopersToMaster);
+
     /** [Editor, refreshLooperStructure] LAYOUT-Zeilen an die aktuelle
         Struktur anpassen (Zähler, Enable-Zustand der −/+-Kacheln). */
     void refreshLayout();
 
-    /** Content des LOOPER-Tabs (Tests: Controls via ComponentID suchen). */
+    /** Content des LOOPER-/MIXER-Tabs (Tests: Controls via ComponentID). */
     [[nodiscard]] juce::Component* getLooperTabContent() noexcept;
+    [[nodiscard]] juce::Component* getMixerTabContent() noexcept;
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
 
     class LooperTabView;
+    class MixerTabView;
     class PlaceholderView;
 
     EditorDockPanel& dock;
@@ -62,6 +74,7 @@ private:
 
     // Vom Dock besessen (addTab) — Pointer gültig bis removeTab im Dtor
     LooperTabView* looperView = nullptr;
+    MixerTabView* mixerView = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LooperDockTabs)
 };

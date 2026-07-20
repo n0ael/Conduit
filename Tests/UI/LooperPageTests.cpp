@@ -63,21 +63,21 @@ TEST_CASE ("LooperPanel: Quellen-Auswahl und Track-Struktur", "[looper][ui]")
     panel.setSources (sources, "out:1");
     REQUIRE (panel.getSourceCombo().getSelectedId() == 0);
 
-    // MST-Kachel: Zustand + Hook (Looper-I/O)
-    bool sendMaster = true;
-    panel.onSendMasterToggled = [&] (bool enabled) { sendMaster = enabled; };
-    panel.setSendMaster (true);
-    REQUIRE (panel.getSendMasterTile().isActive());
-    panel.getSendMasterTile().onClick();
-    REQUIRE_FALSE (sendMaster);
+    // FFT/WAVE-Kachel pro Looper (ersetzt MST — der lebt global im
+    // MIXER-Tab): Zustand + Hook
+    bool spectrum = false;
+    panel.onViewToggled = [&] (bool wantsSpectrum) { spectrum = wantsSpectrum; };
+    panel.setSpectrumView (true);
+    REQUIRE (panel.getViewTile().isActive());
+    panel.getViewTile().onClick();
+    REQUIRE_FALSE (spectrum);   // aktiv → Toggle meldet false
 
-    // Tracks 1..4, „+"-Kachel verschwindet bei 4
+    // Tracks 1..4 (die frühere „+"-Kachel lebt im Seitenpanel-LAYOUT)
     REQUIRE (panel.getTrackCount() == 1);
     panel.setTrackCount (4);
     REQUIRE (panel.getTrackCount() == 4);
-    REQUIRE_FALSE (panel.getAddTrackTile().isVisible());
     panel.setTrackCount (2);
-    REQUIRE (panel.getAddTrackTile().isVisible());
+    REQUIRE (panel.getTrackCount() == 2);
 }
 
 TEST_CASE ("LooperPanel: Quellen-Menü mit Link-Gruppen — Separatoren, Farben, stabile IDs", "[looper][ui]")
@@ -514,64 +514,104 @@ TEST_CASE ("LooperDockTabs: LOOPER-Tab schreibt in die LooperSettings", "[looper
     folder.deleteRecursively();
 }
 
-TEST_CASE ("LooperPage: Kopfzeile — Output-Paare, Spectrum, Hooks", "[looper][ui]")
+TEST_CASE ("LooperPage/Dock: Kopf-Umbau — MASTER-Sektion, Stop All", "[looper][ui]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;
 
-    conduit::LooperPage page;
-    page.setBounds (0, 0, 1400, 700);
-
-    SECTION ("Output-Paare: Anker vorausgewählt, OOB geclampt, Klick meldet Index")
+    SECTION ("MIXER · MASTER: Output-Paare + globaler MST im Seitenpanel")
     {
-        // Item 0 = „Kein Master-Out" (pairIndex −1, ADR 010); Paare dahinter
-        const juce::StringArray pairs { "Out 1 / Out 2", "Out 3 / Out 4" };
-        int selectedPair = -99;
-        page.onOutputPairSelected = [&] (int pair) { selectedPair = pair; };
+        const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("ConduitLooperMasterTests")
+                                .getChildFile (juce::Uuid().toString());
+        folder.createDirectory();
 
-        page.setOutputPairs (pairs, 1);
-        REQUIRE (page.getOutputCombo().getSelectedItemIndex() == 2);
-        REQUIRE (selectedPair == -99);
+        juce::PropertiesFile::Options options;
+        options.applicationName = "LooperMasterTests";
+        options.filenameSuffix  = ".settings";
+        options.folderName      = folder.getFullPathName();
 
-        page.setOutputPairs (pairs, 7);   // OOB → geclampt
-        REQUIRE (page.getOutputCombo().getSelectedItemIndex() == 2);
+        {
+            conduit::LooperSettings settings { options };
+            conduit::EditorDockPanel dock;
+            conduit::LooperDockTabs tabs { dock, settings };
 
-        page.getOutputCombo().setSelectedItemIndex (1, juce::sendNotificationSync);
-        REQUIRE (selectedPair == 0);
+            auto* content = tabs.getMixerTabContent();
+            REQUIRE (content != nullptr);
+            content->setBounds (0, 0, 320, 400);
 
-        // „Kein Master-Out" meldet −1 und ist vorwählbar
-        page.getOutputCombo().setSelectedItemIndex (0, juce::sendNotificationSync);
-        REQUIRE (selectedPair == -1);
+            std::function<juce::Component* (juce::Component&, const juce::String&)> deepFind =
+                [&] (juce::Component& parent, const juce::String& id) -> juce::Component*
+            {
+                if (parent.getComponentID() == id)
+                    return &parent;
+                for (auto* child : parent.getChildren())
+                    if (auto* hit = deepFind (*child, id))
+                        return hit;
+                return nullptr;
+            };
 
-        page.setOutputPairs (pairs, -1);
-        REQUIRE (page.getOutputCombo().getSelectedItemIndex() == 0);
+            auto* combo = dynamic_cast<juce::ComboBox*> (deepFind (*content, "masterOutput"));
+            REQUIRE (combo != nullptr);
+
+            // Item 0 = „Kein Master-Out" (pairIndex −1, ADR 010); Paare dahinter
+            const juce::StringArray pairs { "Out 1 / Out 2", "Out 3 / Out 4" };
+            int selectedPair = -99;
+            tabs.onOutputPairSelected = [&] (int pair) { selectedPair = pair; };
+
+            tabs.setOutputPairs (pairs, 1);
+            REQUIRE (combo->getSelectedItemIndex() == 2);
+            REQUIRE (selectedPair == -99);
+
+            tabs.setOutputPairs (pairs, 7);   // OOB → geclampt
+            REQUIRE (combo->getSelectedItemIndex() == 2);
+
+            combo->setSelectedItemIndex (1, juce::sendNotificationSync);
+            REQUIRE (selectedPair == 0);
+
+            combo->setSelectedItemIndex (0, juce::sendNotificationSync);
+            REQUIRE (selectedPair == -1);
+
+            tabs.setOutputPairs (pairs, -1);
+            REQUIRE (combo->getSelectedItemIndex() == 0);
+
+            // Globaler MST: Zustand + Hook
+            auto* mst = dynamic_cast<conduit::push::TextTile*> (deepFind (*content, "mst"));
+            REQUIRE (mst != nullptr);
+            bool toMaster = false;
+            tabs.onMasterToggled = [&] (bool on) { toMaster = on; };
+            tabs.setMasterState (false);
+            mst->onClick();
+            REQUIRE (toMaster);
+        }
+
+        folder.deleteRecursively();
     }
 
-    SECTION ("Spectrum-Kachel schaltet alle Panel-Strips")
+    SECTION ("Stop All: Hook + Sichtbarkeit per Setting")
     {
-        page.setLooperCount (2);
-        page.setSpectrumView (true);
-        REQUIRE (page.getSpectrumTile().isActive());
+        conduit::LooperPage page;
+        page.setBounds (0, 0, 1400, 700);
 
-        bool toggled = false;
-        page.onViewToggled = [&] (bool spectrum) { toggled = ! spectrum; };
-        page.getSpectrumTile().onClick();
-        
-        REQUIRE (toggled);   // aktiver Zustand → Toggle meldet false
-    }
-
-    SECTION ("−/+/Stop-Hooks feuern (⚙ ersetzt durch das Seitenpanel)")
-    {
-        int added = 0, removed = 0, stopped = 0;
-        page.onAddLooper = [&] { ++added; };
-        page.onRemoveLooper = [&] { ++removed; };
+        int stopped = 0;
         page.onStop = [&] { ++stopped; };
-
-        page.getAddLooperTile().onClick();
-        page.getRemoveLooperTile().onClick();
-        page.getStopTile().onClick();
-
-        REQUIRE (added == 1);
-        REQUIRE (removed == 1);
+        page.getStopAllTile().onClick();
         REQUIRE (stopped == 1);
+
+        REQUIRE (page.getStopAllTile().isVisible());
+        page.setShowStopAll (false);
+        REQUIRE_FALSE (page.getStopAllTile().isVisible());
+        page.setShowStopAll (true);
+        REQUIRE (page.getStopAllTile().isVisible());
+    }
+
+    SECTION ("FFT pro Looper: Page reicht an das Panel durch")
+    {
+        conduit::LooperPage page;
+        page.setBounds (0, 0, 1400, 700);
+        page.setLooperCount (2);
+
+        page.setSpectrumView (1, true);
+        REQUIRE_FALSE (page.getPanel (0).getViewTile().isActive());
+        REQUIRE (page.getPanel (1).getViewTile().isActive());
     }
 }

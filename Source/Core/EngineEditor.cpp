@@ -350,9 +350,13 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
                 captureToast.show (result.getErrorMessage());
             refreshLooperStructure();
         };
+        // Anker: Kopf des betroffenen (letzten) Loopers — die frühere
+        // −-Kachel der Kopfzeile existiert seit dem Panel-Umzug nicht mehr
+        const auto anchorPanel = juce::jlimit (0, looperPage.getLooperCount() - 1, last);
         juce::CallOutBox::launchAsynchronously (
             std::move (dialog),
-            looperPage.getRemoveLooperTile().getScreenBounds(), nullptr);
+            looperPage.getPanel (anchorPanel).getScreenBounds()
+                .removeFromTop (44), nullptr);
     };
 
     // Papierkorb-Kachel (↺): EIN Eintrag = direkt wiederherstellen,
@@ -482,23 +486,24 @@ EngineEditor::EngineEditor (EngineProcessor& engineProcessor,
 
     looperPage.onStop = [this] { engine.stopLooper(); };
 
-    // Spectrum global: schaltet die Strips ALLER Looper (Settings pro
-    // Looper, Kachel wirkt auf alle — Mock-Semantik)
-    looperPage.onViewToggled = [this] (bool spectrum)
+    // MST global (MIXER · MASTER, User 20.07.2026): EIN Toggle setzt
+    // sendMaster ALLER Looper; Anzeige an = alle an
+    looperDockTabs->onMasterToggled = [this] (bool toMaster)
     {
         auto& settings = engine.getLooperSettings();
         for (int l = 0; l < LooperSettings::maxLoopers; ++l)
-            settings.setSpectrumView (l, spectrum);
-        looperPage.setSpectrumView (spectrum);
+            settings.setSendToMaster (l, toMaster);
+        looperDockTabs->setMasterState (toMaster);
     };
 
     // Metronom-Ziel-Paare fürs Link-Menü: Labels aus den ChannelNames,
     // Kanalzahl aus dem audio_out-Tree-Node (folgt der Hardware)
     transportBar.metronomeTargetNames = [this] { return buildOutputPairNames(); };
 
-    // Ausgabe-Paar des Loop-Playbacks (global, B6): Auswahl persistiert
-    // looperAnchor und routet die Bank sofort um
-    looperPage.onOutputPairSelected = [this] (int pairIndex)
+    // Ausgabe-Paar des Loop-Playbacks (global, B6 — seit dem Kopf-Umbau
+    // im MIXER · MASTER): Auswahl persistiert looperAnchor und routet
+    // die Bank sofort um
+    looperDockTabs->onOutputPairSelected = [this] (int pairIndex)
     { engine.setLooperAnchor (pairIndex); };
 
     // Startzustand: Struktur + Quellen aus den Settings ziehen
@@ -882,8 +887,9 @@ void EngineEditor::rebuildLooperSources()
     }
 
     // Ausgabe-Paare hängen an denselben Broadcasts (ChannelNames/Hardware)
-    looperPage.setOutputPairs (buildOutputPairNames(),
-                               engine.getTransportSettings().getLooperAnchor());
+    if (looperDockTabs != nullptr)
+        looperDockTabs->setOutputPairs (buildOutputPairNames(),
+                                        engine.getTransportSettings().getLooperAnchor());
 }
 
 //==============================================================================
@@ -926,9 +932,20 @@ void EngineEditor::refreshLooperStructure()
         panel.getControls().setTargetVisible (panel.getTrackCount() > 1);
     }
 
-    looperPage.setSpectrumView (settings.isSpectrumView (0));
+    for (int l = 0; l < looperPage.getLooperCount(); ++l)
+        looperPage.setSpectrumView (l, settings.isSpectrumView (l));
+    looperPage.setShowStopAll (settings.isShowStopAll());
+
     if (looperDockTabs != nullptr)
+    {
         looperDockTabs->refreshLayout();
+
+        // MST-Anzeige: an = ALLE Looper senden an den Master
+        bool allToMaster = true;
+        for (int l = 0; l < LooperSettings::maxLoopers; ++l)
+            allToMaster = allToMaster && settings.isSendToMaster (l);
+        looperDockTabs->setMasterState (allToMaster);
+    }
     rebuildLooperSources();
 }
 
@@ -948,12 +965,13 @@ void EngineEditor::wireLooperPanels()
             looperPage.getPanel (l).getStrip().setSourceColour (looperSourceColour (key));
         };
 
-        // „An Master senden" pro Looper (Looper-I/O, ADR 010): Settings
-        // broadcasten → applyLooperSettings spiegelt in die Bank
-        panel.setSendMaster (engine.getLooperSettings().isSendToMaster (l));
-        panel.onSendMasterToggled = [this, l] (bool enabled)
+        // FFT/WAVE pro Looper (07/2026, ersetzt die MST-Kachel des Kopfs):
+        // Settings pro Looper, Kachel + Strip folgen sofort
+        panel.setSpectrumView (engine.getLooperSettings().isSpectrumView (l));
+        panel.onViewToggled = [this, l] (bool spectrum)
         {
-            engine.getLooperSettings().setSendToMaster (l, enabled);
+            engine.getLooperSettings().setSpectrumView (l, spectrum);
+            looperPage.getPanel (l).setSpectrumView (spectrum);
         };
 
         // Segment-Klick = Commit in den Target-Slot dieses Loopers;
@@ -1545,7 +1563,7 @@ void EngineEditor::refreshLooperStatus (bool devMode)
     const auto playing = bank.isPlaying();
     transportBar.setLooperStatus (pageHost.getPage() == TransportBar::pageLooper,
                                   playing);
-    looperPage.getStopTile().setEnabled (playing);
+    looperPage.getStopAllTile().setEnabled (playing);
 
     // Papierkorb-Kachel (Big Out): Countdown + Sichtbarkeit
     auto& trash = engine.getLooperTrash();

@@ -8,7 +8,6 @@ namespace
     constexpr int headerHeight = 30;
     constexpr int stripHeight = 110;
     constexpr int controlsHeight = 58;
-    constexpr int addTrackWidth = 28;
 }
 
 LooperPanel::LooperPanel (int number)
@@ -33,24 +32,18 @@ LooperPanel::LooperPanel (int number)
             onSegmentClicked (bars);
     };
 
-    addTrackTile.onClick = [this]
+    // FFT/WAVE pro Looper (07/2026, ersetzt die MST-Kachel — MST lebt
+    // als globaler Toggle im MIXER-Tab): LED an = Spektrum
+    viewTile.onClick = [this]
     {
-        if (onAddTrack != nullptr)
-            onAddTrack();
+        if (onViewToggled != nullptr)
+            onViewToggled (! viewTile.isActive());
     };
 
-    // „An Master senden" (Looper-I/O, ADR 010) — LED an = in der Summe
-    sendMasterTile.onClick = [this]
-    {
-        if (onSendMasterToggled != nullptr)
-            onSendMasterToggled (! sendMasterTile.isActive());
-    };
-
-    addAndMakeVisible (sendMasterTile);
+    addAndMakeVisible (viewTile);
     addAndMakeVisible (sourceCombo);
     addAndMakeVisible (strip);
     addAndMakeVisible (controls);
-    addAndMakeVisible (addTrackTile);
 
     setTrackCount (1);
 }
@@ -96,7 +89,6 @@ void LooperPanel::setTrackCount (int count)
         tracks.push_back (std::move (track));
     }
 
-    addTrackTile.setVisible ((int) tracks.size() < 4);
     resized();
 }
 
@@ -163,9 +155,11 @@ void LooperPanel::applySelectedSourceColour()
                            colour.isTransparent() ? push::colours::text : colour);
 }
 
-void LooperPanel::setSendMaster (bool enabled)
+void LooperPanel::setSpectrumView (bool spectrum)
 {
-    sendMasterTile.setActive (enabled);
+    viewTile.setActive (spectrum);
+    strip.setView (spectrum ? LooperWaveformStrip::View::spectrum
+                            : LooperWaveformStrip::View::waveform);
 }
 
 void LooperPanel::setAudible (bool shouldGlow)
@@ -208,7 +202,7 @@ void LooperPanel::resized()
     auto header = bounds.removeFromTop (headerHeight - 4);
     header.removeFromLeft (76);   // "LOOPER n"
     header.removeFromRight (20);  // LED
-    sendMasterTile.setBounds (header.removeFromRight (44).reduced (2));
+    viewTile.setBounds (header.removeFromRight (44).reduced (2));
     sourceCombo.setBounds (header.reduced (2));
 
     strip.setBounds (bounds.removeFromTop (stripHeight));
@@ -217,10 +211,6 @@ void LooperPanel::resized()
     bounds.removeFromTop (4);
 
     auto trackArea = bounds;
-    if (addTrackTile.isVisible())
-        addTrackTile.setBounds (trackArea.removeFromRight (addTrackWidth)
-                                    .withHeight (44).reduced (2));
-
     const auto count = (int) tracks.size();
     if (count > 0)
     {
