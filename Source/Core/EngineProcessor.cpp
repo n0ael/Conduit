@@ -335,8 +335,9 @@ void EngineProcessor::applyLooperSettings()
             looperBank.setTrackPan  (l, t, looperSettings.getTrackPan (l, t));
             looperBank.setTrackMute (l, t, looperSettings.isTrackMuted (l, t));
             looperBank.setTrackSolo (l, t, looperSettings.isTrackSolo (l, t));
-            looperBank.setTrackSends (l, t,
-                (std::uint32_t) looperSettings.getTrackSends (l, t));
+            for (int s = 0; s < LooperBank::maxSends; ++s)
+                looperBank.setTrackSendLevel (l, t, s,
+                    looperSettings.getTrackSendLevel (l, t, s));
             looperBank.setTrackSendPre (l, t, looperSettings.isTrackSendPre (l, t));
         }
     }

@@ -440,7 +440,8 @@ TEST_CASE ("LooperBank: Track-/Send-Busse — trackBus post-fader, Sends pre/pos
         for (int s = 0; s < LooperBank::maxSends; ++s)
             REQUIRE (juce::exactlyEqual (rms (view.send[s][0], blockSize), 0.0));
 
-        rig.bank.setTrackSends (0, 0, 0b0101);   // Send 1 + 3
+        rig.bank.setTrackSendLevel (0, 0, 0, 1.0f);   // Send 1 + 3
+        rig.bank.setTrackSendLevel (0, 0, 2, 1.0f);
         rig.feedBlocks (2);
 
         view = rig.bank.getAudioView();
@@ -454,9 +455,25 @@ TEST_CASE ("LooperBank: Track-/Send-Busse — trackBus post-fader, Sends pre/pos
             REQUIRE (juce::exactlyEqual (view.send[0][0][i], view.post[0][0][i]));
     }
 
+    SECTION ("Send-LEVEL 0.5 skaliert den Bus exakt (nach Ramp-Settle)")
+    {
+        rig.bank.setTrackSendLevel (0, 0, 0, 0.5f);
+        rig.feedBlocks (2);   // Block 1 rampt (480 > 240 Samples), Block 2 konstant
+
+        const auto view = rig.bank.getAudioView();
+        REQUIRE (rms (view.send[0][0], blockSize) > 0.005);
+        for (int i = 0; i < blockSize; ++i)
+            REQUIRE (juce::exactlyEqual (view.send[0][0][i], 0.5f * view.post[0][0][i]));
+
+        // Zurück auf 0: Bus verstummt nach dem Slew wieder komplett
+        rig.bank.setTrackSendLevel (0, 0, 0, 0.0f);
+        rig.feedBlocks (2);
+        REQUIRE (juce::exactlyEqual (rms (rig.bank.getAudioView().send[0][0], blockSize), 0.0));
+    }
+
     SECTION ("Gain 0: Post-Send verstummt, Pre-Send bleibt hörbar")
     {
-        rig.bank.setTrackSends (0, 0, 0b0001);
+        rig.bank.setTrackSendLevel (0, 0, 0, 1.0f);
         rig.bank.setTrackGain (0, 0, 0.0f);
         rig.feedBlocks (4);   // Gain-Slew (5 ms) ausklingen lassen
 
@@ -487,7 +504,7 @@ TEST_CASE ("LooperBank: Track-/Send-Busse — trackBus post-fader, Sends pre/pos
     SECTION ("LooperPatchOutModule kopiert Track-/Bus-/Send-/Master-Slots")
     {
         using Big = conduit::LooperPatchOutModule;
-        rig.bank.setTrackSends (0, 0, 0b0010);   // Send 2, post
+        rig.bank.setTrackSendLevel (0, 0, 1, 1.0f);   // Send 2, post
         rig.feedBlocks (2);
 
         Big module;

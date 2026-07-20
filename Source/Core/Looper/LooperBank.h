@@ -64,7 +64,9 @@ namespace conduit
         Equal-Power-Pan + effektives Mute (MT-berechnet aus Mute/Solo/
         Solo-Scope) → Post-Fader-LevelMeter → additiv aufs Anker-Paar.
         Meter laufen auch bei OOB-Anker weiter. Send-Busse 1..4 greifen
-        pro Track wahlweise pre (vor dem Fader-Zug) oder post ab.
+        pro Track wahlweise pre (vor dem Fader-Zug) oder post ab —
+        seit dem Mixer (07/2026) mit stufenlosem LEVEL 0..1 pro Send
+        (5-ms-Block-Ramp) statt An/Aus-Maske.
 
     RAM-Konto: right-sized Clips statt Prealloc; die Summe aller lebenden
     Clips (Store + Graveyard) ist auf ramBudgetBytes begrenzt — ein Commit
@@ -194,8 +196,10 @@ public:
     void setTrackMute (int looperIndex, int trackIndex, bool muted) noexcept;
     void setTrackSolo (int looperIndex, int trackIndex, bool solo) noexcept;
 
-    /** Send-Routing des Tracks: Bits 0..3 = Send 1..4 (Big Out). */
-    void setTrackSends (int looperIndex, int trackIndex, std::uint32_t mask) noexcept;
+    /** Send-LEVEL des Tracks (0..1, geclampt) auf Bus sendIndex 0..3 —
+        Audio slewt mit 5-ms-Block-Ramp dorthin (Mixer 07/2026). */
+    void setTrackSendLevel (int looperIndex, int trackIndex, int sendIndex,
+                            float level01) noexcept;
 
     /** Send-Abgriff des Tracks: true = pre (vor Gain/Pan/Mute), false = post. */
     void setTrackSendPre (int looperIndex, int trackIndex, bool pre) noexcept;
@@ -360,6 +364,7 @@ private:
         float currentGain = 1.0f;
         float currentPan = 0.0f;
         float currentMuteGain = 1.0f;
+        std::array<float, static_cast<std::size_t> (maxSends)> currentSend {};
     };
 
     // MT-only: Graveyard-Eintrag wartet auf die Audio-Quittung + Pins
@@ -472,9 +477,10 @@ private:
     std::array<std::array<std::atomic<bool>, static_cast<std::size_t> (maxTracks)>,
                static_cast<std::size_t> (maxLoopers)> effectiveMute;
 
-    // Send-Routing [MT schreibt, Audio liest]: Maske Bits 0..3 + Abgriff
-    std::array<std::array<std::atomic<std::uint32_t>, static_cast<std::size_t> (maxTracks)>,
-               static_cast<std::size_t> (maxLoopers)> targetSendMask;
+    // Send-Level [MT schreibt, Audio slewt dorthin]: 0..1 pro Bus + Abgriff
+    std::array<std::array<std::array<std::atomic<float>, static_cast<std::size_t> (maxSends)>,
+                          static_cast<std::size_t> (maxTracks)>,
+               static_cast<std::size_t> (maxLoopers)> targetSendLevel;
     std::array<std::array<std::atomic<bool>, static_cast<std::size_t> (maxTracks)>,
                static_cast<std::size_t> (maxLoopers)> sendTapPre;
 

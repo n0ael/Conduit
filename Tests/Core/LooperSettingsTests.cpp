@@ -167,6 +167,66 @@ TEST_CASE ("LooperSettings: Clamps und ungültige Indizes", "[looper]")
     REQUIRE (settings.getTrackSends (0, 9) == 0);
 }
 
+TEST_CASE ("LooperSettings: Send-Level — Roundtrip + Legacy-Bitmasken-Migration", "[looper]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+    TempSettings temp;
+
+    SECTION ("Level-Roundtrip; abgeleitete Maske folgt Level > 0")
+    {
+        {
+            LooperSettings settings { temp.options() };
+            settings.setTrackSendLevel (1, 2, 0, 0.25f);
+            settings.setTrackSendLevel (1, 2, 3, 1.0f);
+            settings.setTrackSendLevel (0, 0, 1, 2.0f);   // clampt auf 1.0
+            settings.flush();
+        }
+
+        LooperSettings reloaded { temp.options() };
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 0) == Approx (0.25f));
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 3) == Approx (1.0f));
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 1) == Approx (0.0f));
+        REQUIRE (reloaded.getTrackSendLevel (0, 0, 1) == Approx (1.0f));
+        REQUIRE (reloaded.getTrackSends (1, 2) == 0b1001);
+
+        // Masken-Setter plättet feine Level nicht (Bit gesetzt + Level > 0
+        // bleibt unangetastet); gelöschtes Bit nullt den Level
+        reloaded.setTrackSends (1, 2, 0b1001);
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 0) == Approx (0.25f));
+        reloaded.setTrackSends (1, 2, 0b0001);
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 3) == Approx (0.0f));
+        REQUIRE (reloaded.getTrackSendLevel (1, 2, 0) == Approx (0.25f));
+
+        // Ungültiger Send-Index = No-op
+        reloaded.setTrackSendLevel (0, 0, 7, 1.0f);
+        REQUIRE (reloaded.getTrackSendLevel (0, 0, 7) == Approx (0.0f));
+    }
+
+    SECTION ("Alt-Datei mit sends-Bitmaske lädt als Level 1.0 pro Bit")
+    {
+        {
+            juce::PropertiesFile legacy { temp.options() };
+            juce::XmlElement root ("LooperState");
+            auto* looper = root.createNewChildElement ("Looper");
+            looper->setAttribute ("source", "hw:0");
+            auto* track = looper->createNewChildElement ("Track");
+            track->setAttribute ("gain", 1.0);
+            track->setAttribute ("sends", 0b0101);
+            track->setAttribute ("sendPre", true);
+            legacy.setValue ("looperState", &root);
+            legacy.save();
+        }
+
+        LooperSettings settings { temp.options() };
+        REQUIRE (settings.hasStoredState());
+        REQUIRE (settings.getTrackSendLevel (0, 0, 0) == Approx (1.0f));
+        REQUIRE (settings.getTrackSendLevel (0, 0, 1) == Approx (0.0f));
+        REQUIRE (settings.getTrackSendLevel (0, 0, 2) == Approx (1.0f));
+        REQUIRE (settings.getTrackSends (0, 0) == 0b0101);
+        REQUIRE (settings.isTrackSendPre (0, 0));
+    }
+}
+
 TEST_CASE ("LooperSettings: Einmal-Migration der Legacy-Schlüssel", "[looper]")
 {
     juce::ScopedJuceInitialiser_GUI juceRuntime;

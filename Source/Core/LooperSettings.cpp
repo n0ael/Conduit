@@ -121,7 +121,22 @@ void LooperSettings::loadFromFile()
             track.mute = trackXml->getBoolAttribute ("mute", false);
             track.solo = trackXml->getBoolAttribute ("solo", false);
             track.variQuantized = trackXml->getBoolAttribute ("variQuant", false);
-            track.sends = trackXml->getIntAttribute ("sends", 0) & 0xF;
+            if (trackXml->hasAttribute ("send0"))
+            {
+                for (int s = 0; s < 4; ++s)
+                    track.sendLevel[static_cast<std::size_t> (s)] = juce::jlimit (
+                        0.0f, 1.0f,
+                        (float) trackXml->getDoubleAttribute ("send" + juce::String (s), 0.0));
+            }
+            else
+            {
+                // Migration Alt-Schema: An/Aus-Bitmaske → Level 1.0 pro
+                // gesetztem Bit (der frühere Send-Add war Unity-Gain)
+                const auto legacyMask = trackXml->getIntAttribute ("sends", 0) & 0xF;
+                for (int s = 0; s < 4; ++s)
+                    track.sendLevel[static_cast<std::size_t> (s)] =
+                        (legacyMask & (1 << s)) != 0 ? 1.0f : 0.0f;
+            }
             track.sendPre = trackXml->getBoolAttribute ("sendPre", false);
             ++trackIndex;
         }
@@ -167,7 +182,9 @@ void LooperSettings::writeAndNotify()
             trackXml->setAttribute ("mute", track.mute);
             trackXml->setAttribute ("solo", track.solo);
             trackXml->setAttribute ("variQuant", track.variQuantized);
-            trackXml->setAttribute ("sends", track.sends);
+            for (int s = 0; s < 4; ++s)
+                trackXml->setAttribute ("send" + juce::String (s),
+                                        track.sendLevel[static_cast<std::size_t> (s)]);
             trackXml->setAttribute ("sendPre", track.sendPre);
         }
     }
@@ -445,12 +462,45 @@ void LooperSettings::setTrackVariQuantized (int looperIndex, int trackIndex, boo
     writeAndNotify();
 }
 
+float LooperSettings::getTrackSendLevel (int looperIndex, int trackIndex,
+                                         int sendIndex) const noexcept
+{
+    return validTrack (looperIndex, trackIndex) && sendIndex >= 0 && sendIndex < 4
+         ? loopers[static_cast<std::size_t> (looperIndex)]
+               .tracks[static_cast<std::size_t> (trackIndex)]
+               .sendLevel[static_cast<std::size_t> (sendIndex)]
+         : 0.0f;
+}
+
+void LooperSettings::setTrackSendLevel (int looperIndex, int trackIndex, int sendIndex,
+                                        float level01)
+{
+    if (! validTrack (looperIndex, trackIndex) || sendIndex < 0 || sendIndex >= 4)
+        return;
+
+    const auto clamped = juce::jlimit (0.0f, 1.0f, level01);
+    auto& track = loopers[static_cast<std::size_t> (looperIndex)]
+                      .tracks[static_cast<std::size_t> (trackIndex)];
+    auto& level = track.sendLevel[static_cast<std::size_t> (sendIndex)];
+    if (juce::exactlyEqual (level, clamped))
+        return;
+
+    level = clamped;
+    writeAndNotify();
+}
+
 int LooperSettings::getTrackSends (int looperIndex, int trackIndex) const noexcept
 {
-    return validTrack (looperIndex, trackIndex)
-         ? loopers[static_cast<std::size_t> (looperIndex)]
-               .tracks[static_cast<std::size_t> (trackIndex)].sends
-         : 0;
+    if (! validTrack (looperIndex, trackIndex))
+        return 0;
+
+    const auto& track = loopers[static_cast<std::size_t> (looperIndex)]
+                            .tracks[static_cast<std::size_t> (trackIndex)];
+    int mask = 0;
+    for (int s = 0; s < 4; ++s)
+        if (track.sendLevel[static_cast<std::size_t> (s)] > 0.0f)
+            mask |= 1 << s;
+    return mask;
 }
 
 void LooperSettings::setTrackSends (int looperIndex, int trackIndex, int mask)
@@ -461,11 +511,22 @@ void LooperSettings::setTrackSends (int looperIndex, int trackIndex, int mask)
     const auto clamped = mask & 0xF;
     auto& track = loopers[static_cast<std::size_t> (looperIndex)]
                       .tracks[static_cast<std::size_t> (trackIndex)];
-    if (track.sends == clamped)
-        return;
 
-    track.sends = clamped;
-    writeAndNotify();
+    bool changed = false;
+    for (int s = 0; s < 4; ++s)
+    {
+        const auto target = (clamped & (1 << s)) != 0 ? 1.0f : 0.0f;
+        auto& level = track.sendLevel[static_cast<std::size_t> (s)];
+        // Bit gesetzt + Level > 0 bleibt unangetastet (Dialog-Toggle darf
+        // ein feines Level nicht auf 1.0 plätten)
+        if (target > 0.0f ? level > 0.0f : juce::exactlyEqual (level, 0.0f))
+            continue;
+        level = target;
+        changed = true;
+    }
+
+    if (changed)
+        writeAndNotify();
 }
 
 bool LooperSettings::isTrackSendPre (int looperIndex, int trackIndex) const noexcept

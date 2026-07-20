@@ -24,7 +24,8 @@ namespace conduit
 
         LooperState (globale Menü-Optionen als Attribute)
           └── Looper[i]: sourceKey, spectrum, sendMaster, numTracks
-                └── Track[t]: gain, pan, mute, solo, variQuantized
+                └── Track[t]: gain, pan, mute, solo, variQuantized,
+                              send0..send3 (Level), sendPre
 
     Globale Menü-Optionen (LooperSettingsMenu, M6):
       launchQuant   — Start/Stop-Raster (app-weites Enum, Commit bleibt sofort)
@@ -152,7 +153,16 @@ public:
     [[nodiscard]] bool isTrackVariQuantized (int looperIndex, int trackIndex) const noexcept;
     void setTrackVariQuantized (int looperIndex, int trackIndex, bool quantized);
 
-    /** Send-Routing des Tracks (Big Out): Bitmaske Bits 0..3 = Send 1..4. */
+    /** Send-LEVEL des Tracks (Mixer 07/2026): 0..1 pro Send-Bus 1..4 —
+        ersetzt die frühere An/Aus-Bitmaske (Alt-Dateien migrieren beim
+        Laden Bit→1.0, exakte Verhaltens-Parität). */
+    [[nodiscard]] float getTrackSendLevel (int looperIndex, int trackIndex,
+                                           int sendIndex) const noexcept;
+    void setTrackSendLevel (int looperIndex, int trackIndex, int sendIndex,
+                            float level01);
+
+    /** ABGELEITETE Send-Bitmaske (Bit gesetzt = Level > 0) — Kompatibilität
+        für Farb-Resolver/Hash/Send-Dialog; Setter mappt Bit→1.0 / 0.0. */
     [[nodiscard]] int getTrackSends (int looperIndex, int trackIndex) const noexcept;
     void setTrackSends (int looperIndex, int trackIndex, int mask);
 
@@ -172,7 +182,7 @@ private:
         bool mute = false;
         bool solo = false;
         bool variQuantized = false;   // Default frei (Drift ist Feature)
-        int sends = 0;                // Bitmaske Send 1..4 (Big Out)
+        std::array<float, 4> sendLevel {};   // Send-Level 1..4 (0..1, Default 0)
         bool sendPre = false;         // Abgriff pre statt post (Default post)
     };
 

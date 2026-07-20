@@ -21,9 +21,10 @@ LooperBank::LooperBank()
     for (auto& looper : effectiveMute)
         for (auto& mute : looper)
             mute.store (false, std::memory_order_relaxed);
-    for (auto& looper : targetSendMask)
-        for (auto& mask : looper)
-            mask.store (0, std::memory_order_relaxed);
+    for (auto& looper : targetSendLevel)
+        for (auto& track : looper)
+            for (auto& level : track)
+                level.store (0.0f, std::memory_order_relaxed);
     for (auto& looper : sendTapPre)
         for (auto& pre : looper)
             pre.store (false, std::memory_order_relaxed);
@@ -81,6 +82,7 @@ void LooperBank::prepare (double sampleRate, int maxBlockSamples)
             track.currentGain = 1.0f;
             track.currentPan = 0.0f;
             track.currentMuteGain = 1.0f;
+            track.currentSend.fill (0.0f);
         }
 
     for (std::size_t l = 0; l < static_cast<std::size_t> (maxLoopers); ++l)
@@ -566,14 +568,17 @@ void LooperBank::setTrackSolo (int looperIndex, int trackIndex, bool solo) noexc
     updateEffectiveMutes();
 }
 
-void LooperBank::setTrackSends (int looperIndex, int trackIndex, std::uint32_t mask) noexcept
+void LooperBank::setTrackSendLevel (int looperIndex, int trackIndex, int sendIndex,
+                                    float level01) noexcept
 {
     if (looperIndex < 0 || looperIndex >= maxLoopers
-        || trackIndex < 0 || trackIndex >= maxTracks)
+        || trackIndex < 0 || trackIndex >= maxTracks
+        || sendIndex < 0 || sendIndex >= maxSends)
         return;
 
-    targetSendMask[static_cast<std::size_t> (looperIndex)][static_cast<std::size_t> (trackIndex)]
-        .store (mask & 0xFu, std::memory_order_relaxed);
+    targetSendLevel[static_cast<std::size_t> (looperIndex)][static_cast<std::size_t> (trackIndex)]
+                   [static_cast<std::size_t> (sendIndex)]
+        .store (juce::jlimit (0.0f, 1.0f, level01), std::memory_order_relaxed);
 }
 
 void LooperBank::setTrackSendPre (int looperIndex, int trackIndex, bool pre) noexcept
@@ -1157,6 +1162,19 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
                        ? static_cast<float> (1.0 / (mixSlewSeconds * preparedSampleRate))
                        : gainStep;
 
+    // Linear geramptes Add (Send-Level): dest += src · gain(start→end)
+    const auto rampAdd = [numSamples] (float* dest, const float* src,
+                                       float start, float end) noexcept
+    {
+        const auto step = (end - start) / static_cast<float> (numSamples);
+        auto gain = start;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            dest[i] += src[i] * gain;
+            gain += step;
+        }
+    };
+
     // Duck-Rampe des Blocks (Snap-Declick)
     const auto duckStartGain = duckGain;
     const auto duckStep = (snapDucking ? -1.0f : 1.0f) * gainStep;
@@ -1181,8 +1199,24 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
             auto* scratch0 = trackBus[l][t][0].data();
             auto* scratch1 = trackBus[l][t][1].data();
 
-            const auto sendMask = targetSendMask[l][t].load (std::memory_order_relaxed);
-            const auto sendPre  = sendTapPre[l][t].load (std::memory_order_relaxed);
+            const auto sendPre = sendTapPre[l][t].load (std::memory_order_relaxed);
+
+            // Send-Level-Rampe des Blocks (5-ms-Slew wie der Fader-Zug) —
+            // genau EINMAL pro Block fortgeschrieben; der Abgriff (pre/post)
+            // entscheidet nur, WO dieselbe Rampe anliegt
+            std::array<float, static_cast<std::size_t> (maxSends)> sendStart {}, sendEnd {};
+            bool anySend = false;
+            for (std::size_t s = 0; s < static_cast<std::size_t> (maxSends); ++s)
+            {
+                const auto target = targetSendLevel[l][t][s].load (std::memory_order_relaxed);
+                const auto start = player.currentSend[s];
+                const auto maxDelta = mixStep * static_cast<float> (numSamples);
+                const auto end = start + juce::jlimit (-maxDelta, maxDelta, target - start);
+                sendStart[s] = start;
+                sendEnd[s] = end;
+                player.currentSend[s] = end;
+                anySend = anySend || start > 1.0e-6f || end > 1.0e-6f;
+            }
 
             //==============================================================
             // Voices → trackBus (pre-fader)
@@ -1290,12 +1324,12 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
             juce::FloatVectorOperations::add (preBus[l][0].data(), scratch0, numSamples);
             juce::FloatVectorOperations::add (preBus[l][1].data(), scratch1, numSamples);
 
-            if (sendMask != 0 && sendPre)
+            if (anySend && sendPre)
                 for (std::size_t s = 0; s < static_cast<std::size_t> (maxSends); ++s)
-                    if ((sendMask & (1u << s)) != 0)
+                    if (sendStart[s] > 1.0e-6f || sendEnd[s] > 1.0e-6f)
                     {
-                        juce::FloatVectorOperations::add (sendBus[s][0].data(), scratch0, numSamples);
-                        juce::FloatVectorOperations::add (sendBus[s][1].data(), scratch1, numSamples);
+                        rampAdd (sendBus[s][0].data(), scratch0, sendStart[s], sendEnd[s]);
+                        rampAdd (sendBus[s][1].data(), scratch1, sendStart[s], sendEnd[s]);
                     }
 
             //==============================================================
@@ -1337,12 +1371,12 @@ void LooperBank::renderBlock (const ClockState& clock, std::uint64_t blockStartS
             juce::FloatVectorOperations::add (postBus[l][1].data(), scratch1, numSamples);
 
             // Post-Fader-Sends des Tracks (nach Gain/Pan/Mute)
-            if (sendMask != 0 && ! sendPre)
+            if (anySend && ! sendPre)
                 for (std::size_t s = 0; s < static_cast<std::size_t> (maxSends); ++s)
-                    if ((sendMask & (1u << s)) != 0)
+                    if (sendStart[s] > 1.0e-6f || sendEnd[s] > 1.0e-6f)
                     {
-                        juce::FloatVectorOperations::add (sendBus[s][0].data(), scratch0, numSamples);
-                        juce::FloatVectorOperations::add (sendBus[s][1].data(), scratch1, numSamples);
+                        rampAdd (sendBus[s][0].data(), scratch0, sendStart[s], sendEnd[s]);
+                        rampAdd (sendBus[s][1].data(), scratch1, sendStart[s], sendEnd[s]);
                     }
         }
 
