@@ -27,6 +27,13 @@ Thumbs.db
 *.log
 .cache/
 
+# Smoke-Screenshots + Debug-Artefakte im Repo-Root (Wegwerf-Material der
+# Meilenstein-Smokes). Bewusst NUR root-anchored — dauerhafte Belege
+# liegen unter docs/smoke/ und bleiben versioniert.
+/*.png
+/abort_trace.txt
+*.lnk
+
 # Claude Code: lokales bleibt lokal, aber die path-scoped Rules
 # (Subsystem-Invarianten, ADR 005) sind Teil des Projekts wie CLAUDE.md
 .claude/*
