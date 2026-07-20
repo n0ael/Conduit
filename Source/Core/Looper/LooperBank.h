@@ -179,6 +179,19 @@ public:
     /** „Reset mit Sync": Rate 1× und Anker zurück aufs Commit-Taktraster. */
     [[nodiscard]] juce::Result resetClipWithSync (int looperIndex, int trackIndex);
 
+    /** LEN-Poti: Loop-Länge STUFENLOS in Content-Beats setzen (Sync-Raster
+        rechnet die UI: content/n). Clamps: ≥ 50 ms (Free-Untergrenze),
+        ≤ Content. Beim Schrumpfen mit HalveMode::currentHalf folgt das
+        Fenster der Apply-Phase (verallgemeinertes ÷2). */
+    [[nodiscard]] juce::Result setClipLengthBeats (int looperIndex, int trackIndex,
+                                                   double lengthBeats,
+                                                   looper::HalveMode halveMode);
+
+    /** POS-Poti: Fenster-Offset STUFENLOS in Content-Beats (geclampt auf
+        [0, content − Länge]); 0 = Reset (Doppelklick). */
+    [[nodiscard]] juce::Result setClipWindowOffsetBeats (int looperIndex, int trackIndex,
+                                                         double offsetBeats);
+
     //==========================================================================
     // Clip-Edits per Pointer [MT] — für die Aktiv-Clip-Auswahl des Modells
     // (TARGET-Halten kann JEDEN Clip wählen, nicht nur den spielenden)
@@ -188,6 +201,9 @@ public:
     void multiplyClipLength (LooperClip& clip, bool doubleLength,
                              looper::HalveMode halveMode) noexcept;
     void resetClipWithSync (LooperClip& clip) noexcept;
+    void setClipLengthBeats (LooperClip& clip, double lengthBeats,
+                             looper::HalveMode halveMode) noexcept;
+    void setClipWindowOffsetBeats (LooperClip& clip, double offsetBeats) noexcept;
 
     //==========================================================================
     // Track-Mix [Message Thread schreibt, Audio liest]
@@ -318,6 +334,10 @@ public:
         bool reversed = false;
         int commitBars = 0;
         std::uint32_t clipId = 0;
+
+        // LEN/POS (Mixer 07/2026): Fenster fürs Slot-Dimming + „/n"-Badge
+        double contentBeats = 0.0;
+        double windowOffsetBeats = 0.0;
     };
     [[nodiscard]] bool getClipInfo (int looperIndex, int trackIndex,
                                     ClipInfo& out) const noexcept;

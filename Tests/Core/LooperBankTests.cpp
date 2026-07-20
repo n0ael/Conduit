@@ -1,9 +1,12 @@
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <functional>
 #include <memory>
 #include <thread>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "Core/Looper/BarSampleAnchors.h"
@@ -397,6 +400,130 @@ TEST_CASE ("LooperBank: Looper-I/O-Busse — AudioView, sendToMaster, Kein Maste
         REQUIRE (rms (rig.output.getReadPointer (0), blockSize) > 0.01);
     }
 
+}
+
+TEST_CASE ("LooperBank: LEN/POS — stufenloses Loop-Fenster", "[looper]")
+{
+    BankRig rig;
+
+    SECTION ("Freie Länge 0.5 Beats loopt exakt mit Periode 12 000 Samples")
+    {
+        // 1-Beat-Sägezahn, phasenstarr zur SampleClock (nachrechenbar)
+        rig.signal = [] (std::uint64_t pos)
+        { return 0.5f * static_cast<float> (pos % 24000) / 24000.0f; };
+
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+        rig.feedBlocks (2);
+
+        REQUIRE (rig.bank.setClipLengthBeats (0, 0, 0.5,
+                                              conduit::looper::HalveMode::firstHalf)
+                     .wasOk());
+        rig.feedBlocks (8);   // Apply + Splice-Duck ausklingen lassen
+
+        LooperBank::ClipInfo info;
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.lengthBeats == Catch::Approx (0.5));
+        REQUIRE (info.contentBeats == Catch::Approx (4.0));
+        REQUIRE (info.windowOffsetBeats == Catch::Approx (0.0));
+        REQUIRE (conduit::looper::lengthDivisor (info.contentBeats, info.lengthBeats) == 8);
+
+        // Referenzblock einfrieren, genau eine Loop-Periode später vergleichen
+        std::array<float, static_cast<std::size_t> (blockSize)> reference {};
+        std::copy_n (rig.output.getReadPointer (0), blockSize, reference.begin());
+
+        rig.feedBlocks (25);   // 0.5 Beats @ 120 BPM = 12 000 Samples = 25 Blöcke
+
+        const auto* now = rig.output.getReadPointer (0);
+        float low = 1.0f, high = -1.0f;
+        for (int i = 0; i < blockSize; ++i)
+        {
+            REQUIRE (std::abs (now[i] - reference[static_cast<std::size_t> (i)]) < 1.0e-3f);
+            low = juce::jmin (low, now[i]);
+            high = juce::jmax (high, now[i]);
+        }
+        REQUIRE (high - low > 0.001f);   // echtes Material, keine Stille/DC
+    }
+
+    SECTION ("POS verschiebt das Fenster im Content (Werte-Bereich folgt)")
+    {
+        // 1-TAKT-Sägezahn: Content-Beat b → Wert 0.5·b/4 (Fenster ablesbar)
+        rig.signal = [] (std::uint64_t pos)
+        { return 0.5f * static_cast<float> (pos % 96000) / 96000.0f; };
+
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+        rig.feedBlocks (2);
+
+        REQUIRE (rig.bank.setClipLengthBeats (0, 0, 1.0,
+                                              conduit::looper::HalveMode::firstHalf)
+                     .wasOk());
+        rig.feedBlocks (8);
+
+        // Fenster [0, 1): Werte ∈ [0, 0.125] (+ Wrap-Blend-Rand)
+        {
+            const auto* data = rig.output.getReadPointer (0);
+            for (int i = 0; i < blockSize; ++i)
+                REQUIRE (data[i] < 0.2f);
+        }
+
+        REQUIRE (rig.bank.setClipWindowOffsetBeats (0, 0, 2.0).wasOk());
+        rig.feedBlocks (8);
+
+        LooperBank::ClipInfo info;
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.windowOffsetBeats == Catch::Approx (2.0));
+
+        // Fenster [2, 3): Werte ∈ [0.25, 0.375] (Duck/Blend-Ränder toleriert)
+        {
+            const auto* data = rig.output.getReadPointer (0);
+            float high = -1.0f;
+            for (int i = 0; i < blockSize; ++i)
+                high = juce::jmax (high, data[i]);
+            REQUIRE (high > 0.24f);
+            REQUIRE (high < 0.40f);
+        }
+
+        // Clamp: Offset jenseits des Contents → content − Länge = 3.0
+        REQUIRE (rig.bank.setClipWindowOffsetBeats (0, 0, 99.0).wasOk());
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.windowOffsetBeats == Catch::Approx (3.0));
+
+        // Doppelklick-Reset: Offset 0
+        REQUIRE (rig.bank.setClipWindowOffsetBeats (0, 0, 0.0).wasOk());
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.windowOffsetBeats == Catch::Approx (0.0));
+    }
+
+    SECTION ("LEN-Clamps: 50-ms-Untergrenze und Content-Obergrenze")
+    {
+        rig.signal = [] (std::uint64_t pos)
+        { return 0.3f + 0.2f * static_cast<float> (pos % 61) / 61.0f; };
+
+        rig.feedBars (2.5);
+        REQUIRE (rig.commit (1).wasOk());
+
+        // 50 ms @ 120 BPM = 0.1 Beats Untergrenze
+        REQUIRE (rig.bank.setClipLengthBeats (0, 0, 0.0001,
+                                              conduit::looper::HalveMode::firstHalf)
+                     .wasOk());
+        LooperBank::ClipInfo info;
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.lengthBeats == Catch::Approx (0.1));
+
+        // Obergrenze Content (×2 über Content hinaus unmöglich)
+        REQUIRE (rig.bank.setClipLengthBeats (0, 0, 999.0,
+                                              conduit::looper::HalveMode::firstHalf)
+                     .wasOk());
+        REQUIRE (rig.bank.getClipInfo (0, 0, info));
+        REQUIRE (info.lengthBeats == Catch::Approx (4.0));
+
+        // Ohne Clip: sauberer Fehler
+        REQUIRE (rig.bank.setClipLengthBeats (1, 0, 1.0,
+                                              conduit::looper::HalveMode::firstHalf)
+                     .failed());
+        REQUIRE (rig.bank.setClipWindowOffsetBeats (1, 0, 1.0).failed());
+    }
 }
 
 TEST_CASE ("LooperBank: Distanz-Zug — Width-Kollaps und Vol-Stille", "[looper]")

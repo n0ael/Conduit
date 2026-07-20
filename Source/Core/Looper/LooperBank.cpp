@@ -406,6 +406,8 @@ bool LooperBank::getClipInfo (int looperIndex, int trackIndex, ClipInfo& out) co
     out.reversed = clip->stagedReversed.load (std::memory_order_relaxed);
     out.commitBars = clip->commitBars;
     out.clipId = clip->clipId;
+    out.contentBeats = clip->contentBeats;
+    out.windowOffsetBeats = clip->stagedWindowOffsetBeats.load (std::memory_order_relaxed);
     return true;
 }
 
@@ -490,6 +492,53 @@ void LooperBank::resetClipWithSync (LooperClip& clip) noexcept
                      false, false, true);
 }
 
+void LooperBank::setClipLengthBeats (LooperClip& clip, double lengthBeats,
+                                     looper::HalveMode halveMode) noexcept
+{
+    const auto currentLength = clip.stagedLengthBeats.load (std::memory_order_relaxed);
+    auto window = clip.stagedWindowOffsetBeats.load (std::memory_order_relaxed);
+
+    // Clamps: Free-Untergrenze 50 ms (in Content-Beats des Clips),
+    // Obergrenze Content — stufenlos, KEIN Takt-Floor (LEN-Poti Free)
+    const auto minLength = looper::minFreeLengthBeats (preparedSampleRate,
+                                                       clip.samplesPerBeatRecorded);
+    const auto newLength = juce::jlimit (juce::jmin (minLength, clip.contentBeats),
+                                         clip.contentBeats, lengthBeats);
+    if (juce::exactlyEqual (newLength, currentLength))
+        return;
+
+    bool followPhase = false;
+    if (newLength > currentLength)
+    {
+        // Fenster ggf. nach vorn schieben, damit window + L in den Content passt
+        window = looper::clampWindowOffset (window, clip.contentBeats, newLength);
+    }
+    else if (halveMode == looper::HalveMode::currentHalf)
+    {
+        // Fenster folgt der Apply-Phase (verallgemeinertes ÷2 — der
+        // Audio-Thread rechnet den Offset mit SEINEM Playhead)
+        followPhase = true;
+    }
+
+    stageClipParams (clip,
+                     clip.stagedRate.load (std::memory_order_relaxed),
+                     newLength, window,
+                     clip.stagedReversed.load (std::memory_order_relaxed),
+                     followPhase, false, false);
+}
+
+void LooperBank::setClipWindowOffsetBeats (LooperClip& clip, double offsetBeats) noexcept
+{
+    const auto length = clip.stagedLengthBeats.load (std::memory_order_relaxed);
+    const auto window = looper::clampWindowOffset (offsetBeats, clip.contentBeats, length);
+
+    stageClipParams (clip,
+                     clip.stagedRate.load (std::memory_order_relaxed),
+                     length, window,
+                     clip.stagedReversed.load (std::memory_order_relaxed),
+                     false, false, false);
+}
+
 juce::Result LooperBank::setClipRate (int looperIndex, int trackIndex, double rate)
 {
     auto* clip = activeClipFor (looperIndex, trackIndex);
@@ -528,6 +577,29 @@ juce::Result LooperBank::resetClipWithSync (int looperIndex, int trackIndex)
         return juce::Result::fail ("Kein Clip auf diesem Track");
 
     resetClipWithSync (*clip);
+    return juce::Result::ok();
+}
+
+juce::Result LooperBank::setClipLengthBeats (int looperIndex, int trackIndex,
+                                             double lengthBeats,
+                                             looper::HalveMode halveMode)
+{
+    auto* clip = activeClipFor (looperIndex, trackIndex);
+    if (clip == nullptr)
+        return juce::Result::fail ("Kein Clip auf diesem Track");
+
+    setClipLengthBeats (*clip, lengthBeats, halveMode);
+    return juce::Result::ok();
+}
+
+juce::Result LooperBank::setClipWindowOffsetBeats (int looperIndex, int trackIndex,
+                                                   double offsetBeats)
+{
+    auto* clip = activeClipFor (looperIndex, trackIndex);
+    if (clip == nullptr)
+        return juce::Result::fail ("Kein Clip auf diesem Track");
+
+    setClipWindowOffsetBeats (*clip, offsetBeats);
     return juce::Result::ok();
 }
 
@@ -1081,17 +1153,34 @@ float LooperBank::renderClipSample (const LooperClip& clip, int channel,
         return data[index] + (data[next] - data[index]) * frac;
     };
 
-    const auto zoneStart = static_cast<double> (clip.numContentSamples - fade);
+    // Wrap-Zone am FENSTER-Ende (LEN/POS 07/2026): das Loop-Fenster kann
+    // seit den LEN/POS-Potis irgendwo im Content liegen — der Equal-Power-
+    // Blend zieht auf das Material VOR dem Fensterstart (Vollfenster ⇒
+    // exakt der Lead-in, bit-identisch zum alten Verhalten; Paritätstest).
+    // Reverse wrappt weiterhin durch dieselbe Zone (bekannte Näherung).
+    const auto contentLen = static_cast<double> (clip.numContentSamples);
+    const auto windowLenSamples = clip.activeLengthBeats * clip.samplesPerBeatRecorded;
+    auto windowStart = clip.activeWindowOffsetBeats * clip.samplesPerBeatRecorded;
+    auto windowEnd = windowStart + windowLenSamples;
+    if (windowEnd > contentLen - 1.0e-6)
+        windowEnd = contentLen;   // Vollfenster/Randlage exakt aufs Content-Ende
+    if (windowStart < 1.0e-6)
+        windowStart = 0.0;
 
-    if (contentPosition < zoneStart || clip.numContentSamples <= fade)
+    const auto fadeEff = juce::jmin (static_cast<double> (fade), windowLenSamples * 0.5);
+    const auto zoneStart = windowEnd - fadeEff;
+
+    if (contentPosition < zoneStart || fadeEff <= 0.0 || clip.numContentSamples <= fade)
         return readLinear (static_cast<double> (fade) + contentPosition);
 
-    // Wrap-Zone [N−F, N): equal-power vom Content-Ende auf den Lead-in
-    const auto zonePosition = contentPosition - zoneStart;          // [0, F)
-    const auto alpha = zonePosition / static_cast<double> (fade);   // 0..1
+    const auto zonePosition = contentPosition - zoneStart;   // [0, fadeEff)
+    const auto alpha = zonePosition / fadeEff;               // 0..1
 
     const auto endSample  = readLinear (static_cast<double> (fade) + contentPosition);
-    const auto leadSample = readLinear (zonePosition);              // Lead-in → Loop-Start
+    // Blend-Quelle: gleitet auf den Fensterstart zu (bei z = fadeEff exakt
+    // dort) — Vollfenster: fade − fadeEff + 0 + z == zonePosition (Lead-in)
+    const auto leadSample = readLinear (static_cast<double> (fade) - fadeEff
+                                        + windowStart + zonePosition);
 
     const auto angle = alpha * juce::MathConstants<double>::halfPi;
     return endSample  * static_cast<float> (std::cos (angle))
