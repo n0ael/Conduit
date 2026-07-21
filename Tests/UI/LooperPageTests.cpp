@@ -324,6 +324,41 @@ TEST_CASE ("LooperTrackStrip: Mixer — XY-Panner, Send-Kacheln, Display-Flags",
         REQUIRE (lastDistance == Catch::Approx (0.0f));
     }
 
+    SECTION ("XY-Panner: Ziehen bleibt RELATIV (Cursor-Hider integriert)")
+    {
+        auto& pad = strip.getXyPad();
+        pad.setValues (0.0f, 0.5f);
+
+        int hookCalls = 0;
+        strip.onPanChanged = [&] (float) { ++hookCalls; };
+        strip.onDistanceChanged = [&] (float) { ++hookCalls; };
+
+        const auto src = juce::Desktop::getInstance().getMainMouseSource();
+        const auto now = juce::Time::getCurrentTime();
+        const auto down = juce::Point<float> (0.0f, 0.0f);      // Ecke oben-links
+        const auto drag = juce::Point<float> (4.0f, 4.0f);      // winziger Wischweg
+
+        const juce::MouseEvent downEv { src, down, {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                        &pad, &pad, now, down, now, 1, false };
+        const juce::MouseEvent dragEv { src, drag, {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                        &pad, &pad, now, down, now, 1, true };
+        const juce::MouseEvent upEv   { src, drag, {}, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                        &pad, &pad, now, down, now, 1, true };
+
+        pad.mouseDown (downEv);
+        pad.mouseDrag (dragEv);
+        pad.mouseUp (upEv);
+
+        // Relativ: der Puck bleibt nahe seinem Startwert und springt NICHT
+        // zur absoluten Ecke (die wäre Distanz ≈ 1, Pan ≈ −1). Ein winziger
+        // Wischweg ergibt nur eine winzige Änderung.
+        REQUIRE (pad.getDistance() == Catch::Approx (0.5f).margin (0.1f));
+        REQUIRE (pad.getDistance() < 0.5f);          // 4 px runter → Distanz sinkt
+        REQUIRE (pad.getPan() == Catch::Approx (0.0f).margin (0.1f));
+        REQUIRE (pad.getPan() > 0.0f);               // 4 px rechts → Pan steigt
+        REQUIRE (hookCalls > 0);
+    }
+
     SECTION ("Send-Kacheln: Level-Anzeige, Anzahl, Y-Link, Doppelklick = 0")
     {
         strip.setSendLevels ({ 0.4f, 0.0f, 1.0f, 0.2f });

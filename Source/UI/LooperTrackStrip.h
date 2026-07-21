@@ -6,6 +6,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "DragCursorHider.h"
 #include "PushTiles.h"
 
 namespace conduit
@@ -43,12 +44,15 @@ namespace looperui
     zeigt die Send-Farben des Tracks als Misch-Overlay (Alpha = Level).
     Doppelklick = Reset (Center, Distanz 0). Kompakt-Variante (~56 px)
     ohne FAR-Label und mit kleinerem Puck (3–4 Tracks pro Looper).
-    Reine UI: absolute Puck-Positionierung beim Ziehen, Hooks nach oben.
+    Reine UI: RELATIVES Ziehen (Puck springt nicht unter den Finger),
+    Hooks nach oben. Während des Ziehens verschwindet der Maus-Cursor
+    (DragCursorHider, relativer Modus) — nur beim Ziehen, nicht beim Hover.
 */
 class LooperXyPad final : public juce::Component
 {
 public:
     LooperXyPad() { setName ("looperXyPad"); }
+    ~LooperXyPad() override { cursorHider.end(); }
 
     std::function<void (float pan, float distance01)> onChanged;
 
@@ -63,6 +67,7 @@ public:
     void paint (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& event) override;
     void mouseDrag (const juce::MouseEvent& event) override;
+    void mouseUp (const juce::MouseEvent& event) override;
     void mouseDoubleClick (const juce::MouseEvent& event) override;
 
 private:
@@ -81,6 +86,8 @@ private:
     float dragStartPan = 0.0f;
     float dragStartDistance = 0.0f;
     juce::Point<float> dragStartPosition;
+
+    ui::DragCursorHider cursorHider;   // Cursor weg während des Ziehens
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LooperXyPad)
 };

@@ -122,6 +122,12 @@ void LooperXyPad::mouseDown (const juce::MouseEvent& event)
 
 void LooperXyPad::mouseDrag (const juce::MouseEvent& event)
 {
+    // Erst beim tatsächlichen Ziehen den Cursor ausblenden (nicht schon beim
+    // Aufsetzen — ein reiner Klick soll ihn nicht verschwinden lassen).
+    // Relativer Modus: unbegrenzte Mausbewegung, Cursor kehrt beim Loslassen
+    // an die Zupack-Stelle zurück; die Zieh-Mathematik bleibt unberührt.
+    cursorHider.begin (*this, event, ui::DragCursorHider::Mode::relative);
+
     const auto radius = compact ? 8.0f : 12.0f;
     const auto inner = getLocalBounds().toFloat().reduced (1.0f).reduced (radius + 2.0f);
     if (inner.getWidth() <= 0.0f || inner.getHeight() <= 0.0f)
@@ -146,6 +152,13 @@ void LooperXyPad::mouseDrag (const juce::MouseEvent& event)
 
     if (onChanged != nullptr)
         onChanged (panValue, distanceValue);
+}
+
+void LooperXyPad::mouseUp (const juce::MouseEvent&)
+{
+    // Cursor wieder herstellen (springt bei relativer Geste an die
+    // Zupack-Stelle zurück). No-op, wenn nie ein Drag begann.
+    cursorHider.end();
 }
 
 void LooperXyPad::mouseDoubleClick (const juce::MouseEvent&)
