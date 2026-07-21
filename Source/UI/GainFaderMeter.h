@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "Core/GraphManager.h"
+#include "FaderSlider.h"
 #include "UiFramePacer.h"
 
 namespace conduit
@@ -48,7 +49,7 @@ public:
 
     //==========================================================================
     // Controls public — UI-Tests treiben sie direkt (Muster ParameterPanel)
-    juce::Slider slider { juce::Slider::LinearVertical, juce::Slider::NoTextBox };
+    FaderSlider slider { juce::Slider::LinearVertical, juce::Slider::NoTextBox };
 
     [[nodiscard]] const juce::String& getParamId() const noexcept { return paramId; }
 

@@ -3,6 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_graphics/juce_graphics.h>
 
+#include "DragCursorHider.h"
 #include "PushLookAndFeel.h"
 
 namespace conduit
@@ -41,6 +42,7 @@ public:
     // (Muster PadGridLayout/RingTouchModel).
     NumberFieldBracket();
     explicit NumberFieldBracket (const Config& cfg);
+    ~NumberFieldBracket() override { cursorHider.end(); }
 
     void setValue (double newValue, juce::NotificationType notification = juce::sendNotification);
     [[nodiscard]] double getValue() const noexcept { return value; }
@@ -73,6 +75,8 @@ private:
     double valueAtDragStart = 0.0;
     bool   touched = false;
     juce::Colour accentColour = push::colours::ledCyan;
+
+    ui::DragCursorHider cursorHider;   // Cursor weg beim vertikalen Swipe
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NumberFieldBracket)
 };

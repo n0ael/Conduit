@@ -79,11 +79,16 @@ void NumberFieldBracket::mouseDown (const juce::MouseEvent& event)
 
 void NumberFieldBracket::mouseDrag (const juce::MouseEvent& event)
 {
+    // Relativer Swipe (nach oben = mehr) → Cursor ausblenden, kehrt beim
+    // Loslassen an die Zupack-Stelle zurück.
+    cursorHider.begin (*this, event, ui::DragCursorHider::Mode::relative);
     setValue (valueFromDrag (valueAtDragStart, (float) event.getDistanceFromDragStartY(), config));
 }
 
 void NumberFieldBracket::mouseUp (const juce::MouseEvent&)
 {
+    cursorHider.end();
+
     if (! touched)
         return;
 

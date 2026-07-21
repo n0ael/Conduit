@@ -9,6 +9,7 @@
 #include "Modules/ChassisSchema.h"
 #include "Modules/ModuleFactory.h"
 #include "UI/CurveEditor.h"
+#include "UI/FaderSlider.h"
 #include "UI/FxModulePanel.h"
 #include "UI/NodeComponent.h"
 
@@ -762,4 +763,43 @@ TEST_CASE ("FxModulePanel: columnWidthFor + getPreferredWidth (variable Spaltenb
     ChassisRig rig;
     conduit::FxModulePanel panel { rig.node, rig.manager };
     REQUIRE (panel.getPreferredWidth() == Panel::widthForColumns (panel.getNumColumns()));
+}
+
+TEST_CASE ("FaderSlider: Linksklick relativ (kein Sprung), Mittelklick springt", "[ui][fader]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    conduit::FaderSlider fader { juce::Slider::LinearVertical, juce::Slider::NoTextBox };
+    fader.setRange (0.0, 1.0, 0.0);
+    fader.setBounds (0, 0, 24, 200);
+
+    // Standard = relativ (kein Snap-to-Mouse, User-Wunsch 22.07.2026)
+    REQUIRE_FALSE (fader.getSliderSnapsToMousePosition());
+
+    const auto src = juce::Desktop::getInstance().getMainMouseSource();
+    const auto now = juce::Time::getCurrentTime();
+
+    auto makeDown = [&] (juce::Point<float> p, const juce::ModifierKeys& mods)
+    {
+        return juce::MouseEvent { src, p, mods, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                  &fader, &fader, now, p, now, 1, false };
+    };
+
+    const juce::Point<float> top { 12.0f, 8.0f };   // nahe Oberkante = Wert ~1
+
+    // Linksklick oben: der Griff bleibt stehen (KEIN Sprung nach oben).
+    fader.setValue (0.5, juce::dontSendNotification);
+    fader.mouseDown (makeDown (top, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier)));
+    REQUIRE_FALSE (fader.getSliderSnapsToMousePosition());
+    REQUIRE (fader.getValue() == Approx (0.5));
+    fader.mouseUp (makeDown (top, juce::ModifierKeys()));
+    REQUIRE_FALSE (fader.getSliderSnapsToMousePosition());
+
+    // Mittelklick (Mausrad) oben: der Griff SPRINGT zur Position (nach oben).
+    fader.setValue (0.5, juce::dontSendNotification);
+    fader.mouseDown (makeDown (top, juce::ModifierKeys (juce::ModifierKeys::middleButtonModifier)));
+    REQUIRE (fader.getSliderSnapsToMousePosition());   // Snap NUR für diese Geste
+    REQUIRE (fader.getValue() > 0.6);                  // gesprungen
+    fader.mouseUp (makeDown (top, juce::ModifierKeys()));
+    REQUIRE_FALSE (fader.getSliderSnapsToMousePosition());   // zurück auf relativ
 }

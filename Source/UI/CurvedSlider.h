@@ -4,6 +4,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "FaderSlider.h"
 #include "Modules/ChassisSchema.h"
 #include "PushLookAndFeel.h"
 
@@ -20,10 +21,10 @@ namespace conduit
     Die Kurven-Monotonie garantiert ChassisSchema::parseCurve (Kontroll-
     punkte auf [0,1] geclamped) — das Mapping ist eindeutig invertierbar.
 */
-class CurvedSlider final : public juce::Slider
+class CurvedSlider final : public FaderSlider
 {
 public:
-    using juce::Slider::Slider;
+    using FaderSlider::FaderSlider;
 
     void setResponseCurve (std::optional<ChassisSchema::BezierCurve> curveToUse)
     {

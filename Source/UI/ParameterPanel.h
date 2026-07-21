@@ -5,6 +5,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "FaderSlider.h"
 #include "Modules/ConduitModule.h"
 
 namespace conduit
@@ -49,7 +50,7 @@ public:
     {
         juce::String paramId;
         juce::Label  nameLabel;
-        juce::Slider slider { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
+        FaderSlider  slider { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     };
 
     std::vector<std::unique_ptr<ParameterRow>> rows;
