@@ -124,6 +124,34 @@ Header-Kommentar der jeweiligen `Source/DSP/Airwindows/Plugins/<Name>.h`.
 - `*in1++;` (Deref ohne Wirkung) → `++in1;` etc.
 - `juce::ScopedNoDenormals` liegt im Basis-`process()` (CLAUDE.local.md).
 
+## Wiederverwendbare Diagnose-Muster (Airwindows-übergreifend)
+
+Aus der GlitchShifter-Klick-Jagd (03.07.2026) abgeleitet, gilt aber für
+JEDEN Airwindows-Port mit Regler-abhängigen Artefakten:
+
+- **Buffer-Größen-Test als Erst-Triage bei Knacksen/Artefakten.** Symptom
+  in mehreren Buffer-Größen (z. B. 32/64/128 in Ableton) gegentesten:
+  **bleibt das Artefakt über alle Größen identisch → es ist KEIN
+  CPU/Underrun-Problem, sondern sitzt im Algorithmus** (blockkonstante
+  Parameter, Zustandsübergänge). Ändert es sich mit der Größe → Richtung
+  Underrun/Latenz/Blockgrößen-Abhängigkeit (vgl. ConsoleLABuss & Co., deren
+  Fader-Interpolation bewusst blockgrößen-abhängig ist). Spart die Suche an
+  der falschen Front.
+
+- **Ringpuffer-Zeiger-Hard-Reset ist die generische Airwindows-Klick-Falle.**
+  Viele Airwindows-Delay/Shifter/Reverb-Kerne setzen frei laufende Schreib-/
+  Lesezeiger bei Parameter- oder Geometrie-Änderung per `if (p > size) p = 0;`
+  hart auf 0 — schrumpft `size` (z. B. Tighten/Room-Size) während der Zeiger
+  groß ist, teleportiert er in EINEM Sample quer durch den Puffer → garantierter
+  Klick, unabhängig von den Pitch-/Tune-Parametern. Erste Gegenmaßnahmen beim
+  nächsten Auftreten: (a) Hard-Reset → Modulo-Wrap (`while (p > size) p -= size;`),
+  (b) Position bei `size`-Änderung proportional umskalieren
+  (`p *= newSize/oldSize`), (c) Registry/History NICHT bei jeder Geometrie-
+  Änderung leeren. Reicht das nicht (weil die Splice-AUSWAHL selbst
+  parameterabhängig springt), ist der tiefere Umbau nötig: geduckter
+  Geometrie-Wechsel (Wet kurz auf 0) + Crossfade statt Ein-Sample-Blend —
+  siehe GlitchShifter-Eintrag oben als ausgeführtes Beispiel.
+
 ## Manuell nötig
 
 *(noch keine — Kandidaten mit Latenz/Lookahead/Allokationen im Prozesspfad
