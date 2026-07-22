@@ -166,7 +166,7 @@ public:
         int  numButtons = 0;       // Länge der uiButtons-Liste
         juce::Label  titleLabel;
         CurvedSlider slider { juce::Slider::LinearVertical, juce::Slider::NoTextBox };
-        juce::Slider cvKnob { juce::Slider::RotaryHorizontalVerticalDrag,
+        FaderSlider  cvKnob { juce::Slider::RotaryHorizontalVerticalDrag,
                               juce::Slider::NoTextBox };
         std::unique_ptr<PortComponent> cvPort;   // fehlt bei uiHidden (Kabel getrennt)
 

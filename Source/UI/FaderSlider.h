@@ -39,8 +39,10 @@ public:
 
     void mouseDown (const juce::MouseEvent& event) override
     {
-        // Mittlere Taste springt (Snap für diese eine Geste), links bleibt relativ.
-        middleJump = event.mods.isMiddleButtonDown();
+        // Mittlere Taste springt (Snap für diese eine Geste), links bleibt
+        // relativ. Nur bei LINEAREN Fadern — Drehregler springen nie (JUCE
+        // ignoriert snapsToMousePos bei Rotary ohnehin).
+        middleJump = event.mods.isMiddleButtonDown() && isLinearStyle();
         setSliderSnapsToMousePosition (middleJump);
         juce::Slider::mouseDown (event);
     }
@@ -70,13 +72,24 @@ public:
         // braucht so viele Drag-Pixel, wie der Fader lang ist. Dadurch ist ein
         // längerer Fader GENAU um seinen Längenfaktor feiner als ein kürzerer
         // — statt JUCEs fester 250-px-Distanz, die alle gleich empfindlich macht.
+        // Nur für LINEARE Fader; Drehregler behalten den JUCE-Default.
         const auto style = getSliderStyle();
-        const bool horizontal = style == juce::Slider::LinearHorizontal
-                             || style == juce::Slider::LinearBar;
-        setMouseDragSensitivity (juce::jmax (1, horizontal ? getWidth() : getHeight()));
+        if (style == juce::Slider::LinearVertical || style == juce::Slider::LinearBarVertical)
+            setMouseDragSensitivity (juce::jmax (1, getHeight()));
+        else if (style == juce::Slider::LinearHorizontal || style == juce::Slider::LinearBar)
+            setMouseDragSensitivity (juce::jmax (1, getWidth()));
     }
 
 private:
+    [[nodiscard]] bool isLinearStyle() const
+    {
+        const auto style = getSliderStyle();
+        return style == juce::Slider::LinearHorizontal
+            || style == juce::Slider::LinearVertical
+            || style == juce::Slider::LinearBar
+            || style == juce::Slider::LinearBarVertical;
+    }
+
     void initFaderBehaviour() { setSliderSnapsToMousePosition (false); }
 
     bool middleJump = false;

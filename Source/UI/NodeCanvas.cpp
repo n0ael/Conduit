@@ -536,10 +536,19 @@ void NodeCanvas::paintCables (juce::Graphics& g)
                 ? juce::Colour (0xff8fd0a0)
                 : cableColourFor (activeCableDrag->from.nodeUuid, activeCableDrag->from.channel);
 
+            // Das Kabelende kurz VOR dem Cursor enden lassen, damit das weiße
+            // Fadenkreuz „+" frei darüber steht und sich Kabel und Kreuz nicht
+            // überlagern (User 22.07.2026). Abstand screen-konstant (÷ Zoom).
+            const auto originF = origin->toFloat();
+            auto endF = activeCableDrag->currentPosition.toFloat();
+            const auto toEnd = endF - originF;
+            const auto dist  = toEnd.getDistanceFromOrigin();
+            const auto gap   = (float) (14.0 / juce::jmax (0.1, view.zoom));
+            if (dist > gap)
+                endF -= toEnd / dist * gap;
+
             g.setColour (previewColour.withAlpha (0.5f));
-            g.strokePath (makeCablePath (origin->toFloat(),
-                                         activeCableDrag->currentPosition.toFloat()),
-                          cableStroke);
+            g.strokePath (makeCablePath (originF, endF), cableStroke);
         }
     }
 }
