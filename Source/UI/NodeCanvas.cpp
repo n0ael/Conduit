@@ -444,6 +444,20 @@ void NodeCanvas::paintOverChildren (juce::Graphics& g)
         g.drawLine (centre.x, centre.y - 22.0f, centre.x, centre.y + 22.0f, 1.0f);
     }
 
+    // Eigenes weißes Fadenkreuz „+" beim Verkabeln — deckend, IMMER oben, an der
+    // Cursor-Mitte. Ersetzt den System-Crosshair, dessen Weiß sich über dem
+    // Kabel XOR-verfärbte (User-Feedback 22.07.2026); der OS-Cursor ist während
+    // des Zugs ausgeblendet (PortComponent, NoCursor).
+    if (activeCableDrag)
+    {
+        const auto p = activeCableDrag->currentPosition.toFloat()
+                           .transformedBy (contentTransform());
+        constexpr float arm = 11.0f;
+        g.setColour (juce::Colours::white);
+        g.drawLine (p.x - arm, p.y, p.x + arm, p.y, 1.5f);
+        g.drawLine (p.x, p.y - arm, p.x, p.y + arm, 1.5f);
+    }
+
     // Swipe-Badge (M3b): Zielseite des laufenden 4-Finger-Swipes — das
     // Live-Peek der Nachbar-MODULE kommt mit den M4-Miniaturen
     if (! swipeActive || pageManager == nullptr)
@@ -536,19 +550,13 @@ void NodeCanvas::paintCables (juce::Graphics& g)
                 ? juce::Colour (0xff8fd0a0)
                 : cableColourFor (activeCableDrag->from.nodeUuid, activeCableDrag->from.channel);
 
-            // Das Kabelende kurz VOR dem Cursor enden lassen, damit das weiße
-            // Fadenkreuz „+" frei darüber steht und sich Kabel und Kreuz nicht
-            // überlagern (User 22.07.2026). Abstand screen-konstant (÷ Zoom).
-            const auto originF = origin->toFloat();
-            auto endF = activeCableDrag->currentPosition.toFloat();
-            const auto toEnd = endF - originF;
-            const auto dist  = toEnd.getDistanceFromOrigin();
-            const auto gap   = (float) (14.0 / juce::jmax (0.1, view.zoom));
-            if (dist > gap)
-                endF -= toEnd / dist * gap;
-
+            // Kabelende sitzt in der Cursor-Mitte; das eigene weiße „+" zeichnet
+            // paintOverChildren deckend darüber (kein XOR-Verfärben wie beim
+            // System-Crosshair, User-Feedback 22.07.2026).
             g.setColour (previewColour.withAlpha (0.5f));
-            g.strokePath (makeCablePath (originF, endF), cableStroke);
+            g.strokePath (makeCablePath (origin->toFloat(),
+                                         activeCableDrag->currentPosition.toFloat()),
+                          cableStroke);
         }
     }
 }
@@ -825,19 +833,25 @@ bool NodeCanvas::isInteractionLocked() const noexcept
     return view.zoom < (double) threshold - 1.0e-9;
 }
 
-void NodeCanvas::applyViewTransform()
+juce::AffineTransform NodeCanvas::contentTransform() const
 {
-    // Translation auf ganze Screen-Pixel gerundet ANWENDEN — view selbst
-    // bleibt double-genau (sonst verschluckt die Rundung kleine Deltas).
-    // Sub-Pixel-Offsets ließen Kacheln/Text beim Pannen zwischen Pixeln
-    // zittern (Smoke-Feedback 18.07.2026). Während des 4-Finger-Swipes
-    // kommt der transiente Peek-Versatz obendrauf (M3b).
+    // Translation auf ganze Screen-Pixel gerundet — view selbst bleibt
+    // double-genau (sonst verschluckt die Rundung kleine Deltas). Während des
+    // 4-Finger-Swipes kommt der transiente Peek-Versatz obendrauf (M3b).
     const auto peekX = swipeActive ? swipeDelta.x : 0.0;
     const auto peekY = swipeActive ? swipeDelta.y : 0.0;
 
-    content.setTransform (juce::AffineTransform::scale ((float) view.zoom)
-                              .translated ((float) std::round (view.offsetX + peekX),
-                                           (float) std::round (view.offsetY + peekY)));
+    return juce::AffineTransform::scale ((float) view.zoom)
+               .translated ((float) std::round (view.offsetX + peekX),
+                            (float) std::round (view.offsetY + peekY));
+}
+
+void NodeCanvas::applyViewTransform()
+{
+    // Sub-Pixel-Offsets ließen Kacheln/Text beim Pannen zwischen Pixeln
+    // zittern (Smoke-Feedback 18.07.2026) — daher die gerundete Translation
+    // in contentTransform().
+    content.setTransform (contentTransform());
 
     // Interaktions-Sperre (User-Entscheidung 18.07.2026): unterhalb der
     // Schwelle sind Module reine Navigationsziele

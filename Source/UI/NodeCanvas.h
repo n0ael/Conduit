@@ -213,6 +213,9 @@ private:
     /** view → Content-Transform + Interaktions-Sperre + repaint. */
     void applyViewTransform();
 
+    /** Content- → Canvas-Koordinaten (Zoom + gerundeter Pan/Peek). */
+    [[nodiscard]] juce::AffineTransform contentTransform() const;
+
     /** view in die Page-Properties der aktiven Seite schreiben (ohne Undo —
         View-State, Muster Node-Drag). Am Gesten-Ende bzw. nach diskreten
         Events (Wheel/Magnify). */

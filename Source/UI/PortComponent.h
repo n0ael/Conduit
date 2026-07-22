@@ -68,7 +68,7 @@ private:
     juce::int64 pointerDownMs = 0;
     bool dragResolved = false;
 
-    // Kabelziehen: Cursor wird zum Fadenkreuz „+" (zielt aufs Port)
+    // Kabelziehen: OS-Cursor weg (NoCursor) — der NodeCanvas malt das weiße „+"
     ui::DragCursorHider cursorHider;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PortComponent)

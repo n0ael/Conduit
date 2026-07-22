@@ -72,9 +72,11 @@ void PortComponent::mouseDrag (const juce::MouseEvent& event)
                 canvas->setCableDragMono();
         }
 
-        // Kabelende zielt auf einen Port → Cursor als Fadenkreuz „+" (bleibt
-        // über die ganze Geste, da JUCE den Grabber-Cursor hält).
-        cursorHider.begin (*this, event, ui::DragCursorHider::Mode::crosshair);
+        // OS-Cursor ausblenden — der NodeCanvas zeichnet stattdessen ein
+        // eigenes, deckend-weißes „+" (System-Crosshair verfärbte sich über
+        // dem Kabel per XOR, User-Feedback 22.07.2026). Cursor bleibt über die
+        // ganze Geste weg, da JUCE den Grabber-Cursor hält.
+        cursorHider.begin (*this, event, ui::DragCursorHider::Mode::absolute);
 
         canvas->updateCableDrag (canvas->getLocalPoint (this, event.getPosition()));
     }
