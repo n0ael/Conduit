@@ -62,6 +62,20 @@ public:
         setSliderSnapsToMousePosition (false);   // zurück auf den relativen Standard
     }
 
+    void resized() override
+    {
+        juce::Slider::resized();
+
+        // Regelweg = Fader-LÄNGE (User 22.07.2026): der volle Wertebereich
+        // braucht so viele Drag-Pixel, wie der Fader lang ist. Dadurch ist ein
+        // längerer Fader GENAU um seinen Längenfaktor feiner als ein kürzerer
+        // — statt JUCEs fester 250-px-Distanz, die alle gleich empfindlich macht.
+        const auto style = getSliderStyle();
+        const bool horizontal = style == juce::Slider::LinearHorizontal
+                             || style == juce::Slider::LinearBar;
+        setMouseDragSensitivity (juce::jmax (1, horizontal ? getWidth() : getHeight()));
+    }
+
 private:
     void initFaderBehaviour() { setSliderSnapsToMousePosition (false); }
 

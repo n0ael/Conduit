@@ -803,3 +803,39 @@ TEST_CASE ("FaderSlider: Linksklick relativ (kein Sprung), Mittelklick springt",
     fader.mouseUp (makeDown (top, juce::ModifierKeys()));
     REQUIRE_FALSE (fader.getSliderSnapsToMousePosition());   // zurück auf relativ
 }
+
+TEST_CASE ("FaderSlider: Regelweg proportional zur Fader-Länge", "[ui][fader]")
+{
+    juce::ScopedJuceInitialiser_GUI juceRuntime;
+
+    const auto src = juce::Desktop::getInstance().getMainMouseSource();
+    const auto now = juce::Time::getCurrentTime();
+
+    // Gleicher Wisch (40 px hoch) aus der Mitte, einmal auf einem kurzen und
+    // einmal auf einem doppelt so langen Fader — liefert die Wertänderung.
+    auto dragDelta = [&] (int heightPx)
+    {
+        conduit::FaderSlider fader { juce::Slider::LinearVertical, juce::Slider::NoTextBox };
+        fader.setRange (0.0, 1.0, 0.0);
+        fader.setBounds (0, 0, 24, heightPx);
+        fader.setValue (0.5, juce::dontSendNotification);
+
+        const juce::Point<float> start { 12.0f, (float) heightPx * 0.5f };
+        const juce::Point<float> end   { 12.0f, (float) heightPx * 0.5f - 40.0f };
+        const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+
+        fader.mouseDown ({ src, start, left, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                           &fader, &fader, now, start, now, 1, false });
+        fader.mouseDrag ({ src, end, left, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                           &fader, &fader, now, start, now, 1, true });
+        return fader.getValue() - 0.5;
+    };
+
+    const auto shortDelta = dragDelta (100);
+    const auto tallDelta  = dragDelta (200);
+
+    // Der doppelt so lange Fader ist doppelt so fein: dieselben 40 px ändern
+    // ihn nur halb so viel.
+    REQUIRE (shortDelta > tallDelta);
+    REQUIRE (tallDelta == Approx (shortDelta * 0.5).margin (0.02));
+}
